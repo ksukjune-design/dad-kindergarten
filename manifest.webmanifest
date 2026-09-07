@@ -1,0 +1,20 @@
+{
+  "name": "방과후 아빠 유치원",
+  "short_name": "아빠 유치원",
+  "description": "아빠와 8살 아이가 매일 하나씩 함께 푸는 사고력 프로그램",
+  "lang": "ko",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f6f4ef",
+  "theme_color": "#c2410c",
+  "icons": [
+    {
+      "src": "./assets/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
