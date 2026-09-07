@@ -42,7 +42,7 @@ git commit -m "업데이트"
 git push
 ```
 
-`package-ghpages.js` 는 매번 `dist/gh-pages/` 를 새로 만들지만 `.git` 폴더는 지우지 않으니
+`package-ghpages.js` 는 만든 파일만 갈아끼우고 `.git` 은 건드리지 않으니
 원격 주소와 이력은 그대로 유지됩니다.
 
 ## 갤럭시탭에서 쓰는 법
