@@ -31,5 +31,6 @@ node tools/package-ghpages.js
 
 `move/` 폴더에 2026년 11월 이사를 준비하는 앱이 있습니다 (체크리스트·도면 배치·이사 견적·자금 흐름·가이드·AI 비서).
 부부가 함께 쓰고 AI 비서를 쓰려면 클로드 공유 버전을 여세요 (링크는 [move/README.md](move/README.md)).
+깃허브 페이지 버전도 **💑 함께 쓰기**(파이어베이스, 처음 한 번 약 15분 설정)를 켜면 부부가 각자 로그인해서 같은 기록을 고칠 수 있습니다 (두 버전의 기록은 서로 이어지지 않음).
 
 **바로 열기 → https://ksukjune-design.github.io/dad-kindergarten/move/** · 자세한 설명은 [move/README.md](move/README.md)

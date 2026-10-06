@@ -1,7 +1,11 @@
 /* ============================================================
-   공유 저장소 동기화 (claude.ai 공유 버전 전용)
-   - GitHub Pages 처럼 window.claude 가 없는 곳에서는 아무것도 하지 않습니다 (기록은 이 브라우저에만).
-   - claude.ai 에서 열면 db 기능으로 부부가 같은 기록을 보고, Claude 도 나중에 읽고 고칠 수 있습니다.
+   공유 저장소 동기화 (저장소 종류와 상관없이 같은 규칙)
+   - claude.ai 에서 열면 db 기능으로 부부가 같은 기록을 보고, Claude 도 나중에 읽고 고칠 수 있습니다 (connect).
+   - 깃허브 페이지 버전은 '함께 쓰기'(파이어베이스)를 설정하고 로그인하면 sync-firebase.js 가
+     같은 모양의 어댑터를 만들어 MV.sync.attach(...) 로 붙입니다. 설정·로그인 전에는 이 브라우저에만 저장.
+   - 어댑터 모양: doc(path) → { set(obj), delete() } / collection(c) → { get(), onSnapshot(next, err) }
+     오류 코드: unavailable(잠시 끊김) · quota_exceeded(가득 참) · invalid_argument(너무 큼 또는 권한 없음)
+               not_writer(쓰기 권한 없음 → 보기 전용) · revoked(읽기 권한 없음·로그인 풀림)
 
    저장 구조 (문서 경로 → 내용)
      move/meta        { moveDate, createdAt, deletedSeed, seedVersion, version }
@@ -32,6 +36,15 @@
    상태: synced(공유 중) · saving · offline(잠시 끊김, 다시 시도) · partial(일부를 공유하지 못함 — 이 기기에만)
          readonly(보기 전용 — 언제나 이것) · revoked(공유 권한 없음 — 이 기기에만)
          unreachable(처음 연결 실패 — 이 기기에만, 새로 열면 다시 연결) · empty · connecting
+   다시 연결(파이어베이스): 연결이 끊긴 동안(연결 실패·로그아웃·프로그램을 못 불러옴) 이 기기에서 고친 내용은
+         버리지 않습니다. 같은 저장소(프로젝트·기록 묶음)에 다시 붙으면 '마지막으로 안 서버 내용'(srv)을 기준으로
+         받은 기록과 3-방향 합치기를 하고, 이 기기에서만 고친 것은 올립니다 (rejoin). 새로 열어도 이어지도록
+         srv 는 localStorage 'mv:sync:base:v1' 에 줄여서 남김 — 문서마다 해시, 이 기기와 다른 문서만 내용
+         (평면도 사진 내용은 빼고). 처음 붙는 기기(기준 없음)만 공유 기록으로 맞춥니다 (adopt).
+   처음 공유 시작(initFromLocal): 파이어베이스는 move/meta 를 '없을 때만' 먼저 써서(트랜잭션) 두 기기가 거의 같이 눌러도
+         한쪽 기록만 공유 기록이 되고, 늦은 쪽은 공유 기록으로 맞춤 (이 기기 기록은 BACKUP_KEY 에 따로 보관).
+         이미 공유가 시작됐으면(상태가 empty 가 아니면) 다시 올리지 않음.
+         활동 기록 중 key 가 있는 줄(새 버전 맞춤 'seed-v7-add' 등)은 두 기기가 같이 적어도 한 줄만 남김 (mergeActivity).
    ============================================================ */
 (function (global) {
   'use strict';
@@ -43,11 +56,15 @@
     empty: false,
     cap: {},                // { db, user, downloads, sample } — 쓸 수 있는 것만
     lastError: null,
+    lastFbCode: null,       // 파이어베이스 원래 오류 코드 (화면 안내용)
+    backend: null,          // null | 'claude' | 'firebase'
+    account: '',            // 로그인한 이메일 (파이어베이스) — 이 기기 화면에만, 어디에도 저장하지 않음
   };
   const SECTIONS = ['layouts', 'planEdits', 'estimate', 'finance'];
   const COLS = ['move', 'items', 'inventory', 'planbg'];
   const MAX_DOC = 250 * 1024;
   const BACKUP_KEY = 'mv:state:v1:before-share';
+  const BASE_KEY = 'mv:sync:base:v1';   // 다시 연결할 때 합치기 기준 (파이어베이스만)
   const BACKOFF_MIN = 1000;     // 쓰기 실패 뒤 첫 재시도 (한 묶음에 한 번만 늘림)
   const BACKOFF_MAX = 4000;
   const STUCK_MIN = 15000;      // 공유 저장소가 가득 찼을 때 다시 올려 보는 간격
@@ -62,7 +79,7 @@
   const hist = new Map();       // 경로 → [{h, j}] 지금 이 기기 내용에 이미 들어 있는 내용들 (오래된 것 → 최근, 합치기 기준·메아리 거르기)
   const seen = new Map();       // 경로 → 받은 스냅샷 수 (쓰기 확인 사이에 새 내용이 왔는지)
   const pending = new Map();    // 경로 → { body | null(삭제) }
-  const inflight = new Set();
+  let inflight = new Set();     // 지금 연결에서 보내는 중인 경로 (연결이 바뀌면 새로 — 옛 연결의 약속은 옛 것만 줄임)
   const tooBig = new Map();     // 경로 → 이 길이를 넘으면 보내지 않음 (너무 큼)
   const stuck = new Map();      // 경로 → true : 공유 저장소가 가득 차 못 올린 문서
   const unsubs = [];
@@ -75,7 +92,10 @@
   let stuckDelay = STUCK_MIN;
   let retryingStuck = false;
   let resyncing = false;
+  let starting = false;         // 처음 공유 시작 중 (move/meta 를 '없을 때만' 쓰는 중)
   let deferred = [];            // 다시 읽는 동안 도착한 변경 (다 읽은 뒤 처리)
+  let baseId = null;            // srv 가 어느 저장소의 내용인지 ('firebase:프로젝트/묶음') — 있을 때만 기준을 남기고 다시 붙을 때 합침
+  let baseT = 0;
   const toasted = new Set();
 
   /* ---------- 도우미 ---------- */
@@ -357,8 +377,10 @@
     return order.map((k) => keep.get(k));
   }
   function mergeActivity(b, l, r) {
-    const key = (a) => (a && a.at ? String(a.at) : '') + '\u0001' + (a && a.text ? String(a.text) : '');
-    const base = new Set(((b && b.list) || []).map(key));
+    const atText = (a) => (a && a.at ? String(a.at) : '') + '\u0001' + (a && a.text ? String(a.text) : '');
+    // key 가 있는 줄(예: 'seed-v7-add' 새 버전 맞춤)은 key 로 한 줄만 — 두 기기가 같이 적어도 한 번만 보임
+    const key = (a) => (a && typeof a.key === 'string' && a.key ? '\u0002' + a.key : atText(a));
+    const base = new Set(((b && b.list) || []).filter(Boolean).map(key));
     const ll = ((l && l.list) || []).filter(Boolean);
     const rl = ((r && r.list) || []).filter(Boolean);
     const inL = new Set(ll.map(key));
@@ -366,11 +388,13 @@
     const out = new Map();
     ll.concat(rl).forEach((a) => {
       const k = key(a);
-      if (out.has(k)) return;
       if (base.has(k) && !(inL.has(k) && inR.has(k))) return; // 한쪽에서 밀려난(오래된) 기록은 빼기
+      const had = out.get(k);
+      if (had && !(atText(a) < atText(had))) return;          // 같은 key 면 어느 기기에서 합쳐도 같은 줄(먼저 적힌 것)
       out.set(k, a);
     });
-    const list = Array.from(out.entries()).sort((x, y) => (x[0] < y[0] ? 1 : x[0] > y[0] ? -1 : 0)).map((e) => e[1]);
+    const sk = (a) => atText(a) + '\u0001' + (a && a.key ? String(a.key) : '');
+    const list = Array.from(out.values()).sort((x, y) => { const p = sk(x); const q = sk(y); return p < q ? 1 : p > q ? -1 : 0; });
     return { list: list.slice(0, 150) };
   }
   /** 문서 종류에 맞춰 합치기 */
@@ -454,9 +478,9 @@
         // 보내는 사이에 새 스냅샷이 오지 않았으면 서버 내용 = 보낸 내용
         if ((seen.get(path) || 0) === seq0) { if (job.body === null) srv.delete(path); else srv.set(path, canon(job.body)); }
       }).catch((e) => { if (conn === db) onWriteError(path, job, e); }).finally(() => {
+        if (conn !== db) return;      // 끊긴(또는 바뀐) 연결의 약속: 지금 연결의 셈에 손대지 않음
         inflight.delete(path);
         running--;
-        if (conn !== db) return;
         if (pending.size) schedule();
         else settle();
       });
@@ -465,9 +489,10 @@
   function onWriteError(path, job, e) {
     const code = (e && e.code) || 'unavailable';
     Y.lastError = code;
-    if (code === 'invalid_argument') {
+    Y.lastFbCode = (e && e.fbCode) || null;
+    if (code === 'invalid_argument' || code === 'not_writer') {
       const len = job.body ? canon(job.body).length : 0;
-      if (job.body && len > MAX_DOC - 4096) {
+      if (code === 'invalid_argument' && job.body && len > MAX_DOC - 4096) {
         tooBig.set(path, len - 2048);  // 이보다 줄어들면 다시 보냄
         toastOnce('big:' + path, path.startsWith('planbg/') ? '평면도 사진이 커서 이 기기에만 저장했어요 (공유되지 않음).' : '저장할 내용이 너무 커서 일부가 이 기기에만 남았어요.');
         return;
@@ -577,6 +602,7 @@
     // 둘 다 고침 → 합치기
     const merged = mergeDoc(path, base === null ? undefined : JSON.parse(base), MV.clone(lu), data);
     last.set(path, j);
+    pending.delete(path);              // 줄 서 있던 내 예전 내용은 버림 — 합친 결과가 서버와 다르면 diffAndWrite 가 다시 줄 세움
     if (canon(merged) === lj) return 2; // 받은 내용이 이미 내 쪽에 다 들어 있음 → 내 것을 올리기만
     applyUnit(st, path, merged);
     return 1;
@@ -637,7 +663,8 @@
         if (data) changes.push({ id, data });
       });
       if (Y.empty) {
-        if (metaArrived) { Y.empty = false; resync(); }
+        // 공유 시작 중이면 move/meta 가 내 것인지 다른 기기 것인지는 initFromLocal 이 정함
+        if (metaArrived && !starting) { Y.empty = false; resync(); }
         return;
       }
       if (resyncing) { deferred.push([col, changes]); return; }
@@ -649,6 +676,7 @@
       try {
         unsubs.push(db.collection(c).onSnapshot(onSnap(c), (e) => {
           Y.lastError = e && e.code;
+          Y.lastFbCode = (e && e.fbCode) || null;
           if (e && REVOKED.indexOf(e.code) >= 0) {
             stop('revoked');
             toastOnce('revoked', '공유 권한이 없어져서 지금부터 바꾼 내용은 이 기기에만 저장돼요.');
@@ -657,10 +685,11 @@
       } catch (e) { /* 무시 */ }
     });
   }
-  async function readAll() {
-    const snaps = await Promise.all(COLS.map((c) => db.collection(c).get()));
+  async function readAll(conn) {
+    conn = conn || db;
+    const snaps = await Promise.all(COLS.map((c) => conn.collection(c).get()));
     const remote = new Map();
-    snaps.forEach((qs, i) => qs.docs.forEach((d) => { if (d.exists) remote.set(COLS[i] + '/' + d.id, strip(d.data())); }));
+    snaps.forEach((qs, i) => qs.docs.forEach((d) => { if (d.exists) remote.set(COLS[i] + '/' + d.id, d.data()); })); // '_sa' 는 쓰는 쪽에서 뗌
     return remote;
   }
   function adopt(remote) {
@@ -673,7 +702,8 @@
     srv.clear();
     hist.clear();
     stuck.clear();
-    remote.forEach((data, path) => {
+    remote.forEach((raw, path) => {
+      const data = strip(raw);
       applyUnit(st, path, data);
       const j = canon(data);
       last.set(path, j);
@@ -687,8 +717,10 @@
   async function resync() {
     resyncing = true;
     deferred = [];
+    const conn = db;
     try {
-      const remote = await readAll();
+      const remote = await readAll(conn);
+      if (conn !== db) return;        // 읽는 사이에 연결이 바뀜 (새 연결이 따로 읽음)
       if (!remote.has('move/meta')) { Y.empty = true; resyncing = false; deferred = []; setStatus(Y.readOnly ? 'readonly' : 'empty'); return; }
       Y.empty = false;
       resyncing = false;
@@ -698,24 +730,129 @@
       later.forEach(([col, changes]) => handleChanges(col, changes));
       if (!pending.size && !running) setStatus(idleStatus());
     } catch (e) {
+      if (conn !== db) return;
       resyncing = false;
       deferred = [];
       Y.lastError = e && e.code;
+      Y.lastFbCode = (e && e.fbCode) || null;
       setStatus('offline');
     }
   }
 
-  /** 공유 저장소가 비어 있을 때: 이 기기 기록으로 공유를 시작 */
-  Y.initFromLocal = function initFromLocal() {
-    if (!db || Y.readOnly) return false;
-    Y.empty = false;
+  /** 같은 저장소에 다시 붙음: 마지막으로 안 서버 내용(srv)을 기준으로 받은 기록과 합침 (이 기기에서만 고친 것은 올림) */
+  function rejoin(remote) {
+    const st = S.get();
+    const units = unitsOf(st);
+    let edits = 0;
+    units.forEach((u, path) => {
+      const j = srv.get(path);
+      if (j === undefined ? !path.startsWith('planbg/') : j !== canon(u)) edits++; // 서버에 없는 큰 평면도 사진은 원래 이 기기에만
+    });
+    srv.forEach((j, path) => { if (isItemPath(path) && !units.has(path)) edits++; });
     last.clear();
-    srv.clear();
-    hist.clear();
-    S.log('이 기기의 기록으로 공유를 시작했어요.', true);
-    S.persist();
-    S.emit('change', { source: 'local' });
-    return true;
+    srv.forEach((j, path) => last.set(path, j)); // 서버에 있다고 아는 것 (보내지 못한 것은 다시 보냄)
+    const known = Array.from(srv.keys());
+    remote.forEach((raw, path) => { onRemote(st, path, raw); });
+    known.forEach((path) => { if (!remote.has(path)) onRemoved(st, path.slice(0, path.indexOf('/')), path); });
+    S.mergeSeed(st);
+    S.persist();              // → diffAndWrite: 합친 결과와 이 기기에서만 고친 것을 올림
+    S.emit('change', { source: 'remote' });
+    if (edits && MV.ui && MV.ui.toast) MV.ui.toast('연결이 끊긴 동안 이 기기에서 바꾼 내용을 공유 기록과 합쳐서 올렸어요.', { ms: 5000 });
+  }
+
+  /* ---------- 합치기 기준(srv)을 이 기기에 남기기 ---------- */
+  function saveBase() {
+    clearTimeout(baseT);
+    baseT = 0;
+    if (!baseId) return;
+    let units;
+    try { units = unitsOf(S.get()); } catch (e) { return; }
+    const h = {};
+    const d = {};
+    srv.forEach((j, path) => {
+      h[path] = hash(j);
+      const u = units.get(path);
+      if ((u === undefined ? null : canon(u)) !== j && !path.startsWith('planbg/')) d[path] = j; // 이 기기와 다른 문서만 내용째
+    });
+    try { global.localStorage.setItem(BASE_KEY, JSON.stringify({ id: baseId, h, d })); } catch (e) { /* 가득 참 등 — 다음 저장 때 다시 */ }
+  }
+  function saveBaseSoon() { if (baseId && !baseT) baseT = setTimeout(saveBase, 400); }
+  function clearBase() {
+    baseId = null;
+    clearTimeout(baseT);
+    baseT = 0;
+    try { global.localStorage.removeItem(BASE_KEY); } catch (e) { /* 무시 */ }
+  }
+  /** 페이지를 열 때(아직 아무것도 고치기 전): 남겨 둔 기준을 되살림. 해시가 같은 문서는 지금 이 기기 내용이 곧 기준 */
+  function loadBase() {
+    if (global.claude && typeof global.claude.use === 'function') return;
+    let rec = null;
+    try { rec = JSON.parse(global.localStorage.getItem(BASE_KEY) || 'null'); } catch (e) { rec = null; }
+    if (!isObj(rec) || typeof rec.id !== 'string' || !isObj(rec.h)) return;
+    let units;
+    try { units = unitsOf(S.get()); } catch (e) { return; }
+    const d = isObj(rec.d) ? rec.d : {};
+    Object.keys(rec.h).forEach((path) => {
+      if (typeof d[path] === 'string') { srv.set(path, d[path]); return; }
+      const u = units.get(path);
+      if (u === undefined) return;
+      const j = canon(u);
+      if (hash(j) === rec.h[path]) srv.set(path, j);
+    });
+    baseId = rec.id;
+  }
+
+  /** 공유 저장소가 비어 있을 때: 이 기기 기록으로 공유를 시작 → Promise<true(시작함)|false(안 함)>
+      두 기기가 거의 같이 눌러도 한쪽만 시작하도록, 파이어베이스는 move/meta 를 '없을 때만' 먼저 씀.
+      이미 다른 기기가 시작했으면 공유 기록으로 맞춤 (이 기기 기록은 따로 보관 — ⋯ 메뉴에서 받기) */
+  Y.initFromLocal = function initFromLocal() {
+    const toast = (msg) => { if (MV.ui && MV.ui.toast) MV.ui.toast(msg, { ms: 6000 }); };
+    if (!db || Y.readOnly || Y.mode !== 'shared' || starting) return Promise.resolve(false);
+    if (!Y.empty || Y.status !== 'empty') {
+      toast('이미 공유가 시작됐어요 — 지금 보이는 것이 공유된 기록이에요.');
+      return Promise.resolve(false);
+    }
+    const conn = db;
+    const begin = () => {
+      try { if (!global.localStorage.getItem(BACKUP_KEY)) global.localStorage.setItem(BACKUP_KEY, JSON.stringify(S.get())); } catch (e) { /* 무시 */ }
+      Y.empty = false;
+      last.clear();
+      srv.clear();
+      hist.clear();
+      S.log('이 기기의 기록으로 공유를 시작했어요.', true);
+      S.persist();
+      S.emit('change', { source: 'local' });
+      return true;
+    };
+    let ref = null;
+    if (Y.backend === 'firebase') { try { ref = db.doc('move/meta'); } catch (e) { ref = null; } }
+    if (!ref || typeof ref.create !== 'function') return Promise.resolve(begin());
+    starting = true;
+    setStatus('saving');
+    const meta = unitsOf(S.get()).get('move/meta');
+    return Promise.resolve().then(() => ref.create(MV.clone(meta))).then((created) => {
+      starting = false;
+      if (conn !== db) return false;
+      if (created) return begin();
+      // 다른 기기가 조금 먼저 시작함 → 공유 기록으로 맞춤
+      Y.empty = false;
+      toast('다른 기기에서 조금 먼저 공유를 시작했어요 — 공유된 기록으로 맞췄어요. 이 기기 기록은 ⋯ 메뉴의 \'공유 전 이 기기 기록 받기\'로 받을 수 있어요.');
+      resync();
+      return false;
+    }, (e) => {
+      starting = false;
+      if (conn !== db) return false;
+      Y.lastError = e && e.code;
+      Y.lastFbCode = (e && e.fbCode) || null;
+      if (REVOKED.indexOf(Y.lastError) >= 0) {
+        stop('revoked');
+        toastOnce('revoked', '공유 권한이 없어져서 지금부터 바꾼 내용은 이 기기에만 저장돼요.');
+      } else {
+        if (Y.empty) setStatus('empty');
+        toast('공유를 시작하지 못했어요. 인터넷 연결을 확인하고 다시 눌러 주세요.');
+      }
+      return false;
+    });
   };
   /** 처음 연결 때 따로 둔 '이 기기 기록' 백업 */
   Y.localBackup = function localBackup() {
@@ -734,10 +871,27 @@
     revoked: ['🔒', '공유 권한이 없어요 — 이 기기에만 저장돼요'],
     unreachable: ['⚠', '공유 저장소에 연결하지 못했어요 — 지금은 이 기기에만 저장돼요'],
     error: ['⚠', '공유 저장소 오류'],
+    login: ['🔑', '로그인하면 부부가 같은 기록을 봐요'],
   };
   /** ⋯ 메뉴 '함께 쓰기' 칸에 쓸 긴 설명 (app.js 에 아직 없는 상태만) */
   Y.statusText = function statusText(st) {
     st = st || Y.status;
+    if (Y.backend === 'firebase') {
+      if (st === 'login') {
+        return '🔑 로그인하면 부부가 같은 기록을 봐요. 함께 쓰기 화면에서 각자 이메일로 로그인하세요. 지금은 이 기기에만 저장돼요'
+          + (Y.willMerge() ? ' — 다시 로그인하면 그동안 바꾼 내용을 공유 기록과 합쳐서 올려요.' : ' — 처음 로그인하면 공유된 기록으로 맞춰져요 (지금 기록은 따로 보관).');
+      }
+      if (st === 'revoked') {
+        const fc = Y.lastFbCode || '';
+        if (fc === 'not-found' || fc === 'failed-precondition') return '🔒 파이어베이스에서 데이터베이스를 아직 만들지 않았어요 — 함께 쓰기 화면의 설정 안내 ④단계를 확인하세요. 지금은 이 기기에만 저장돼요.';
+        if (fc === 'unauthenticated') return '🔒 로그인이 풀렸어요. 함께 쓰기 화면에서 다시 로그인하세요. 지금은 이 기기에만 저장돼요.';
+        return '🔒 이 계정은 함께 쓰기 허용 목록에 없어요 — 파이어베이스 규칙의 이메일을 확인하세요. 지금은 이 기기에만 저장돼요.';
+      }
+      if (st === 'unreachable') {
+        return '⚠ 함께 쓰기 저장소에 연결하지 못했어요. 인터넷 연결을 확인하세요 — 잠시 뒤 저절로 다시 시도하고, 함께 쓰기 화면에서 바로 다시 시도할 수도 있어요. 그동안 바꾼 내용은 이 기기에 저장되고, '
+          + (Y.willMerge() ? '다시 연결되면 공유 기록과 합쳐서 올려요.' : '처음 연결되면 공유된 기록으로 맞춰져요 (지금 기록은 따로 보관).');
+      }
+    }
     if (st === 'partial') {
       return '⚠ 일부 기록을 공유하지 못했어요. 그 부분은 이 기기에만 남아 있어요. '
         + (stuck.size ? '공유 저장소가 가득 찼어요 — 필요 없는 항목이나 사진을 지우면 잠시 뒤 자동으로 다시 올려요.' : '내용이 너무 커요 — 줄이면 다시 공유돼요.');
@@ -786,9 +940,36 @@
   }
 
   /* ---------- 시작 ---------- */
+  /** db 를 얻은 뒤의 공통 부분: 모두 읽기 → 비었는지 보거나 공유 기록으로 맞추기 → 변경 구독 */
+  async function attachDb(dbNs, merge) {
+    db = dbNs;
+    let remote;
+    try { remote = await readAll(dbNs); } catch (e) {
+      if (db !== dbNs) return;        // 읽는 사이에 다른 연결로 바뀜
+      // 처음 읽기 실패: 저절로 다시 붙지 않으므로 '다시 시도하는 중' 이라고 하지 않음 (새로 열면 다시 연결)
+      Y.lastError = e && e.code;
+      Y.lastFbCode = (e && e.fbCode) || null;
+      Y.mode = 'local';
+      db = null;
+      setStatus(REVOKED.indexOf(Y.lastError) >= 0 ? 'revoked' : 'unreachable');
+      return;
+    }
+    if (db !== dbNs) return;
+    Y.mode = 'shared';
+    if (!remote.has('move/meta')) {
+      Y.empty = true;
+      setStatus(Y.readOnly ? 'readonly' : 'empty');
+    } else {
+      if (merge && srv.size) rejoin(remote); else adopt(remote);
+      setStatus(Y.readOnly ? 'readonly' : (pending.size || running ? 'saving' : idleStatus()));
+    }
+    saveBaseSoon();
+    subscribe();
+  }
   async function connect() {
     const c = global.claude;
-    if (!c || typeof c.use !== 'function') return; // GitHub Pages 등: 이 기기만
+    if (!c || typeof c.use !== 'function') return; // GitHub Pages 등: sync-firebase.js 가 따로 붙임 (설정 전에는 이 기기만)
+    Y.backend = 'claude';
     Y.mode = 'connecting';
     setStatus('connecting');
     const safe = (name) => Promise.resolve().then(() => c.use(name)).catch(() => null);
@@ -803,25 +984,58 @@
     if (userNs) {
       try { const w = await userNs.can('data.write'); if (w === false) Y.readOnly = true; } catch (e) { /* 무시 */ }
     }
-    let remote;
-    try { remote = await readAll(); } catch (e) {
-      // 처음 읽기 실패: 저절로 다시 붙지 않으므로 '다시 시도하는 중' 이라고 하지 않음 (새로 열면 다시 연결)
-      Y.lastError = e && e.code;
-      Y.mode = 'local';
-      db = null;
-      setStatus(REVOKED.indexOf(Y.lastError) >= 0 ? 'revoked' : 'unreachable');
-      return;
-    }
-    Y.mode = 'shared';
-    if (!remote.has('move/meta')) {
-      Y.empty = true;
-      setStatus(Y.readOnly ? 'readonly' : 'empty');
-    } else {
-      adopt(remote);
-      setStatus(Y.readOnly ? 'readonly' : (pending.size || running ? 'saving' : idleStatus()));
-    }
-    subscribe();
+    await attachDb(dbNs);
   }
+
+  /** 다른 저장소(파이어베이스) 어댑터를 붙임. 이전 연결이 있으면 끊음.
+      opts.connId('firebase:프로젝트/묶음')가 지난번과 같으면 마지막으로 안 서버 내용(srv)을 기준으로 합치고(rejoin),
+      다르거나 없으면 처음부터 (공유 기록으로 맞춤) */
+  Y.attach = function attach(adapter, opts) {
+    opts = opts || {};
+    if (db || Y.mode !== 'local') stop('connecting');
+    const id = typeof opts.connId === 'string' && opts.connId ? opts.connId : null;
+    const merge = !!(id && id === baseId && srv.size);
+    if (!merge) { srv.clear(); hist.clear(); }
+    if (id) baseId = id; else clearBase();
+    last.clear(); seen.clear(); pending.clear(); stuck.clear(); tooBig.clear();
+    deferred = [];
+    inflight = new Set();             // 옛 연결의 약속은 끝나도 이 셈을 건드리지 않음 (pump 의 conn 확인)
+    running = 0;
+    Y.readOnly = false;
+    Y.empty = false;
+    resyncing = false;
+    starting = false;
+    backoff = 0;
+    bumpedBatch = 0;
+    stuckDelay = STUCK_MIN;
+    Y.lastError = null;
+    Y.lastFbCode = null;
+    Y.backend = opts.backend || 'firebase';
+    Y.account = opts.account || '';
+    Y.mode = 'connecting';
+    setStatus('connecting');
+    return attachDb(adapter, merge);
+  };
+  /** 다시 연결하면 이 기기에서 고친 것을 공유 기록과 합치는지 (아니면 처음 연결 — 공유 기록으로 맞춤) */
+  Y.willMerge = function willMerge() { return !!(baseId && srv.size); };
+  /** 연결 끊기 (로그아웃 등). 이 기기 기록은 그대로 남음. opts.keepBackend: 칸 표시용으로 backend 를 남김 */
+  Y.detach = function detach(status, opts) {
+    if (!(opts && opts.keepBackend)) { Y.backend = null; clearBase(); srv.clear(); hist.clear(); }
+    Y.account = '';
+    Y.readOnly = false;
+    Y.empty = false;
+    stop(status || 'local');
+  };
+  /** 어댑터가 주는 힌트. 조심스럽게만 바꿈
+      offline      : 10초 넘게 저장이 안 끝남 → 저장 중일 때만 '끊김'
+      disconnected : 서버와 연결이 끊김(캐시만 보임) → 공유 중·저장 중일 때 '끊김'
+      online       : 다시 연결됨 → '끊김' 이고 보낼 것·보내는 것·다시 보낼 예정이 없으면 공유 중으로 */
+  Y._hint = function hint(status) {
+    if (Y.mode !== 'shared') return;
+    if (status === 'offline') { if (Y.status === 'saving') setStatus('offline'); return; }
+    if (status === 'disconnected') { if (Y.status === 'saving' || Y.status === 'synced' || Y.status === 'partial') setStatus('offline'); return; }
+    if (status === 'online' && Y.status === 'offline' && !pending.size && !running && !timer && !resyncing) setStatus(idleStatus());
+  };
 
   /* ---------- claude.ai 화면 안에서의 제약 보완 ---------- */
   function installViewerShims() {
@@ -856,7 +1070,16 @@
   }
   if (global.claude && typeof global.claude.use === 'function') installViewerShims();
 
+  loadBase();
   S.afterPersist.push(diffAndWrite);
+  S.afterPersist.push(saveBaseSoon);
+  S.on('sync', saveBaseSoon);         // 서버 내용(srv)이 바뀐 뒤 (쓰기 확인·받은 변경)
+  // 연결 안 된 동안 '처음부터 다시'·백업 복원(이 기기만이라고 안내함) → 다시 연결되면 합치지 않고 공유 기록으로 맞춤
+  S.on('change', (e) => {
+    if (e && e.reset && (e.log === 'reset' || e.log === 'import') && Y.mode !== 'shared' && baseId) { srv.clear(); hist.clear(); saveBaseSoon(); }
+  });
+  global.addEventListener('pagehide', () => { if (baseT) saveBase(); });
+  global.document.addEventListener('visibilitychange', () => { if (global.document.visibilityState === 'hidden' && baseT) saveBase(); });
   MV.css('sync', `
     .sync-chip { flex: 0 0 auto; padding: 0 8px; font-size: 1rem; }
     .sync-chip[data-status="offline"], .sync-chip[data-status="error"], .sync-chip[data-status="partial"],
@@ -866,5 +1089,5 @@
   else setTimeout(connect, 0);
 
   // 테스트·디버깅용
-  Y._debug = { canon, hash, unitsOf, unitOf, docId, last, srv, hist, pending, inflight, stuck, tooBig, applyUnit, merge3, mergeDoc, get backoff() { return backoff; } };
+  Y._debug = { canon, hash, unitsOf, unitOf, docId, last, srv, hist, pending, get inflight() { return inflight; }, stuck, tooBig, applyUnit, merge3, mergeDoc, get backoff() { return backoff; }, get baseId() { return baseId; }, saveBase };
 })(window);

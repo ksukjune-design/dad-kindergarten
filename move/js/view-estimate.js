@@ -5,6 +5,8 @@
    라우트
      #/stuff              → #/stuff/inventory 로 바꿔 보여 줌
      #/stuff/inventory    짐 목록 (요약·필터·표/카드·제조사·옮기는 곳·붙여넣기·업체용 목록)
+     #/stuff/inventory/spec  규격 확인 — 추정 규격인 가져갈 짐을 지금 방별로, 모델명 입력(바로 저장)·상태·검색 링크·카톡 복사
+                          (탭은 '짐 목록'이 켜진 채로. 짐 목록 위 요약 줄 '📸 규격 확인 n/m'에서 들어가요)
      #/stuff/estimate     이사 견적 (입력 → 부피 → 톤수·인원 → 금액 범위, 계산 기준 수정)
      #/stuff/quotes       업체 견적 비교 + '견적으로 보정'
      #/stuff/lg           가전 이전 비교 (가전마다 제조사 서비스(LG 또는 삼성) vs 이삿짐센터, 우리 집 계획)
@@ -1622,7 +1624,7 @@
       TABS.map((t) => el('button', {
         type: 'button', role: 'tab', class: t.id === cur ? 'active' : '', 'aria-selected': String(t.id === cur),
         'data-tab': t.id, title: t.label,
-        onclick: () => { if (t.id !== cur) goTab(t.id); },
+        onclick: () => { if (t.id !== cur || (R && R.sub)) goTab(t.id); },
       }, el('span', { class: 'es-ti', 'aria-hidden': 'true' }, t.icon), el('span', { class: 'es-tl' }, t.label), el('span', { class: 'es-ts' }, t.short),
       counts[t.id] ? el('span', { class: 'es-tn' }, String(counts[t.id])) : null)));
     upd(() => {
@@ -1652,7 +1654,7 @@
       if (mem.cat && it.cat !== mem.cat) return false;
       if (mem.onlyAssumed && !it.assumed) return false;
       if (q) {
-        const hay = [it.name, it.note, it.room, it.roomNew, MV.inv.cat(it.cat).label, MV.inv.fate(it.fate).label].join(' ').toLowerCase();
+        const hay = [it.name, it.note, it.model, it.room, it.roomNew, MV.inv.cat(it.cat).label, MV.inv.fate(it.fate).label].join(' ').toLowerCase();
         if (!q.split(/\s+/).every((w) => hay.includes(w))) return false;
       }
       return true;
@@ -1701,9 +1703,9 @@
         mkTxt ? el('button', { type: 'button', class: 'es-stat es-statbtn', 'data-fk': 'maker-stat', title: '제조사 서비스로 따로 옮길 가전 — 눌러서 ‘가전 이전 비교’ 보기', onclick: () => goTab('lg') }, '🔧 ', el('b', mkTxt)) : null,
         assumed ? el('button', {
           type: 'button', class: 'es-fchip es-warnchip' + (mem.onlyAssumed ? ' is-on' : ''), 'aria-pressed': String(mem.onlyAssumed),
-          'data-fk': 'assumed-filter', title: '규격이 추정치인 짐만 보기',
+          'data-fk': 'assumed-filter', title: '크기가 추정치인 짐만 보기 (살 짐·버릴 짐도 포함 — 모델명 확인 대상은 아래 ‘규격 확인’ 줄의 숫자예요)',
           onclick: () => { mem.onlyAssumed = !mem.onlyAssumed; refreshNamed(['invsum', 'invlist']); },
-        }, '⚠ 규격 확인 필요 ', el('b', assumed + '개')) : null,
+        }, '⚠ 추정 크기 ', el('b', assumed + '개')) : null,
         blocked.length ? el('button', {
           type: 'button', class: 'es-fchip es-warnchip es-badchip', 'data-fk': 'lgfix-all',
           title: blocked.map(nm).join(', ') + ' — 제조사 서비스 표시가 켜져 있지만 맡길 수 없어요. 눌러서 이삿짐센터로 바꾸세요.',
@@ -1810,6 +1812,12 @@
     const u = safeUrl(it.url);
     return u ? el('a', { class: 'es-link', href: u, target: '_blank', rel: 'noopener noreferrer', title: u, 'aria-label': nm(it) + ' 제품 링크 열기' }, '🔗') : null;
   }
+  /* 모델명 칩 (적어 둔 짐만) — 누르면 규격 확인 목록 */
+  function modelChip(it) {
+    const m = String((it && it.model) || '').trim();
+    if (!m) return null;
+    return el('a', { class: 'chip brand es-mchip', style: { textDecoration: 'none' }, href: '#/stuff/inventory/spec', title: '모델명 ' + m + ' — 눌러서 규격 확인 목록 보기' }, '모델 ' + clip(m, 18));
+  }
   const dimTxt = (it) => Math.round(num(it.w, 0)) + '×' + Math.round(num(it.d, 0)) + '×' + Math.round(num(it.h, 0));
   const roomTxt = (it) => (it.room || '—') + ' → ' + (it.roomNew || '—');
   function nameBtn(it) {
@@ -1846,6 +1854,7 @@
           el('td', { class: 'es-namecell' }, el('div', { class: 'es-namewrap' }, nameBtn(it),
             brandChip(it),
             it.assumed ? el('span', { class: 'chip warn', title: '규격을 아직 재지 않은 추정치' }, '추정치') : null,
+            modelChip(it),
             isAircon(it) && it.ac ? el('span', { class: 'chip' }, AC_LABEL[it.ac] || it.ac) : null,
             lgBlockedIt(it, inpL) ? lgFixChip(it) : null),
             it.note ? el('div', { class: 'es-memo', title: it.note }, clip(it.note, 80)) : null),
@@ -1867,6 +1876,7 @@
         el('div', { class: 'es-icard-top' }, nameBtn(it),
           brandChip(it),
           it.assumed ? el('span', { class: 'chip warn' }, '추정치') : null,
+          modelChip(it),
           whoChip(it, inpL),
           lgBlockedIt(it, inpL) ? lgFixChip(it) : null),
         el('div', { class: 'es-icard-ctl' }, fateSelect(it), el('label', { class: 'es-qtylab' }, '수량', qtyInput(it))),
@@ -1889,7 +1899,244 @@
         el('div', { class: 'small es-muted' }, '부가세 별도 약 ' + won(est.ex.typical) + ' · ' + tonsLabel(est.tons) + ' · ' + est.crewLabel + ' · 짐 ' + m3(est.volume))),
       el('button', { type: 'button', class: 'btn btn-primary', onclick: () => goTab('estimate') }, '이사 견적 자세히 →'));
   }
+  /* ======================= 1-b) 규격 확인 (#/stuff/inventory/spec) =======================
+     추정 규격으로 넣어 둔 '가져감·미정' 짐을 지금 집 방별로 모아, 모델명을 적고(바로 저장) 상태를 봐요.
+     대상·상태 판단은 core 의 MV.inv.specTarget / specStatus (대시보드·AI 비서와 같은 기준).
+     상태: need '확인 필요'(추정·모델명 없음) / model '모델명 받음 — 규격 찾는 중' / done '확정'(추정 아님) */
+  const SPEC_HREF = '#/stuff/inventory/spec';
+  const specOk = () => !!(MV.inv && typeof MV.inv.specTarget === 'function');
+  const specSt = (it) => (MV.inv.SPEC_STATUS || {})[MV.inv.specStatus(it)] || { label: '', short: '', cls: '', icon: '' };
+  const modelTxt = (it) => String((it && it.model) || '').trim();
+  /* 방 순서 = 짐 목록 '지금 방순' 정렬과 같게 (방 이름 가나다순, 방이 없는 짐은 맨 뒤) */
+  function specGroups() {
+    const catIdx = (id) => { const i = MV.inv.CATS.findIndex((c) => c.id === id); return i < 0 ? 99 : i; };
+    const list = invItems(MV.inv.specTarget).sort((a, b) => (a.room ? 0 : 1) - (b.room ? 0 : 1)
+      || String(a.room).localeCompare(String(b.room), 'ko') || catIdx(a.cat) - catIdx(b.cat) || nm(a).localeCompare(nm(b), 'ko'));
+    const groups = [];
+    list.forEach((it) => {
+      const room = it.room || '';
+      let g = groups[groups.length - 1];
+      if (!g || g.room !== room) { g = { room, items: [] }; groups.push(g); }
+      g.items.push(it);
+    });
+    return groups;
+  }
+  function specCounts() {
+    const r = MV.inv.specStats();
+    r.buy = invItems((it) => it.fate === 'buy' && it.assumed).length;
+    return r;
+  }
+  /* 짐 목록 탭 위 작은 요약 줄 */
+  function specBar() {
+    if (!specOk()) return null;
+    const c = specCounts();
+    if (!c.total) return null;
+    return el('section', { class: 'card flat es-spbar', 'aria-label': '규격 확인 요약' },
+      el('div', { class: 'es-spbar-t' },
+        el('span', { class: 'es-spbar-ico', 'aria-hidden': 'true' }, '📸'),
+        el('span', '규격 확인 ', el('b', c.done + '/' + c.total), ' 확정', c.model ? ' · 모델명 받음 ' : '', c.model ? el('b', String(c.model)) : null),
+        el('span', { class: 'es-spbar-bar' }, MV.ui.progress(c.total ? c.done / c.total : 0, 'brand'))),
+      el('a', { class: 'btn btn-sm es-spbar-btn', href: SPEC_HREF, 'data-fk': 'spec-open' }, '규격 확인 목록 →'));
+  }
+  /* 카톡으로 보낼 확인 목록 */
+  function specCopyText() {
+    const groups = specGroups();
+    const lines = ['📸 가구·가전 모델명 확인 목록 (' + D.fmt(D.today()) + ')',
+      '명판·라벨의 모델명을 적어 주세요. 라벨이 없으면 줄자로 가로×깊이×높이를 재 주세요.'];
+    let done = 0;
+    groups.forEach((g) => {
+      const open = g.items.filter((it) => MV.inv.specStatus(it) !== 'done');
+      done += g.items.length - open.length;
+      if (!open.length) return;
+      lines.push('', '[' + (g.room || '방 미정') + ']');
+      open.forEach((it) => {
+        const m = modelTxt(it);
+        lines.push('□ ' + nm(it) + ' (' + qtyOf(it) + '개) — 지금 추정 ' + dimTxt(it) + 'cm → 모델명: ' + (m ? m + ' (규격 찾는 중)' : '____'));
+      });
+    });
+    if (done) lines.push('', '(확정된 ' + done + '개는 뺐어요)');
+    return lines.join('\n');
+  }
+  function specCopy(ta, more) {
+    const text = specCopyText();
+    ta.value = text;
+    const showSel = () => {
+      more.open = true;
+      try { ta.focus(); ta.select(); ta.setSelectionRange(0, ta.value.length); } catch (e) { /* 무시 */ }
+      toast('복사하지 못해 글을 선택해 두었어요. 길게 눌러 복사하세요.', { ms: 5000 });
+    };
+    const done = () => toast('복사했어요. 카톡에 붙여 넣으세요.');
+    const legacy = () => {
+      try {
+        more.open = true;
+        ta.focus(); ta.select();
+        if (document.execCommand && document.execCommand('copy')) { done(); return; }
+      } catch (e) { /* 아래로 */ }
+      showSel();
+    };
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, legacy);
+      else legacy();
+    } catch (e) { legacy(); }
+  }
+  /* 모델명 칸: 입력하면 잠시 뒤 바로 저장(기록 없이), 칸을 떠날 때 바뀌었으면 활동 기록 '모델명 적음: 소파 — ○○' */
+  const specPending = new Map(); // id → 저장 대기 함수 (창을 닫기 직전 flush 에서 마저 저장)
+  function modelInput(it) {
+    const id = it.id;
+    const inp = el('input', { class: 'input es-sp-in', value: modelTxt(it), placeholder: '예) 라벨의 모델명', maxlength: '80',
+      autocomplete: 'off', autocapitalize: 'characters', spellcheck: 'false', enterkeyhint: 'done', 'aria-label': nm(it) + ' 모델명', 'data-fk': 'model-' + id });
+    let base = modelTxt(it);
+    const save = (log) => {
+      specPending.delete(id);
+      const x = MV.inv.get(id);
+      if (!x) return;
+      const v = inp.value.trim().slice(0, 80);
+      if (v !== modelTxt(x)) MV.inv.update(id, { model: v });
+      if (log && v !== base) {
+        MV.store.log(v ? '모델명 적음: ' + nm(x) + ' — ' + v : '모델명 지움: ' + nm(x));
+        base = v;
+      }
+    };
+    const deb = MV.debounce(() => save(false), 700);
+    inp.addEventListener('focus', () => { const x = MV.inv.get(id); base = modelTxt(x); });
+    // 한글·안드로이드 키보드는 쓰는 동안 계속 '조합 중'이라, 조합 중에도 저장 대기에는 넣고(창을 닫을 때 flush 가 저장)
+    // 0.7초 뒤 저장만 건너뛰어요. 조합이 끝나면(compositionend) 그때 0.7초 뒤 저장을 걸어요.
+    inp.addEventListener('input', (e) => { specPending.set(id, () => save(true)); if (!e.isComposing) deb(); });
+    inp.addEventListener('compositionend', () => { specPending.set(id, () => save(true)); deb(); });
+    inp.addEventListener('change', () => { deb.flush(); save(true); });
+    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); inp.blur(); } });
+    return inp;
+  }
+  function specRow(it) {
+    const s = MV.inv.specStatus(it);
+    const st = specSt(it);
+    return el('div', { class: 'es-sp-row', 'data-st': s, 'data-id': it.id },
+      el('div', { class: 'es-sp-main' },
+        el('div', { class: 'es-sp-name' },
+          el('span', { class: 'es-sp-ico', 'aria-hidden': 'true' }, MV.inv.cat(it.cat).icon),
+          el('b', nm(it) || '이름 없는 짐'), el('span', { class: 'es-sp-qty' }, qtyOf(it) + '개'),
+          it.fate === 'undecided' ? el('span', { class: 'chip' }, '미정') : null),
+        el('div', { class: 'es-sp-meta' },
+          el('span', { class: 'chip ' + st.cls, title: st.label }, st.icon + ' ' + st.label),
+          el('span', { class: 'es-sp-dim' }, (s === 'done' ? '크기 ' : '지금 크기 ') + dimTxt(it) + 'cm'),
+          it.assumed ? el('span', { class: 'chip warn', title: '아직 재지 않은 예시 크기' }, '추정') : null)),
+      el('div', { class: 'es-sp-ctl' },
+        el('label', { class: 'es-sp-lab' }, el('span', '모델명'), modelInput(it)),
+        el('button', { type: 'button', class: 'btn btn-sm es-sp-fix', 'data-fk': 'spfix-' + it.id, onclick: () => MV.inv.editor(it.id) }, '✎ 크기 고치기')),
+      MV.inv.specLinks(modelTxt(it), 'es-sp-links'));
+  }
+  function specHead() {
+    const c = specCounts();
+    return el('section', { class: 'card es-sp-head', 'aria-label': '규격 확인 진행' },
+      el('div', { class: 'es-sp-top' },
+        el('a', { class: 'btn btn-sm btn-ghost es-sp-back', href: '#/stuff/inventory' }, '← 짐 목록'),
+        el('h2', { class: 'es-h2 es-sp-h' }, el('span', { 'aria-hidden': 'true' }, '📸'), '규격 확인 — 모델명으로 크기 확정')),
+      el('div', { class: 'es-sp-prog' },
+        el('span', '확정 ', el('b', c.done + '/' + c.total)),
+        MV.ui.progress(c.total ? c.done / c.total : 0, 'brand')),
+      el('div', { class: 'es-chiprow' },
+        el('span', { class: 'chip good' }, '✅ 확정 ' + c.done),
+        el('span', { class: 'chip brand' }, '🔎 모델명 받음 ' + c.model),
+        el('span', { class: 'chip warn' }, '📸 확인 필요 ' + c.need)),
+      el('p', { class: 'small mb-0 es-muted' }, '크기를 추정으로 넣어 둔 가져갈 짐(미정 포함)이에요. 모델명을 적으면 바로 저장되고 검색 링크가 생겨요. ',
+        '사진이나 모델명을 클로드에게 보내면 규격을 찾아 넣어 드려요. 크기를 고치면 \'확정\'이 돼요.'),
+      el('p', { class: 'small mb-0 es-muted' }, '버릴 짐·팔 짐은 뺐어요. ' + (c.buy ? '살 짐 ' + c.buy + '개는 ' : '') + '살 물건은 살 때 정해요.'));
+  }
+  function specHelp() {
+    const rows = [
+      ['가전 (TV·공기청정기·에어컨 등)', '뒷면·옆면·문 안쪽 명판 — 모델명이 적힌 은색·흰 스티커'],
+      ['침대', '프레임 안쪽·헤드 뒤 라벨, 매트리스 옆 라벨 (슈퍼싱글·퀸·킹 같은 크기 표기만 있어도 좋아요)'],
+      ['소파', '쿠션 아래·바닥면 라벨'],
+      ['책장·서랍장·수납장·옷장·책상', '뒷판·서랍 안쪽·밑면 스티커. 이케아는 제품 이름(설명서·영수증·앱 주문 내역)'],
+      ['라벨이 없으면', '줄자로 가로·깊이·높이를 재고 줄자가 보이게 찍어요. 손잡이·다리처럼 튀어나온 곳까지 가장 바깥 크기로'],
+    ];
+    return el('details', { class: 'es-sp-help' },
+      el('summary', '📷 어디를 찍나요 (눌러서 보기)'),
+      el('dl', { class: 'es-sp-dl' }, rows.map(([k, v]) => [el('dt', k), el('dd', v)])),
+      el('p', { class: 'small mb-0' }, '사진은 방마다 한 번에: 전체 사진 1장 + 라벨 가까이 1장이면 충분해요.'),
+      el('p', { class: 'small mb-0' }, '목록에 있는데 우리 집에 없는 짐은 짐 목록에서 지우고, 빠진 큰 짐은 더해요. 처리(가져감·버림·팖)와 분해할 수 있는지도 같이 정해요.'));
+  }
+  function specCopyCard() {
+    const ta = el('textarea', { class: 'textarea es-sp-ta', readonly: true, 'aria-label': '카톡으로 보낼 확인 목록', spellcheck: 'false' });
+    const more = el('details', { class: 'es-sp-more' }, el('summary', '보낼 글 보기'), ta);
+    more.addEventListener('toggle', () => { if (more.open) ta.value = specCopyText(); });
+    return el('section', { class: 'card flat es-sp-copy', 'aria-label': '찍는 법과 확인 목록 보내기' },
+      specHelp(),
+      el('button', { type: 'button', class: 'btn btn-primary es-sp-copybtn', 'data-fk': 'spec-copy', onclick: () => specCopy(ta, more) }, '📋 카톡으로 보낼 확인 목록 복사'),
+      more);
+  }
+  function specList() {
+    const groups = specGroups();
+    if (!groups.length) {
+      return el('section', { class: 'card' }, el('div', { class: 'empty' },
+        el('span', { class: 'big', 'aria-hidden': 'true' }, '✅'),
+        el('p', '확인할 짐이 없어요. 가져갈 짐의 크기가 모두 추정이 아니에요.')));
+    }
+    return groups.map((g) => {
+      const done = g.items.filter((it) => MV.inv.specStatus(it) === 'done').length;
+      return el('section', { class: 'card es-sp-room', 'aria-label': (g.room || '방 미정') + ' 규격 확인' },
+        el('h3', { class: 'es-sp-rh' }, el('span', g.room || '방 미정'), el('span', { class: 'es-sp-rn' }, '확정 ' + done + '/' + g.items.length)),
+        g.items.map(specRow));
+    });
+  }
+  function renderSpec(body, ctx) {
+    MV.css('es-spec', `
+.es-spbar { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; padding: 10px 14px; margin-bottom: 12px; }
+.es-spbar-t { display: flex; align-items: center; gap: 6px 8px; flex-wrap: wrap; min-width: 0; font-size: .92rem; }
+.es-spbar-bar { width: 90px; flex: 0 0 auto; }
+.es-spbar-btn { flex: 0 0 auto; }
+.es-sp-head .es-sp-top { display: flex; align-items: center; gap: 6px 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.es-sp-h { margin: 0; }
+.es-sp-prog { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 10px; margin: 4px 0 10px; }
+.es-sp-head p { margin-top: 8px; }
+.es-sp-help { border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+.es-sp-help > summary { cursor: pointer; font-weight: 800; min-height: 40px; display: flex; align-items: center; list-style: none; }
+.es-sp-help > summary::-webkit-details-marker { display: none; }
+.es-sp-help > summary::after { content: '▾'; margin-left: 6px; color: var(--ink-3); }
+.es-sp-help[open] > summary::after { content: '▴'; }
+.es-sp-dl { display: grid; grid-template-columns: minmax(110px, 200px) 1fr; gap: 6px 12px; margin: 8px 0; font-size: .9rem; }
+.es-sp-dl dt { font-weight: 800; }
+.es-sp-dl dd { margin: 0; color: var(--ink-2); }
+.es-sp-copy { display: flex; flex-direction: column; gap: 8px; }
+.es-sp-copybtn { align-self: flex-start; max-width: 100%; white-space: normal; text-align: left; }
+.es-sp-more > summary { cursor: pointer; font-size: .85rem; color: var(--ink-2); font-weight: 700; min-height: 32px; display: inline-flex; align-items: center; }
+.es-sp-ta { min-height: 180px; font-size: .85rem; margin-top: 6px; }
+.es-sp-room { padding-top: 10px; }
+.es-sp-rh { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 0 0 6px; font-size: 1.02rem; }
+.es-sp-rn { font-size: .8rem; color: var(--ink-3); font-weight: 700; }
+.es-sp-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 10px 0; border-top: 1px solid var(--line); }
+.es-sp-row:first-of-type { border-top: 0; }
+.es-sp-row[data-st="done"] .es-sp-name b { color: var(--ink-2); }
+.es-sp-name { display: flex; align-items: center; gap: 4px 8px; flex-wrap: wrap; min-width: 0; overflow-wrap: anywhere; }
+.es-sp-ico { flex: 0 0 auto; }
+.es-sp-qty { font-size: .82rem; color: var(--ink-3); font-weight: 700; }
+.es-sp-meta { display: flex; align-items: center; gap: 4px 8px; flex-wrap: wrap; margin-top: 4px; font-size: .85rem; color: var(--ink-2); }
+.es-sp-dim { font-variant-numeric: tabular-nums; }
+.es-sp-ctl { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 8px; min-width: 0; }
+.es-sp-lab { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.es-sp-lab > span { font-size: .75rem; font-weight: 700; color: var(--ink-3); }
+.es-sp-fix { white-space: nowrap; }
+.es-sp-links { grid-column: 1 / -1; }
+@media (min-width: 760px) {
+  .es-sp-row { grid-template-columns: minmax(0, 1fr) minmax(280px, 380px); align-items: center; column-gap: 16px; }
+}
+@media (pointer: coarse) {
+  .es-body .es-spbar-btn, .es-body .es-sp-fix, .es-body .es-sp-back, .es-body .es-sp-copybtn { min-height: 44px; }
+  .es-sp-in { min-height: 44px; }
+  .es-sp-help > summary, .es-sp-more > summary { min-height: 44px; }
+}
+@media (max-width: 400px) { .es-spbar-bar { width: 64px; } .es-sp-dl { grid-template-columns: 1fr; gap: 2px; } .es-sp-dl dd { margin-bottom: 6px; } }
+`);
+    if (!specOk()) { body.appendChild(errCard('규격 확인 목록을 열 수 없어요', null, false)); return; }
+    body.appendChild(region(specHead, 'sphead'));
+    body.appendChild(specCopyCard());
+    body.appendChild(region(specList, 'splist'));
+    // 창을 닫기 직전: 입력 중이던 모델명을 마저 저장
+    const off = MV.store.on('flush', () => { Array.from(specPending.values()).forEach((fn) => { try { fn(); } catch (e) { /* 무시 */ } }); });
+    if (ctx && ctx.onCleanup) ctx.onCleanup(() => { off(); Array.from(specPending.values()).forEach((fn) => { try { fn(); } catch (e) { /* 무시 */ } }); specPending.clear(); });
+  }
   function renderInventory(body) {
+    body.appendChild(region(specBar, 'specbar'));
     body.appendChild(region(invSummary, 'invsum'));
     body.appendChild(invToolbar());
     body.appendChild(region(invList, 'invlist'));
@@ -3088,7 +3335,7 @@
       x.addEventListener('change', () => updQuote(id, { [key]: x.checked }));
       return el('label', { class: 'check es-check' }, x, el('span', label));
     };
-    const note = el('textarea', { class: 'textarea', rows: '2', placeholder: '메모 (담당자, 특약 가능 여부, 느낌 등)', 'aria-label': '메모', 'data-fk': 'q-' + id + '-note' }, q0.note || '');
+    const note = el('textarea', { class: 'textarea', rows: '2', placeholder: '메모 (상담한 직원, 특약 가능 여부, 느낌 등)', 'aria-label': '메모', 'data-fk': 'q-' + id + '-note' }, q0.note || '');
     textCommit(note, (v) => updQuote(id, { note: v }));
     const badges = el('div', { class: 'es-qbadges' });
     const normTxt = el('div', { class: 'es-qnorm' });
@@ -3572,8 +3819,10 @@
   function render(root, params, ctx) {
     const tabId = TABS.some((t) => t.id === params[0]) ? params[0] : 'inventory';
     if (params[0] !== tabId) { try { history.replaceState(null, '', '#/stuff/' + tabId); } catch (e) { /* 무시 */ } }
+    // #/stuff/inventory/spec → 짐 목록 탭 안의 '규격 확인' 목록 (휴대폰 탭 줄이 넘치지 않게 탭을 늘리지 않음)
+    const sub = tabId === 'inventory' && params[1] === 'spec' ? 'spec' : '';
     MV.store.ensure('estimate', defaults);
-    R = { root, tab: tabId, regions: [], updaters: [], est: null, raw: null, pending: false, dirty: false };
+    R = { root, tab: tabId, sub, regions: [], updaters: [], est: null, raw: null, pending: false, dirty: false };
     const myR = R;
     recompute();
     root.appendChild(headEl());
@@ -3581,7 +3830,7 @@
     root.appendChild(tabs);
     const body = el('div', { class: 'es-body' });
     root.appendChild(body);
-    try { TAB_RENDER[tabId](body); } catch (e) {
+    try { if (sub === 'spec') renderSpec(body, ctx); else TAB_RENDER[tabId](body); } catch (e) {
       console.error('[estimate]', e);
       body.appendChild(errCard('이 화면을 그리다 문제가 생겼어요', e, false, () => MV.rerender(true)));
     }
@@ -3596,7 +3845,7 @@
     root.addEventListener('compositionstart', onCompStart, true);
     root.addEventListener('compositionend', onCompEnd, true);
     let ro = null;
-    if (tabId === 'inventory' && window.ResizeObserver) {
+    if (tabId === 'inventory' && !sub && window.ResizeObserver) {
       ro = new ResizeObserver(() => { if (R === myR && R.tableMode !== undefined && tableMode() !== R.tableMode) refreshNamed(['invlist']); });
       ro.observe(root);
     }

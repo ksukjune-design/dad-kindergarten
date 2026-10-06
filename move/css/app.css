@@ -136,7 +136,7 @@ code, kbd { font-family: var(--mono); font-size: .9em; background: var(--bg-3); 
 .topbar .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: inherit; min-width: 0; flex: 0 1 auto; overflow: hidden; }
 .brand-mark { font-size: 1.5rem; }
 .brand-text { display: flex; flex-direction: column; line-height: 1.15; min-width: 0; }
-.brand-text strong { font-size: 1rem; }
+.brand-text strong { font-size: 1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .brand-text small { color: var(--ink-3); font-size: .78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dday {
   margin-left: auto;
@@ -150,6 +150,12 @@ code, kbd { font-family: var(--mono); font-size: .9em; background: var(--bg-3); 
 @media (max-width: 420px) {
   .dday .dday-date { display: none; }
   .brand-text small { display: none; }
+}
+@media (max-width: 380px) {
+  .topbar { gap: 8px; }
+  .topbar .brand { gap: 6px; }
+  .brand-mark { font-size: 1.3rem; }
+  .dday { padding: 4px 9px; }
 }
 .nav {
   grid-area: nav;
@@ -277,6 +283,7 @@ hr.sep { border: 0; border-top: 1px solid var(--line); margin: 16px 0; }
 @media (pointer: coarse) {
   .btn-sm { min-height: 36px; }
   .btn-sm.btn-icon { width: 36px; }
+  .db-facts a.chip, a.chip.es-mchip { min-height: 40px; padding: 0 12px; }
 }
 
 .chip {
