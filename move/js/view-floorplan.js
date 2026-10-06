@@ -1683,7 +1683,8 @@
 .fp-editbar > .fp-break { order: 2; flex: 0 0 100%; height: 0; }
 .fp-editbar > .fp-edittip { order: 3; }
 .fp-editbar > .fp-ebtn { order: 4; }
-.fp-dock { position: fixed; top: calc(var(--topbar-h) + 6px); left: 50%; transform: translateX(-50%); z-index: 25; display: flex; gap: 2px; padding: 3px;
+.fp-docked .toast-wrap { bottom: calc(var(--bottom-h) + 76px + env(safe-area-inset-bottom)); }
+.fp-dock { position: fixed; bottom: calc(var(--bottom-h) + 8px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); z-index: 25; display: flex; gap: 2px; padding: 3px;
   background: var(--bg-2); border: 1px solid color-mix(in srgb, var(--brand) 40%, var(--line)); border-radius: 14px; box-shadow: var(--shadow-lg); max-width: calc(100vw - 12px); }
 .fp-dock .btn { flex-direction: column; gap: 1px; min-height: 46px; min-width: 58px; padding: 3px 6px; border-color: transparent; background: transparent; line-height: 1.1; }
 .fp-dock .btn:hover { background: var(--bg-3); }
@@ -1972,7 +1973,8 @@
       if (fTool) { const b2 = editBar.querySelector('[data-tool="' + fTool + '"]'); if (b2) b2.focus({ preventScroll: true }); }
       drawDock();
     }
-    /* ---- 따라다니는 도구 줄: 치수 수정 중 위 도구 줄이 화면 위로 밀려 나가면 위쪽에 작게 떠서, 도면을 보면서 도구를 바꿀 수 있게 ---- */
+    /* ---- 따라다니는 도구 줄 (폰·태블릿): 치수 수정 중 위 도구 줄이 화면 위로 밀려 나가면 아래 메뉴 바로 위에 작게 떠서,
+       도면을 보면서 엄지로 도구를 바꿀 수 있게. 떠 있는 동안 알림은 그 위로 올림 ---- */
     const dock = el('div', { class: 'fp-dock', hidden: true, role: 'toolbar', 'aria-label': '치수 수정 도구 (따라다니는 줄)' });
     planCard.appendChild(dock);
     let dockOn = false, dockRaf = 0;
@@ -1980,7 +1982,7 @@
       const ae = document.activeElement;
       const fd = ae && dock.contains(ae) && ae.getAttribute && ae.getAttribute('data-dock');
       dock.textContent = '';
-      if (!editMode || wiz) { dock.hidden = true; dockOn = false; return; }
+      if (!editMode || wiz) { placeDock(); return; }
       const D = (id, ico, label, onclick, cls) => el('button', { type: 'button', class: 'btn fp-b ' + (cls || ''), 'data-dock': id, 'aria-pressed': cls ? null : String(tool === id), onclick, 'aria-label': label },
         el('span', { class: 'fp-dico', 'aria-hidden': 'true' }, ico), el('span', { class: 'fp-dlab', 'aria-hidden': 'true' }, label));
       put(dock, TOOL_DEFS.map(([id, ico, label]) => D(id, ico, label, () => { setTool(id); toast(TOOL_TIPS[id], { ms: 3200 }); })),
@@ -1990,20 +1992,23 @@
     }
     /** 위 도구 줄이 위 막대 뒤로 사라졌고 도면 카드는 아직 보이면 띄움 */
     function placeDock() {
-      if (!editMode || wiz || !root.isConnected) { dock.hidden = true; dockOn = false; return; }
-      const top = pxv('--topbar-h', 56);
-      const eb = editBar.getBoundingClientRect(), pc = planCard.getBoundingClientRect();
-      const on = eb.bottom < top + 4 && pc.bottom > top + 160;
-      if (on !== dockOn || on) {
-        dockOn = on;
-        dock.hidden = !on;
-        if (on) dock.style.left = Math.round(pc.left + pc.width / 2) + 'px';
+      let on = false, pc = null;
+      if (editMode && !wiz && root.isConnected && mm('(max-width: 860px)')) {
+        const top = pxv('--topbar-h', 56);
+        const eb = editBar.getBoundingClientRect();
+        pc = planCard.getBoundingClientRect();
+        on = eb.bottom < top + 4 && pc.bottom > top + 160;
       }
+      if (on && pc) dock.style.left = Math.round(pc.left + pc.width / 2) + 'px';
+      if (on === dockOn) return;
+      dockOn = on;
+      dock.hidden = !on;
+      document.body.classList.toggle('fp-docked', on);
     }
     const onDockScroll = () => { if (!editMode || dockRaf) return; dockRaf = requestAnimationFrame(() => { dockRaf = 0; placeDock(); }); };
     window.addEventListener('scroll', onDockScroll, { passive: true });
     window.addEventListener('resize', onDockScroll);
-    ctx.onCleanup(() => { window.removeEventListener('scroll', onDockScroll); window.removeEventListener('resize', onDockScroll); cancelAnimationFrame(dockRaf); });
+    ctx.onCleanup(() => { window.removeEventListener('scroll', onDockScroll); window.removeEventListener('resize', onDockScroll); cancelAnimationFrame(dockRaf); document.body.classList.remove('fp-docked'); });
     function setTool(id) {
       tool = id;
       preview = null;

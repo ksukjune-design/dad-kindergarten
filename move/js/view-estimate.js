@@ -1,13 +1,13 @@
 /* ============================================================
    우리집 이사 관리 — 짐·견적
-   짐 목록(MV.inv, 도면 배치 화면과 같은 데이터) + 자동 이사 견적 + 업체 견적 비교 + LG vs 이삿짐센터
+   짐 목록(MV.inv, 도면 배치 화면과 같은 데이터) + 자동 이사 견적 + 업체 견적 비교 + LG·이삿짐센터 비교
 
    라우트
      #/stuff              → #/stuff/inventory 로 바꿔 보여 줌
      #/stuff/inventory    짐 목록 (요약·필터·표/카드·붙여넣기·업체용 목록)
      #/stuff/estimate     이사 견적 (입력 → 부피 → 톤수·인원 → 금액 범위, 계산 기준 수정)
      #/stuff/quotes       업체 견적 비교 + '견적으로 보정'
-     #/stuff/lg           LG 서비스 vs 이삿짐센터
+     #/stuff/lg           LG·이삿짐센터 비교 (LG 서비스와 이삿짐센터 중 누가 옮길지)
 
    상태  MV.store.ensure('estimate') → {
            coef:   { 모든 계수 },                 // '기준값으로 되돌리기' 가능
@@ -18,7 +18,9 @@
            lgChecks: { schedule, landlord, brand } }
    계산  MV.calc.moveEstimate(state) → { tons, crew, volume, low, typical, high,
            lines:[{key,label,low,typical,high,detail}], lgCost:{low,typical,high,rows,vatIncluded:true}|null, notes:[],
-           vatIncl,                       // low/typical/high 가 부가세 포함인지 (‘부가세 더하기’, 기본 꺼짐 = 리서치 시세 그대로 부가세 별도)
+           vatIncl,                       // low/typical/high 가 부가세 포함인지 (‘부가세 포함으로 보기’, 기본 꺼짐 = 리서치 시세 그대로 부가세 별도)
+           ex:{low,typical,high},         // 이삿짐센터 부가세 별도 금액 (언제나 별도 — 화면의 보조 숫자)
+           lgBlocked:[{id,name,reason}],  // LG 표시가 켜져 있지만 LG 불가(다른 브랜드·창문형)라 이삿짐센터 짐으로 계산한 가전
            pay:{low,typical,high},        // 이삿짐센터 ‘실제로 낼 돈’ (언제나 부가세 포함)
            totalPay:{low,typical,high},   // pay + LG 요금(소비자가, 부가세 포함) — 이삿짐센터와 LG를 더할 땐 이 값
            ... }
@@ -48,7 +50,19 @@
   const won = (n) => F.krw(Math.round(num(n, 0)));
   const tonsLabel = (t) => (Number.isInteger(t) ? String(t) : String(r1(t))) + '톤';
   const crewLabel = (c) => (!isNum(c) ? '-' : Number.isInteger(c) ? c + '명' : Math.floor(c) + '~' + Math.ceil(c) + '명');
-  const clip = (s, n) => { s = String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
+  /* 줄여 보이기: 낱말 중간(예: 'URL' → 'UR…')에서 자르지 않고 띄어쓰기·가운뎃점·쉼표 같은 경계에서 잘라요.
+     경계가 너무 앞(절반 미만)이면 글자 단위로 자르되, 끝에 걸친 영문·숫자 덩어리는 통째로 빼요 */
+  const clip = (s, n) => {
+    s = String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
+    if (s.length <= n) return s;
+    let cut = s.slice(0, n - 1);
+    if (!/[\s·,.;:!?)\]]/.test(s.charAt(n - 1))) {
+      const m = cut.match(/^(.*)[\s·,;:\/(\[]/);
+      if (m && m[1].length >= Math.floor(n / 2)) cut = m[1];
+      else cut = cut.replace(/[A-Za-z0-9.]+$/, '') || cut;
+    }
+    return cut.replace(/[\s·,;:\/(\[\-–—]+$/, '') + '…';
+  };
   const normDate = (s) => (D.valid(s) ? D.str(D.parse(s)) : null);
   const median = (arr) => {
     const a = arr.filter(isNum).sort((x, y) => x - y);
@@ -93,10 +107,10 @@
     misoCost: { label: '포장이사 비용 (미소)', url: 'https://miso.kr/blog/포장이사-비용' },
     misoSize: { label: '평수별 포장이사 (미소)', url: 'https://miso.kr/blog/포장이사-평수별' },
     ladder: { label: '2025 사다리차 요금표 (아정당)', url: 'https://www.ajd.co.kr/contents/basic-tip/detail/%ED%8F%AC%EC%9E%A5%EC%9D%B4%EC%82%AC_%EC%82%AC%EB%8B%A4%EB%A6%AC%EC%B0%A8_%EB%B9%84%EC%9A%A9_%EC%9A%94%EA%B8%88%ED%91%9C_%ED%95%9C%EB%88%88%EC%97%90_%EB%B3%B4%EA%B8%B0_%EC%89%BD%EA%B2%8C-47059' },
-    elev: { label: '사다리차 vs 엘리베이터 (아정당)', url: 'https://www.ajd.co.kr/contents/basic-tip/detail/이사_사다리차_비용_엘리베이터_사용료_견적_장단점_총정리-92583' },
+    elev: { label: '사다리차와 엘리베이터 비교 (아정당)', url: 'https://www.ajd.co.kr/contents/basic-tip/detail/이사_사다리차_비용_엘리베이터_사용료_견적_장단점_총정리-92583' },
     soomgo: { label: '에어컨 이전설치 공시가 (숨고 ①)', url: 'https://soomgo.com/profile/users/4199268' },
     soomgo2: { label: '에어컨 이전설치 공시가 (숨고 ②)', url: 'https://soomgo.com/profile/users/6304368' },
-    lunar: { label: 'KASI 기반 음력 계산 라이브러리', url: 'https://pypi.org/project/korean-lunar-calendar/' },
+    lunar: { label: '한국천문연구원 음력 자료 기준 계산 도구', url: 'https://pypi.org/project/korean-lunar-calendar/' },
     lunarDay: { label: '2026-11-03 음력 확인', url: 'https://datedb.net/calendar/day/20261103/' },
     terms: { label: '이사화물 표준약관 요약 (한국경제)', url: 'https://www.hankyung.com/amp/2002091120971' },
     kca: { label: '소비자원 이사 피해 통계 (경북매일)', url: 'https://kbmaeil.com/article/202412110413641' },
@@ -104,8 +118,8 @@
     jjan: { label: '이사업체 자격 확인 (전북일보)', url: 'https://www.jjan.kr/articleAmp/20160301575127' },
     lgCare: { label: 'LG 베스트케어 이전설치', url: 'https://www.lge.co.kr/lg-best-care/service-installation-removal' },
     lgRelease: { label: 'LG 베스트케어 보도자료', url: 'https://www.lg.co.kr/media/release/25552' },
-    lxPrice: { label: 'LX판토스 이전설치 요금표', url: 'https://move.lxpantos.com/mvinst/priceTable.jsp' },
-    lxSvc: { label: 'LX판토스 LG 가전 설치', url: 'https://www.lxpantos.com/kr/lg-electronics-installation.do' },
+    lxPrice: { label: '판토스(LG 물류 협력사) 이전설치 요금표', url: 'https://move.lxpantos.com/mvinst/priceTable.jsp' },
+    lxSvc: { label: '판토스(LG 물류 협력사) LG 가전 설치 안내', url: 'https://www.lxpantos.com/kr/lg-electronics-installation.do' },
     lgAc: { label: 'LG 에어컨 이전설치 요금 (2025-11 기준 정리)', url: 'https://tilnote.io/pages/6a43ec7788a337ba183160e3' },
     ewaste: { label: '폐가전 무상방문수거 1599-0903', url: 'https://www.15990903.or.kr' },
   };
@@ -165,7 +179,7 @@
     { k: 'weekend_pct', g: 'date', label: '주말·공휴일 할증', unit: '%', v: 15, lo: 10, hi: 20, conf: 'low', basis: '업계 통상치. 11/3은 화요일이라 해당 없음', src: [] },
     { k: 'month_end_pct', g: 'date', label: '월말 할증 (그달 마지막 5일)', unit: '%', v: 10, lo: 5, hi: 20, conf: 'low', basis: '추정', src: [] },
     { k: 'month_start_pct', g: 'date', label: '월초 할증 (1~5일)', unit: '%', v: 5, lo: 0, hi: 10, conf: 'low', basis: '추정 (출처 없는 업계 통상치). 11/3은 월초라 적용', src: [] },
-    { k: 'multi_add_pct', g: 'date', label: '할증이 겹칠 때 더하는 몫', unit: '%p', v: 5, conf: 'low', basis: '리서치 모델: 여러 개가 겹치면 가장 큰 할증 + 5%p', src: [] },
+    { k: 'multi_add_pct', g: 'date', label: '할증이 겹칠 때 더하는 몫', unit: '%포인트', v: 5, conf: 'low', basis: '리서치 모델: 여러 개가 겹치면 가장 큰 할증에 5%포인트를 더함', src: [] },
     // 사다리차·엘리베이터
     { k: 'ladder_f2', g: 'lift', label: '사다리차 2~5층 (5톤 기준)', unit: '원/회', v: 150000, lo: 100000, hi: 180000, money: true, conf: 'mid', basis: '2025 요금표 2~5층 15만원 (원문 재확인 못 함)', src: ['ladder'] },
     { k: 'ladder_f6', g: 'lift', label: '사다리차 6~9층', unit: '원/회', v: 165000, money: true, conf: 'low', basis: '요금표 5층(15만)과 10층(18만) 사이 보간 (추정)', src: ['ladder'] },
@@ -204,7 +218,7 @@
     { k: 'lg_ac_stand', g: 'lg', label: 'LG 에어컨 이전설치: 스탠드', unit: '원/대', v: 318000, lo: 318000, hi: 450000, money: true, conf: 'mid', basis: '2025-11-01 기준 (2차 출처)', src: ['lgAc'] },
     { k: 'lg_ac_2in1', g: 'lg', label: 'LG 에어컨 이전설치: 2in1', unit: '원/세트', v: 417000, lo: 417000, hi: 600000, money: true, conf: 'mid', basis: '2025-11-01 기준 (2차 출처)', src: ['lgAc'] },
     { k: 'lg_ac_pipe_per_m', g: 'lg', label: 'LG 에어컨 배관 연장 1m당', unit: '원/m', v: 19000, money: true, conf: 'mid', basis: '2차 출처. 실외기 앵글(12~14만)·매립배관 세척(5만)은 별도', src: ['lgAc'] },
-    { k: 'lg_fridge', g: 'lg', label: 'LG 냉장고 이전설치 (철거+설치)', unit: '원/대', v: 120000, lo: 60000, hi: 200000, money: true, conf: 'low', basis: 'LX판토스 요금표(일반 6만·4도어 10.1만·정수기형 17.9만)가 예전 요금일 수 있어 올려 잡음', src: ['lxPrice'] },
+    { k: 'lg_fridge', g: 'lg', label: 'LG 냉장고 이전설치 (철거+설치)', unit: '원/대', v: 120000, lo: 60000, hi: 200000, money: true, conf: 'low', basis: '판토스(LG 물류 협력사) 요금표(일반 6만·4도어 10.1만·정수기형 17.9만)가 예전 요금일 수 있어 올려 잡음', src: ['lxPrice'] },
     { k: 'lg_dryer', g: 'lg', label: 'LG 건조기 이전설치 (철거+설치)', unit: '원/대', v: 110000, lo: 73000, hi: 150000, money: true, conf: 'low', basis: '건조기 단가를 못 찾아 세탁기 요금으로 추정', src: ['lxPrice'] },
     { k: 'lg_washer', g: 'lg', label: 'LG 세탁기 이전설치', unit: '원/대', v: 98000, lo: 73000, hi: 130000, money: true, conf: 'low', basis: '예전 요금표 기준 (이번엔 세탁기를 버려서 참고용)', src: ['lxPrice'] },
     { k: 'lg_other', g: 'lg', label: 'LG TV·기타 가전 이전설치', unit: '원/대', v: 100000, lo: 60000, hi: 180000, money: true, conf: 'low', basis: 'TV 등 단가 미조사 — 냉장고·세탁기 요금 범위의 중간값으로 둠. 1544-7777에서 확인', src: ['lgCare'] },
@@ -220,7 +234,7 @@
     range_low: [0.5, 1], range_high: [1, 3], vat_pct: [0, 20], deposit_pct: [0, 100],
   };
   COEFS.forEach((d) => {
-    const b = BOUNDS[d.k] || (d.g === 'pack' ? [0.3, 3] : d.g === 'crew' ? [1, 20] : (d.unit === '%' || d.unit === '%p') ? [0, 100] : d.money ? [0, 50000000] : [0, 1e6]);
+    const b = BOUNDS[d.k] || (d.g === 'pack' ? [0.3, 3] : d.g === 'crew' ? [1, 20] : (d.unit === '%' || d.unit === '%포인트') ? [0, 100] : d.money ? [0, 50000000] : [0, 1e6]);
     d.min = b[0]; d.max = b[1];
   });
   const inBounds = (d, v) => isFinite(v) && v >= d.min - 1e-9 && v <= d.max + 1e-9;
@@ -250,7 +264,7 @@
   }
 
   /* ======================= 날짜 (음력·손없는날) =======================
-     KASI 기반 korean-lunar-calendar 로 계산한 음력 1일 (리서치 검증본과 일치: 11/3 = 음력 9/24) */
+     한국천문연구원(KASI) 음력 자료 기반 korean-lunar-calendar 로 계산한 음력 1일 (리서치 검증본과 일치: 11/3 = 음력 9/24) */
   const LUNAR_STARTS = [
     ['2026-07-14', 6], ['2026-08-13', 7], ['2026-09-11', 8], ['2026-10-11', 9], ['2026-11-09', 10], ['2026-12-09', 11],
     ['2027-01-08', 12], ['2027-02-07', 1], ['2027-03-08', 2], ['2027-04-07', 3], ['2027-05-06', 4], ['2027-06-05', 5],
@@ -410,8 +424,10 @@
     if (it.fate === 'undecided' || !FATE_IDS.has(it.fate)) return !!inp.includeUndecided;
     return false;
   }
-  /* 실제로 LG가 옮기는 짐: LG 표시 + 가져감(또는 계산에 넣는 미정) + 가전·에어컨 — 견적 계산·목록·내보내기가 모두 같은 규칙 */
-  function lgActive(it, inp) { return !!it && !!it.lg && isGoing(it, inp) && isApplianceLike(it); }
+  /* 실제로 LG가 옮기는 짐: LG 표시 + 가져감(또는 계산에 넣는 미정) + 가전·에어컨 + LG 이전설치 가능(LG 제품·창문형 아님)
+     — 견적 계산·목록·내보내기가 모두 같은 규칙. LG 불가인데 LG 표시만 켜진 짐은 이삿짐센터가 옮기는 것으로 계산해요 */
+  function lgActive(it, inp) { return !!it && !!it.lg && isGoing(it, inp) && isApplianceLike(it) && lgEligible(it); }
+  function lgBlockedIt(it, inp) { return !!it && !!it.lg && isGoing(it, inp) && isApplianceLike(it) && !lgEligible(it); }
   function rawVol(it) {
     return Math.max(0, num(it.w, 0)) * Math.max(0, num(it.d, 0)) * Math.max(0, num(it.h, 0)) / 1e6 * qtyOf(it);
   }
@@ -550,9 +566,11 @@
     const inv = invAll.filter((x) => x && typeof x === 'object');
     const going = inv.filter((it) => isGoing(it, inp));
     // LG 표시는 가전·에어컨에만 의미가 있어요 (가구에 잘못 켜져 있으면 이삿짐센터가 옮기는 것으로 계산)
-    const viaLg = (it) => !!it.lg && isApplianceLike(it);
+    // LG 이전설치는 LG 제품만 — 다른 브랜드로 보이거나 창문형 에어컨이면 LG 표시가 켜져 있어도 이삿짐센터 짐으로 계산 (lgCost 에서 빠짐)
+    const viaLg = (it) => !!it.lg && isApplianceLike(it) && lgEligible(it);
     const mover = going.filter((it) => !viaLg(it));
     const lgItems = going.filter(viaLg);
+    const lgBlocked = going.filter((it) => !!it.lg && isApplianceLike(it) && !lgEligible(it));
 
     /* 1) 부피 */
     const furnRaw = sum(mover, rawVol);
@@ -664,6 +682,7 @@
         detail: '방문견적 ' + calib.n + '곳 중앙값(부가세 별도로 환산) ' + won(calib.median) + '에 맞춤', group: 'calib' });
       total += v;
     }
+    const totalEx = total; // 부가세 별도 (보정 포함)
     if (inp.vat) {
       const v = total * vatRate;
       add('vat', '부가세 ' + r1(c.vat_pct) + '%', v, (useCalib ? '보정한 금액' : '부가세 별도 시세') + ' ' + won(total) + ' × ' + r1(c.vat_pct) + '%', 'tax');
@@ -677,6 +696,7 @@
        LG 요금은 소비자가(부가세 포함)라, 이삿짐센터와 LG를 더하거나 비교할 땐 이 값끼리 써요 */
     const payMul = inp.vat ? 1 : 1 + vatRate;
     const pay = { low: Math.round(total * c.range_low * payMul), typical: Math.round(total * payMul), high: Math.round(total * c.range_high * payMul) };
+    const ex = { low: Math.round(totalEx * c.range_low), typical: Math.round(totalEx), high: Math.round(totalEx * c.range_high) };
     const lineVal = (k) => sum(lines.filter((l) => l.key === k), (l) => l.typical);
     /* 업체 견적에 빠진 항목을 채울 때 쓰는 모델 금액 — partsEx 는 부가세 별도, parts 는 지금 화면 기준 */
     const partsEx = {
@@ -707,6 +727,11 @@
 
     /* 6) 안내 문구 */
     const notes = [];
+    if (lgBlocked.length) {
+      const nb = lgBlocked.map(nm);
+      notes.push('LG 표시가 켜진 ' + nb.join(', ') + ' — ' + (lgBlocked.every((it) => lgKind(it) === 'ac_window') ? '창문형 에어컨은 LG 이전설치가 필요 없어요' : 'LG 제품이 아닌 것으로 보여 LG 이전설치를 맡길 수 없어요') +
+        '. 이삿짐센터가 옮기는 것으로 계산했어요 — ‘LG·이삿짐센터 비교’ 탭에서 이삿짐센터로 바꾸세요.');
+    }
     const assumed = going.filter((it) => it.assumed);
     const undecided = going.filter((it) => it.fate !== 'move');
     if (!inv.length) notes.push('짐 목록이 비어 있어 박스·잡동사니 기본값으로만 계산했어요. 냉장고·침대·소파 같은 큰 짐을 넣어 주세요.');
@@ -717,14 +742,13 @@
     if (next && next.headroom < 1.5) notes.push('짐이 ' + m3(next.headroom) + '(박스 약 ' + next.boxes + '개)만 늘어도 ' + tonsLabel(next.tons) + '으로 올라가 약 ' + won(next.delta) + ' 더 들어요.');
     if (acCnt.unknown) notes.push('종류를 안 적은 에어컨 ' + acCnt.unknown + '대는 스탠드로 계산했어요.');
     if (undecided.length) notes.push('처리 ‘미정’ 짐 ' + undecided.length + '개도 가져가는 것으로 계산했어요.');
-    const lgOther = lgItems.filter((it) => brandOf(it) === 'other');
-    if (lgOther.length) notes.push('LG로 옮긴다고 표시한 ' + lgOther.map(nm).join(', ') + ' — 다른 브랜드로 보여요. LG 이전설치는 LG 제품만 돼요.');
     if (inp.dateMode === 'auto' && di.lunar && !di.sohn) notes.push(D.fmt(di.date) + '은 음력 ' + di.lunar.month + '월 ' + di.lunar.day + '일 — 손없는날이 아니에요.');
 
     return {
       tons, crew, volume: r1(volume), low, typical, high, lines, lgCost, notes,
       typicalRaw, subtotalEx: Math.round(subtotal), vatIncl: !!inp.vat, vatMul: 1 + vatRate, partsEx,
-      pay, totalPay, // pay: 이삿짐센터 부가세 포함 / totalPay: pay + LG(부가세 포함)
+      pay, totalPay, ex, // pay: 이삿짐센터 부가세 포함 / totalPay: pay + LG(부가세 포함) / ex: 이삿짐센터 부가세 별도
+      lgBlocked: lgBlocked.map((it) => ({ id: it.id, name: nm(it), reason: lgKind(it) === 'ac_window' ? 'window' : 'brand' })),
       calibFactor: useCalib ? calib.factor : 1, calib,
       truckLabel: truck.label, crewLabel: crewLabel(crew), tonsNeed, tonsMargin,
       volumeParts: { furnRaw, furnEff, boxes, boxM3, miscM3, items: mover.length, units: sum(mover, qtyOf) },
@@ -1121,7 +1145,7 @@
     { id: 'inventory', label: '짐 목록', short: '짐 목록', icon: '📦' },
     { id: 'estimate', label: '이사 견적', short: '견적', icon: '🧮' },
     { id: 'quotes', label: '업체 견적 비교', short: '업체 비교', icon: '📑' },
-    { id: 'lg', label: 'LG vs 이삿짐센터', short: 'LG 비교', icon: '🔌' },
+    { id: 'lg', label: 'LG·이삿짐센터 비교', short: 'LG·이삿짐센터', icon: '🔌' },
   ];
 
   /* ---------- 상태 읽기·쓰기 ---------- */
@@ -1291,6 +1315,33 @@
           ? '계수 대부분이 리서치 신뢰도 ‘낮음’이에요. 방문견적 3곳을 받으면 ‘견적으로 보정’으로 다시 맞추세요.'
           : '계수(톤당 8만원, 1인 21만원, 할증률, 품목 부피 등) 대부분이 리서치 신뢰도 ‘낮음’이에요. 방문견적 3곳을 받아 ‘업체 견적 비교’에 넣고 ‘견적으로 보정’하세요. 업체에 ‘적정가’라고 내미는 근거로 쓰지는 마세요.'));
   }
+  /* LG 불가(다른 브랜드·창문형)인데 LG 표시가 켜진 가전 → 이삿짐센터로 (되돌리기 가능).
+     견적·자금·대시보드는 이미 이삿짐센터 짐으로 계산하지만, 짐 목록의 표시도 맞춰 두면 업체·LG 예약 때 헷갈리지 않아요 */
+  function switchToMover(ids) {
+    ids = Array.from(new Set(ids || []));
+    if (!ids.length) return;
+    const names = invItems((x) => ids.includes(x.id)).map(nm);
+    const setLg = (v) => (st) => { (st.inventory || []).forEach((x) => { if (x && ids.includes(x.id)) x.lg = v; }); };
+    MV.store.update(setLg(false), { log: 'LG 불가 가전을 이삿짐센터로: ' + names.join(', ') });
+    toast(names.length === 1 ? '‘' + clip(names[0], 20) + '’ — 이삿짐센터로 바꿨어요.' : names.length + '개를 이삿짐센터로 바꿨어요.',
+      { action: { label: '되돌리기', onClick: () => MV.store.update(setLg(true), { log: 'LG 표시 되돌림: ' + names.join(', ') }) } });
+  }
+  const blockedWhy = (it) => (lgKind(it) === 'ac_window' ? '창문형 에어컨은 LG 이전설치가 필요 없어요' : '다른 브랜드로 보여요 — LG 이전설치는 LG 제품만 돼요');
+  function lgFixChip(it) {
+    return el('button', {
+      type: 'button', class: 'chip bad es-lgfix', 'data-fk': 'lgfix-' + it.id,
+      title: 'LG 표시가 켜져 있지만 ' + blockedWhy(it) + '. 견적은 이삿짐센터가 옮기는 것으로 계산했어요. 눌러서 이삿짐센터로 바꾸세요.',
+      onclick: () => switchToMover([it.id]),
+    }, '⚠ LG 불가 — 이삿짐센터로 바꾸기');
+  }
+  function lgBlockedCallout(est) {
+    const bl = (est && Array.isArray(est.lgBlocked)) ? est.lgBlocked : [];
+    if (!bl.length) return null;
+    return el('div', { class: 'callout bad es-lgblocked' },
+      el('b', '⚠ LG 불가인데 LG 표시: '), bl.map((b) => b.name).join(', '),
+      ' — LG 이전설치를 맡길 수 없어 이삿짐센터 비용에 넣어 계산했어요.',
+      el('div', { class: 'mt-8' }, el('button', { type: 'button', class: 'btn btn-sm btn-primary', 'data-fk': 'lgfix-hero', onclick: () => switchToMover(bl.map((b) => b.id)) }, '🚚 ' + bl.length + '개 이삿짐센터로 바꾸기')));
+  }
   function copyText(text, ta) {
     const done = () => toast('복사했어요. 문자·카톡에 붙여 넣으세요.');
     const fallback = () => {
@@ -1312,11 +1363,12 @@
     return region(() => {
       const est = R.est;
       const n = invItems().length;
+      // 머리말 숫자는 자금·LG 탭과 같은 ‘부가세 포함’(실제로 낼 돈)으로, 부가세 별도는 보조로
       return el('div', { class: 'view-head es-head' },
         el('div',
           el('h1', '🚚 짐·견적'),
-          el('div', { class: 'sub' }, '짐 ', el('b', n + '개'), ' · 예상 이사비 ', el('b', '약 ' + won(est.typical)),
-            ' (' + won(est.low) + '~' + won(est.high) + ', 추정치)')),
+          el('div', { class: 'sub' }, '짐 ', el('b', n + '개'), ' · 예상 이사비 ', el('b', '약 ' + won(est.pay.typical)), ' ', el('span', { class: 'es-vat' }, '부가세 포함'),
+            ' (' + won(est.pay.low) + '~' + won(est.pay.high) + ') · 부가세 별도 약 ' + won(est.ex.typical) + ' · 추정치')),
         R.tab === 'inventory' ? null : el('div', { class: 'actions' },
           el('button', { type: 'button', class: 'btn btn-sm', onclick: openExport }, '📋 업체에 보낼 짐 목록')));
     }, 'head');
@@ -1391,6 +1443,7 @@
     const assumed = inv.filter((it) => it.assumed).length;
     const inpS = inpNow();
     const lg = sum(inv.filter((it) => lgActive(it, inpS)), qtyOf);
+    const blocked = inv.filter((it) => lgBlockedIt(it, inpS));
     const fchips = MV.inv.FATES.map((f) => el('button', {
       type: 'button', class: 'es-fchip' + (mem.fates.has(f.id) ? ' is-on' : ''), 'data-tone': f.cls || '',
       'aria-pressed': String(mem.fates.has(f.id)), 'data-fk': 'fate-filter-' + f.id,
@@ -1406,7 +1459,12 @@
           type: 'button', class: 'es-fchip es-warnchip' + (mem.onlyAssumed ? ' is-on' : ''), 'aria-pressed': String(mem.onlyAssumed),
           'data-fk': 'assumed-filter', title: '규격이 추정치인 짐만 보기',
           onclick: () => { mem.onlyAssumed = !mem.onlyAssumed; refreshNamed(['invsum', 'invlist']); },
-        }, '⚠ 규격 확인 필요 ', el('b', assumed + '개')) : null),
+        }, '⚠ 규격 확인 필요 ', el('b', assumed + '개')) : null,
+        blocked.length ? el('button', {
+          type: 'button', class: 'es-fchip es-warnchip es-badchip', 'data-fk': 'lgfix-all',
+          title: blocked.map(nm).join(', ') + ' — LG 표시가 켜져 있지만 LG 이전설치를 맡길 수 없어요. 눌러서 이삿짐센터로 바꾸세요.',
+          onclick: () => switchToMover(blocked.map((it) => it.id)),
+        }, '⚠ LG 불가 ', el('b', blocked.length + '개'), ' — 이삿짐센터로 바꾸기') : null),
       el('div', { class: 'es-chiprow', role: 'group', 'aria-label': '처리별 보기' }, fchips));
   }
 
@@ -1543,7 +1601,8 @@
           el('td', { class: 'es-ico', title: MV.inv.cat(it.cat).label }, MV.inv.cat(it.cat).icon),
           el('td', { class: 'es-namecell' }, el('div', { class: 'es-namewrap' }, nameBtn(it),
             it.assumed ? el('span', { class: 'chip warn', title: '규격을 아직 재지 않은 추정치' }, '추정치') : null,
-            isAircon(it) && it.ac ? el('span', { class: 'chip' }, AC_LABEL[it.ac] || it.ac) : null),
+            isAircon(it) && it.ac ? el('span', { class: 'chip' }, AC_LABEL[it.ac] || it.ac) : null,
+            lgBlockedIt(it, inpL) ? lgFixChip(it) : null),
             it.note ? el('div', { class: 'es-memo', title: it.note }, clip(it.note, 80)) : null),
           el('td', fateSelect(it)),
           el('td', { class: 'num' }, qtyInput(it)),
@@ -1562,7 +1621,8 @@
       el('div',
         el('div', { class: 'es-icard-top' }, nameBtn(it),
           it.assumed ? el('span', { class: 'chip warn' }, '추정치') : null,
-          lgActive(it, inpL) ? el('span', { class: 'chip kid' }, 'LG ✓') : null),
+          lgActive(it, inpL) ? el('span', { class: 'chip kid' }, 'LG ✓') : null,
+          lgBlockedIt(it, inpL) ? lgFixChip(it) : null),
         el('div', { class: 'es-icard-ctl' }, fateSelect(it), el('label', { class: 'es-qtylab' }, '수량', qtyInput(it))),
         el('div', { class: 'es-icard-meta' },
           el('span', { class: 'es-dim' }, dimTxt(it) + 'cm'),
@@ -1570,16 +1630,17 @@
           el('span', roomTxt(it)),
           isAircon(it) && it.ac ? el('span', AC_LABEL[it.ac] || it.ac) : null,
           linkEl(it)),
-        it.note ? el('div', { class: 'es-icard-meta' }, clip(it.note, 90)) : null))));
+        it.note ? el('div', { class: 'es-icard-meta', title: it.note }, clip(it.note, 90)) : null))));
     return el('section', { class: 'card' }, info, cards);
   }
   function invBanner() {
     const est = R.est;
     return el('section', { class: 'card tint-brand es-banner' },
       el('div',
-        el('div', { class: 'small strong' }, '이 짐 목록으로 계산한 예상 이사비'),
-        el('div', el('span', { class: 'es-bnum' }, '약 ' + won(est.typical)),
-          el('span', { class: 'small es-muted' }, ' · ' + won(est.low) + '~' + won(est.high) + ' · ' + tonsLabel(est.tons) + ' · ' + est.crewLabel + ' · 짐 ' + m3(est.volume)))),
+        el('div', { class: 'small strong' }, '이 짐 목록으로 계산한 예상 이사비 (이삿짐센터)'),
+        el('div', el('span', { class: 'es-bnum' }, '약 ' + won(est.pay.typical)), ' ', el('span', { class: 'es-vat' }, '부가세 포함'),
+          el('span', { class: 'small es-muted' }, ' · ' + won(est.pay.low) + '~' + won(est.pay.high))),
+        el('div', { class: 'small es-muted' }, '부가세 별도 약 ' + won(est.ex.typical) + ' · ' + tonsLabel(est.tons) + ' · ' + est.crewLabel + ' · 짐 ' + m3(est.volume))),
       el('button', { type: 'button', class: 'btn btn-primary', onclick: () => goTab('estimate') }, '이사 견적 자세히 →'));
   }
   function renderInventory(body) {
@@ -1810,7 +1871,7 @@
   function openPaste() {
     let rows = [];
     let m = null;
-    const ta = el('textarea', { class: 'textarea es-paste-ta', placeholder: '한 줄에 하나씩 적거나 엑셀·메모에서 붙여 넣으세요.\n예) 퀸 침대 160x210x40 1개 https://…\n예) 책장, 80, 30, 180, 3\n예) 안방: 키즈 책상 https://…', 'aria-label': '붙여 넣을 짐 목록' });
+    const ta = el('textarea', { class: 'textarea es-paste-ta', placeholder: '한 줄에 하나씩 적거나 엑셀·메모에서 붙여 넣으세요.\n예) 퀸 침대 160×210×40 1개 (뒤에 제품 링크를 붙여도 돼요)\n예) 책장, 80, 30, 180, 3\n예) 안방: 키즈 책상', 'aria-label': '붙여 넣을 짐 목록' });
     const pv = el('div', { class: 'es-pv' });
     const readBtn = el('button', { type: 'button', class: 'btn btn-primary' }, '↓ 읽어 오기');
     const status = el('span', { class: 'small es-muted' }, '');
@@ -1867,7 +1928,7 @@
       draw();
     });
     const body = el('div', { class: 'stack' },
-      el('p', { class: 'small es-muted mb-0' }, '한 줄 = 짐 하나. 이름, 크기(가로×깊이×높이 — cm가 기본, 1.6m·1600mm도 돼요), 수량(‘2개’ 또는 크기 뒤 숫자), 링크를 알아서 읽어요. 크기가 없으면 비슷한 규격을 넣고 ‘추정치’로 표시해요. 줄 앞에 ‘안방:’처럼 쓰면 지금 위치로 넣어요. 엑셀 머리줄(이름·가로…)은 건너뛰어요.'),
+      el('p', { class: 'small es-muted mb-0' }, '한 줄 = 짐 하나. 이름, 크기(가로×깊이×높이 — cm가 기본, 1.6m·1600미리도 돼요), 수량(‘2개’ 또는 크기 뒤 숫자), 링크를 알아서 읽어요. 크기가 없으면 비슷한 규격을 넣고 ‘추정치’로 표시해요. 줄 앞에 ‘안방:’처럼 쓰면 지금 위치로 넣어요. 엑셀 머리줄(이름·가로…)은 건너뛰어요.'),
       ta,
       el('div', { class: 'row' }, readBtn, status),
       pv);
@@ -1988,9 +2049,10 @@
       el('div', { class: 'es-bar-ends', 'aria-hidden': 'true' }, el('span', '하한 ' + won(est.low)), pts.length ? el('span', { style: { color: 'var(--think)' } }, '| 업체 견적') : null, el('span', '상한 ' + won(est.high))),
     ];
   }
-  function quotePoints() {
+  /* basis 'inc' → 부가세 포함 환산 금액 (히어로의 범위 막대는 언제나 부가세 포함) */
+  function quotePoints(basis) {
     const raw = rawEst();
-    return quotesOf(estSt()).map((q) => normQuote(q, raw)).filter(Boolean).map((n) => n.amount);
+    return quotesOf(estSt()).map((q) => normQuote(q, raw)).filter(Boolean).map((n) => (basis === 'inc' ? n.inc : n.amount));
   }
   /* 보정 비율은 부가세 별도 금액끼리 나눠요 (견적 중앙값 ÷ 모델 기준가) — ‘부가세 더하기’를 켜고 꺼도 같은 값 */
   function calibTarget(raw, est) {
@@ -2037,7 +2099,7 @@
       applied ? el('span', { class: 'chip think' }, '적용 중 ×' + cal.factor.toFixed(2)) : el('span', { class: 'chip' }, '보정 없음')));
     if (applied) {
       const shownMed = isNum(cal.median) ? cal.median * (raw.vatIncl ? raw.vatMul : 1) : null;
-      box.appendChild(el('p', (cal.at ? MV.date.time(cal.at) + ' · ' : '') + '방문견적 ' + cal.n + '곳 중앙값' + (shownMed ? ' ' + won(shownMed) + '(' + bl + ' 기준)' : '') + '에 맞춰 모델 금액을 ×' + cal.factor.toFixed(2) + ' 했어요. 짐이나 조건을 바꾸면 같은 비율로 따라가고, ‘부가세 더하기’를 켜고 꺼도 비율은 그대로예요.'));
+      box.appendChild(el('p', (cal.at ? MV.date.time(cal.at) + ' · ' : '') + '방문견적 ' + cal.n + '곳 중앙값' + (shownMed ? ' ' + won(shownMed) + '(' + bl + ' 기준)' : '') + '에 맞춰 모델 금액을 ×' + cal.factor.toFixed(2) + ' 했어요. 짐이나 조건을 바꾸면 같은 비율로 따라가고, 부가세 포함·별도 보기를 바꿔도 비율은 그대로예요.'));
       if (!ns.length) box.appendChild(el('p', { class: 'small', style: { color: 'var(--bad)', fontWeight: '700' } }, '⚠ 보정에 쓴 견적이 지금은 하나도 없어요. 보정을 해제하는 게 좋아요.'));
       // 견적 자체가 바뀌었을 때만 ‘다시 맞추기’를 권해요 (예전 보정은 서명이 없어 견적 수로만 판단)
       const quotesChanged = ns.length > 0 && (cal.sig != null ? quoteSig(est0) !== cal.sig : cal.n !== ns.length);
@@ -2085,24 +2147,26 @@
   }
   function heroCard() {
     const est = R.est;
-    const qp = quotePoints();
+    const qp = quotePoints('inc');
     const lg = est.lgCost;
     const acInc = est.counts.acN > 0;
+    const pay = est.pay;
     return el('section', { class: 'card es-hero', 'aria-label': '예상 이사비' },
       el('div', { class: 'es-hero-grid' },
         el('div',
           el('div', { class: 'es-eyebrow' }, '이삿짐센터 예상 비용 · 추정치' + (est.calibFactor !== 1 ? ' (방문견적 보정)' : '')),
-          el('div', { class: 'es-big', title: F.won(est.typical) }, '약 ' + won(est.typical)),
-          el('div', { class: 'es-rangetxt' }, '범위 ' + won(est.low) + ' ~ ' + won(est.high)),
-          rangeBar(est, qp),
+          el('div', { class: 'es-big', title: F.won(pay.typical) + ' (부가세 포함)' }, '약 ' + won(pay.typical), el('small', '부가세 포함')),
+          el('div', { class: 'es-rangetxt' }, '범위 ' + won(pay.low) + ' ~ ' + won(pay.high)),
+          el('div', { class: 'es-exline' }, '부가세 별도 약 ' + won(est.ex.typical) + ' (' + won(est.ex.low) + ' ~ ' + won(est.ex.high) + ') — 업체 견적이 ‘부가세 별도’면 이 숫자와 비교하세요'),
+          rangeBar(pay, qp),
           el('div', { class: 'es-facts' },
             el('span', { class: 'chip' }, '📦 짐 ' + m3(est.volume)),
             el('span', { class: 'chip brand' }, '🚚 ' + est.truckLabel),
             el('span', { class: 'chip' }, '👷 ' + est.crewLabel),
             el('span', { class: 'chip' + (est.surchargePct ? ' warn' : ' good') }, '📅 ' + est.dateLabel + (est.surchargePct ? ' +' + r1(est.surchargePct) + '%' : ' 할증 없음')),
-            el('span', { class: 'chip' }, '❄️ 에어컨 ' + (acInc ? '포함 (' + est.counts.acN + '대)' : '제외')),
-            el('span', { class: 'chip', title: est.vatIncl ? '부가세 ' + fmtDec(est.coef.vat_pct) + '%를 더한 금액이에요' : '리서치 시세는 부가세 별도예요. ‘이사 조건’에서 ‘부가세 ' + fmtDec(est.coef.vat_pct) + '% 더하기’를 켜면 포함 금액으로 봐요 (부가세 포함 약 ' + won(est.pay.typical) + ')' }, '🧾 ' + basisLabel(est.vatIncl)))),
+            el('span', { class: 'chip' }, '❄️ 에어컨 ' + (acInc ? '포함 (' + est.counts.acN + '대)' : '제외')))),
         el('div', { class: 'es-hero-side' },
+          lgBlockedCallout(est),
           lg && lg.typical > 0 ? el('div', { class: 'es-lgsum' }, '🔌 LG로 옮기는 가전 ' + lg.count + '대 별도 ', el('b', '약 ' + won(lg.typical)),
             el('span', '→ 이사 전체 약 ' + won(est.totalPay.typical) + ' (부가세 포함' + (est.vatIncl ? '' : ' — 이삿짐센터 ' + won(est.pay.typical) + ' + LG') + ')')) : null,
           disclaimer(true),
@@ -2211,8 +2275,8 @@
           lun ? el('b', { style: { color: di.sohn ? 'var(--bad)' : 'var(--good)' } }, di.sohn ? '손없는날이에요 (할증·예약 경쟁 큼)' : '손없는날이 아니에요') : '날짜 유형을 직접 고르세요',
           di.holiday ? ' · ' + di.holiday : '', di.monthStart ? ' · 월초' : di.monthEnd ? ' · 월말' : ''),
         el('div', { class: 'es-note' }, di.date === '2026-11-03'
-          ? '근거: KASI 기반 음력 라이브러리로 리서치 검증자가 다시 계산 (신뢰도 높음). 11/2(월)은 음력 9/23. 일부 블로그·중국 기준 음력은 11월 손없는날을 하루씩 틀리게 안내해요.'
-          : '앱에 넣은 음력표(KASI 기반, ' + LUNAR_RANGE + ')와 공휴일표(대체공휴일 포함, 2026-08 ~ 2027-12)로 계산했어요.' +
+          ? '근거: 한국천문연구원 음력 자료 기준으로 다시 계산했어요 (신뢰도 높음). 11/2(월)은 음력 9월 23일이에요. 일부 블로그·중국 기준 음력은 11월 손없는날을 하루씩 틀리게 안내해요.'
+          : '앱에 넣은 음력표(한국천문연구원 음력 자료 기준, ' + LUNAR_RANGE + ')와 공휴일표(대체공휴일 포함, 2026-08 ~ 2027-12)로 계산했어요.' +
             (di.holidayKnown ? '' : ' 이 날짜는 공휴일표 밖이라 공휴일이면 날짜 유형을 ‘주말·공휴일’로 직접 고르세요.'), ' ', srcLinks(['lunar', 'lunarDay'])),
         di.nearby.length ? el('div', { class: 'es-sohn' }, el('span', { class: 'small strong' }, '가까운 손없는날:'),
           di.nearby.map((x) => el('span', { class: 'chip bad', title: '손없는날은 +' + r1(c.sohn_pct) + '% 안팎 비싸고 예약이 빨리 차요' }, D.fmt(x)))) : null,
@@ -2292,11 +2356,11 @@
     upd(() => {
       const est = R.est;
       const u = est.counts.acUnits;
-      const lgAc = invItems((it) => isAircon(it) && it.lg && isGoing(it, est.inputs)).reduce((s, it) => s + qtyOf(it), 0);
+      const lgAc = invItems((it) => isAircon(it) && lgActive(it, est.inputs)).reduce((s, it) => s + qtyOf(it), 0);
       setKids(acBox,
         el('div', el('b', '❄️ 에어컨 이전 (짐 목록에서 자동): '),
           est.counts.acN ? AC_T.filter((t) => u[t]).map((t) => AC_LABEL[t] + ' ' + u[t] + '대').join(', ') + ' — 이삿짐센터 협력 기사' : '이삿짐센터가 옮길 에어컨 없음'),
-        el('div', { class: 'es-note' }, lgAc ? 'LG 서비스로 옮기는 에어컨 ' + lgAc + '대는 빠져 있어요. ' : '', '누가 옮길지는 ‘LG vs 이삿짐센터’에서 정해요.'),
+        el('div', { class: 'es-note' }, lgAc ? 'LG 서비스로 옮기는 에어컨 ' + lgAc + '대는 빠져 있어요. ' : '', '누가 옮길지는 ‘LG·이삿짐센터 비교’ 탭에서 정해요.'),
         el('div', { class: 'mt-8' }, el('button', { type: 'button', class: 'btn btn-sm', onclick: () => goTab('lg') }, '🔌 누가 옮길지 정하기 →')));
     });
     card.appendChild(acBox);
@@ -2326,8 +2390,9 @@
     });
     arrSub.appendChild(fieldWrap('추가 인원 (명)', numInput('arrangeCount', { min: 1, max: 10 })));
     // 부가세율은 계산 기준에서 바꿀 수 있어 글자도 그 값을 따라감
-    const vatField = checkField('vat', '부가세 10% 더하기 (실제로 낼 돈으로 보기)');
-    upd(() => { const sp = vatField.querySelector('span'); if (sp) sp.textContent = '부가세 ' + fmtDec(coefNow().vat_pct) + '% 더하기 (실제로 낼 돈으로 보기)'; }, vatField);
+    /* 머리말·히어로는 언제나 부가세 포함(실제로 낼 돈)이에요. 이 체크는 금액 내역 표·업체 견적 비교의 기준만 바꿔요 */
+    const vatField = checkField('vat', '금액 내역·업체 비교도 부가세 포함으로 보기 (부가세 10%)');
+    upd(() => { const sp = vatField.querySelector('span'); if (sp) sp.textContent = '금액 내역·업체 비교도 부가세 포함으로 보기 (부가세 ' + fmtDec(coefNow().vat_pct) + '%)'; }, vatField);
     card.appendChild(el('div', { class: 'es-checks' },
       checkField('waste', '폐기물을 이삿짐센터에 맡기기', (v) => { wasteSub.hidden = !v; }), wasteSub,
       checkField('arrange', '정리수납 추가 인력 요청', (v) => { arrSub.hidden = !v; }), arrSub,
@@ -2355,9 +2420,14 @@
       el('div', { class: 'table-wrap' }, el('table', { class: 'tbl es-lines' },
         el('thead', el('tr', el('th', '항목'), el('th', { class: 'num es-l-lohi' }, '하한'), el('th', { class: 'num' }, '기준'), el('th', { class: 'num es-l-lohi' }, '상한'))),
         el('tbody', rows),
-        el('tfoot', el('tr', el('td', '합계'), el('td', { class: 'num es-l-lohi' }, won(est.low)),
-          el('td', { class: 'num es-l-typ' }, won(est.typical), el('span', { class: 'es-l-rng' }, won(est.low) + '~' + won(est.high))),
-          el('td', { class: 'num es-l-lohi' }, won(est.high)))))),
+        el('tfoot',
+          el('tr', el('td', '합계 ', el('span', { class: 'es-vat' }, basisLabel(est.vatIncl))), el('td', { class: 'num es-l-lohi' }, won(est.low)),
+            el('td', { class: 'num es-l-typ' }, won(est.typical), el('span', { class: 'es-l-rng' }, won(est.low) + '~' + won(est.high))),
+            el('td', { class: 'num es-l-lohi' }, won(est.high))),
+          // 부가세 별도로 보는 중이면 실제로 낼 돈(부가세 포함)을 한 줄 더 — 머리말·히어로·자금 화면과 같은 숫자
+          est.vatIncl ? null : el('tr', { class: 'es-l-pay' }, el('td', '실제로 낼 돈 ', el('span', { class: 'es-vat' }, '부가세 ' + fmtDec(est.coef.vat_pct) + '% 포함')), el('td', { class: 'num es-l-lohi' }, won(est.pay.low)),
+            el('td', { class: 'num es-l-typ' }, won(est.pay.typical), el('span', { class: 'es-l-rng' }, won(est.pay.low) + '~' + won(est.pay.high))),
+            el('td', { class: 'num es-l-lohi' }, won(est.pay.high)))))),
       est.lgCost && est.lgCost.typical > 0 ? el('p', { class: 'small es-muted mt-8 mb-0' }, '🔌 LG 서비스로 옮길 가전 ' + est.lgCost.count + '대(약 ' + won(est.lgCost.typical) + ', 부가세 포함 소비자가)는 위 금액에 없어요 — LG에 따로 내요. 둘을 더한 이사 전체는 부가세 포함 약 ' + won(est.totalPay.typical) + '이에요.') : null);
   }
   function whyCard() {
@@ -2369,7 +2439,7 @@
     const tips = [];
     if (est.next) tips.push('짐이 ' + m3(est.next.headroom) + '(박스 약 ' + est.next.boxes + '개) 넘게 늘면 ' + est.next.label + ' · ' + crewLabel(est.next.crew) + '으로 올라가 약 ' + won(est.next.delta) + ' 더 들어요. 버리기·정리로 줄이면 그만큼 아껴요.');
     if (est.inputs.fromMethod === 'ladder' && est.inputs.fromFloor <= 3 && est.inputs.fromFloor >= 2) tips.push('출발지 ' + est.inputs.fromFloor + '층 사다리차를 빼면 약 ' + won(est.lifts.from.typical - liftCost(est.inputs.fromFloor, 'elevator', est.tons, c).typical) + ' 줄일 수 있어요 (업체에 문의).');
-    if (est.counts.acN) tips.push('에어컨을 LG에 맡기면 이 표에서 빠지고 LG 요금이 따로 들어요 — ‘LG vs 이삿짐센터’에서 비교하세요.');
+    if (est.counts.acN) tips.push('에어컨을 LG에 맡기면 이 표에서 빠지고 LG 요금이 따로 들어요 — ‘LG·이삿짐센터 비교’ 탭에서 대당 요금을 비교하세요.');
     tips.push('방문견적은 3곳에서 같은 조건표(‘업체에 보낼 짐 목록’)로 받고, 부가세 포함 총액으로 비교하세요.');
     return el('section', { class: 'card es-why', 'aria-label': '왜 이 금액인가요' },
       sectionHead('💬', '왜 이 금액인가요?'),
@@ -2378,9 +2448,10 @@
           (est.lgCount ? ' LG가 옮길 가전 ' + est.lgCount + '개는 빠져요.' : '')),
         el('li', el('b', '필요 톤수'), ' = ' + m3(est.volume) + ' ÷ ' + c.m3_per_ton + '㎥/톤 = ' + r2(est.tonsNeed) + '톤, 여유 ' + c.truck_margin + '% 더해 ' + r2(est.tonsMargin) + '톤 → 위 등급인 ', el('b', est.truckLabel), ', 인원 ', el('b', est.crewLabel), '.'),
         el('li', el('b', '본비 ' + won(base)), ' = ' + tonsLabel(est.tons) + ' × ' + won(c.base_per_ton) + ' + ' + est.crew + '명 × ' + won(c.crew_day_rate) + (est.packType !== 'full' ? ' (' + (PACK_TYPES.find((p) => p.id === est.packType) || {}).label + ' 비율 적용)' : '') + '. 차량·연료·포장재와 인건비예요.'),
-        el('li', el('b', '날짜 할증 ' + (est.surchargePct ? '+' + r1(est.surchargePct) + '%' : '없음')), ' — ' + est.dateLabel + '. 할증은 본비에만 붙어요 (손없는날 ' + c.sohn_pct + '%, 주말 ' + c.weekend_pct + '%, 월말 ' + c.month_end_pct + '%, 월초 ' + c.month_start_pct + '%; 겹치면 가장 큰 값 + ' + c.multi_add_pct + '%p).'),
+        el('li', el('b', '날짜 할증 ' + (est.surchargePct ? '+' + r1(est.surchargePct) + '%' : '없음')), ' — ' + est.dateLabel + '. 할증은 본비에만 붙어요 (손없는날 ' + c.sohn_pct + '%, 주말 ' + c.weekend_pct + '%, 월말 ' + c.month_end_pct + '%, 월초 ' + c.month_start_pct + '%; 겹치면 가장 큰 값 + ' + c.multi_add_pct + '%포인트).'),
         el('li', el('b', '부대비 ' + won(sum(extras, (l) => l.typical))), extras.length ? ' = ' + extras.map((l) => l.label.replace(/\s*\(.*\)$/, '') + ' ' + won(l.typical)).join(', ') + '.' : ' — 없음.'),
-        el('li', el('b', '기준가 ' + won(est.typical)), ' — 하한은 × ' + c.range_low + ' (' + won(est.low) + '), 상한은 × ' + c.range_high + ' (' + won(est.high) + '). 업체마다 인건비·마진·당일 사정이 달라서 범위로 봐요.' + (est.calibFactor !== 1 ? ' 방문견적 중앙값에 맞춘 보정 ' + josa('×' + est.calibFactor.toFixed(2), '이/가') + ' 들어 있어요.' : ''))),
+        el('li', el('b', '기준가 ' + won(est.typical) + ' (' + basisLabel(est.vatIncl) + ')'), ' — 하한은 × ' + c.range_low + ' (' + won(est.low) + '), 상한은 × ' + c.range_high + ' (' + won(est.high) + '). 업체마다 인건비·마진·당일 사정이 달라서 범위로 봐요.' + (est.calibFactor !== 1 ? ' 방문견적 중앙값에 맞춘 보정 ' + josa('×' + est.calibFactor.toFixed(2), '이/가') + ' 들어 있어요.' : '')),
+        est.vatIncl ? null : el('li', el('b', '실제로 낼 돈 ' + won(est.pay.typical) + ' (부가세 포함)'), ' = 기준가 × ' + fmtDec(1 + est.coef.vat_pct / 100) + ' (부가세 ' + fmtDec(est.coef.vat_pct) + '%). 범위 ' + won(est.pay.low) + ' ~ ' + won(est.pay.high) + '. 리서치 시세는 부가세 별도라 더했어요 — 머리말·자금 화면은 이 숫자를 써요.')),
       el('h3', { class: 'es-h3' }, '💡 이렇게 하면 달라져요'),
       el('ul', { class: 'es-tips' }, tips.map((t) => el('li', t))),
       est.notes.length ? el('div', { class: 'callout mt-12' }, el('ul', { class: 'es-tips', style: { marginTop: 0 } }, est.notes.map((n) => el('li', n)))) : null);
@@ -2573,12 +2644,13 @@
       sectionHead('🧮', '모델 기준', '같은 조건으로 계산한 추정치',
         el('button', { type: 'button', class: 'btn btn-sm btn-ghost', onclick: () => goTab('estimate') }, '조건 바꾸기 →')),
       el('div', { class: 'es-qref' },
-        el('span', { class: 'es-qref-big' }, '약 ' + won(est.typical)),
+        el('span', { class: 'es-qref-big' }, '약 ' + won(est.typical)), el('span', { class: 'es-vat' }, basisLabel(est.vatIncl)),
+        est.vatIncl ? null : el('span', { class: 'small strong' }, '부가세 포함 약 ' + won(est.pay.typical)),
         el('span', { class: 'small es-muted' }, won(est.low) + ' ~ ' + won(est.high) + ' · ' + est.truckLabel + ' · ' + est.crewLabel +
           ' · 사다리차 ' + (est.parts.ladder > 0 ? '포함' : '없음') + ' · 에어컨 ' + (est.counts.acN ? est.counts.acN + '대 포함' : '제외'))),
       el('div', { class: 'mt-12' }, calibBox(false)),
       el('p', { class: 'small es-muted mt-8 mb-0' }, '업체 견적에 빠진 항목(사다리차·에어컨 등)은 모델 금액을 더해 ‘같은 조건 환산’으로 비교해요. 부가세도 모델과 같은 기준으로 맞춰요 — 지금 모델은 ',
-        el('b', basisLabel(est.vatIncl)), est.vatIncl ? ' 금액이라 ‘부가세 별도’ 견적에 ' + r1(est.coef.vat_pct) + '%를 더해요.' : ' 시세라 ‘부가세 포함’ 견적에서 부가세를 빼고 비교해요. 실제로 낼 돈은 ‘이사 견적’에서 ‘부가세 ' + fmtDec(est.coef.vat_pct) + '% 더하기’를 켜면 보여요.'));
+        el('b', basisLabel(est.vatIncl)), est.vatIncl ? ' 금액이라 ‘부가세 별도’ 견적에 ' + r1(est.coef.vat_pct) + '%를 더해요.' : ' 시세라 ‘부가세 포함’ 견적에서 부가세를 빼고 비교해요. 부가세 포함으로 비교하려면 ‘이사 견적’ 탭의 ‘금액 내역·업체 비교도 부가세 포함으로 보기’를 켜세요.'));
   }
   function quotesCompare() {
     const est = R.est;
@@ -2768,7 +2840,7 @@
     body.appendChild(grid);
   }
 
-  /* ======================= 4) LG vs 이삿짐센터 ======================= */
+  /* ======================= 4) LG·이삿짐센터 비교 ======================= */
   /* 견적 계산(isGoing)과 같은 규칙: ‘가져감’ + (‘미정도 가져가는 것으로 계산’이 켜져 있으면) ‘미정’ — lgCost 와 목록이 늘 같은 가전 */
   function lgCandidates() { const inp = inpNow(); return invItems((it) => isGoing(it, inp) && isApplianceLike(it)); }
   function lgScenarios() {
@@ -2794,7 +2866,7 @@
         el('div',
           el('h3', '✅ LG가 해 주는 것'),
           el('ul',
-            el('li', '철거 → 운송 → 재설치를 한 번에 (실제 작업은 물류 협력사 LX판토스 설치 기사)'),
+            el('li', '철거 → 운송 → 재설치를 한 번에 (실제 작업은 LG 물류 협력사인 판토스의 설치 기사)'),
             el('li', '대상: 에어컨, TV, 냉장고, 세탁기, 건조기, 워시타워, 정수기, 빌트인'),
             el('li', 'LG가 직접 운송하니 이삿짐센터는 그 가전을 안 옮겨요 → 견적에서 빠져요'),
             el('li', '2개 이상이면 철거·설치비 10% 할인 (에어컨·정수기·빌트인 제외, 2차 출처)'))),

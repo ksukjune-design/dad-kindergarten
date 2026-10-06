@@ -14,8 +14,14 @@
    상태   MV.store.ensure('finance', defaults) — 화면의 모든 숫자는 고칠 수 있고 '기본값으로 되돌리기' 가능
           finance.links { 'prot-키' | 'prep-키' | 'doc-키': 체크리스트 항목 id } — 한 줄은 늘 항목 하나에만 연결
           금액 칸은 저장 전에 검사(음수·'1억abc' 거부), 1회 한도 초과 이체는 단계 카드에 빨간 경고
-   계산   MV.calc.financeSummary(state) → { inflow, outflow, leftover, expensesTotal(아직 낼 이사비),
-          expensesAll, expensesPaid, refunds, net, warnings:[{text, level}] } — 순수 함수 (대시보드가 호출)
+          finance.budget.lines[].group 'essential'(꼭 드는 이사 비용) | 'purchase'(새로 사는 살림) | 'optional'(선택·나중에)
+          — 없으면 줄 id 로 정함(GROUP_OF), 직접 추가한 줄은 'purchase'. 줄마다 '묶음'에서 옮길 수 있음
+   계산   MV.calc.financeSummary(state) → { inflow, outflow, leftover, expensesTotal(아직 낼 이사비 전부),
+          expensesAll, expensesPaid, refunds, net(= 남는 돈 − 아직 낼 돈 전부),
+          essentialUnpaid, purchaseUnpaid, optionalUnpaid (묶음별 아직 낼 돈),
+          netEssential(= 남는 돈 − 꼭 드는 이사 비용: 11/3 전후 현금 여유/부족 — 머리 숫자),
+          netWithPurchases(= 남는 돈 − 꼭 드는 비용 − 살림), rentPart(11/3에 함께 내는 월세),
+          warnings:[{text, level}] } — 순수 함수 (대시보드가 호출)
    근거   리서치 검증본 finance_verified.json (2026-10-06). 규칙·요율 옆에 신뢰도와 짧은 근거,
           신뢰도가 높지 않으면 '세무사·은행 확인 권장' 표시.
    다시 그리기
@@ -63,6 +69,15 @@
   const eok = (n) => F.eok(n);
   const signedKrw = (n) => (n > 0 ? '+' : n < 0 ? '−' : '') + F.krw(Math.abs(n));
   const signedEok = (n) => (n > 0 ? '+' : n < 0 ? '−' : '') + F.eok(Math.abs(n));
+  /* 받침에 맞는 조사 ('을'/'를', '으로'/'로') — 마지막 한글 글자 기준, 한글이 없으면 '을(를)' */
+  function jo(w, pair) {
+    const m = String(w == null ? '' : w).match(/[가-힣](?=[^가-힣]*$)/);
+    if (!m) return { 을: '을(를)', 으로: '(으)로' }[pair] || '';
+    const jong = (m[0].charCodeAt(0) - 0xAC00) % 28;
+    if (pair === '으로') return jong && jong !== 8 ? '으로' : '로';
+    return jong ? '을' : '를';
+  }
+  const verdictTxt = (n) => (n < 0 ? '부족 ' : '여유 ') + F.krw(Math.abs(n));
   const signedWon = (n) => (n > 0 ? '+' : n < 0 ? '−' : '') + F.won(Math.abs(n));
   const pctTxt = (x, d) => {
     if (!isNum(x)) return '-';
@@ -70,6 +85,8 @@
     if (s.indexOf('.') >= 0) s = s.replace(/\.?0+$/, '');
     return s + '%';
   };
+  /* '11월' — 이사일이 속한 달 (월세 메모·안내용) */
+  const monthTxt = (s) => { const d = D.parse(s); return d ? (d.getMonth() + 1) + '월' : '이번 달'; };
   const moveDateOf = (state) => (state && state.meta && D.valid(state.meta.moveDate) ? state.meta.moveDate : '2026-11-03');
   function addMonths(s, n) {
     const d = D.parse(s);
@@ -150,12 +167,12 @@
     wooriLoan: { label: '우리은행 우리전세론', url: 'https://spib.wooribank.com/pib/Dream?withyou=PSLON0275' },
     loanInfo: { label: '우리전세론 상품 정리', url: 'https://bankserch.com/%EC%9A%B0%EB%A6%AC%EC%9D%80%ED%96%89-%EC%A0%84%EC%84%B8%EC%9E%90%EA%B8%88%EB%8C%80%EC%B6%9C-%EC%9A%B0%EB%A6%AC%EC%A0%84%EC%84%B8%EB%A1%A0%EC%A3%BC%ED%83%9D%EA%B8%88%EC%9C%B5%EB%B3%B4%EC%A6%9D/' },
     hf: { label: '주택금융공사 전세자금보증', url: 'https://www.hf.go.kr/ko/sub02/sub02_01_02.do' },
-    taxlyRate: { label: '가족 차용 최저 이자율 (taxly)', url: 'https://taxly.kr/post/1667-증여세-가족-등-타인으로부터-차용시-세법상-문제가-없는-가장-낮은-이자율-적용방법' },
-    taxlyLoan: { label: '가족 간 전세금 차용 상담 (taxly)', url: 'https://taxly.kr/qna/140409-가족간-전세금-차용시-기간-및-이자율-문의' },
-    taxlyGift: { label: '가족 간 전세자금 차용과 증여세 (taxly)', url: 'https://taxly.kr/qna/16208-가족간-전세자금-차용시-증여세-문제' },
-    taxlyNote: { label: '부모 차용증 이자 설정 (taxly)', url: 'https://taxly.kr/qna/133077-부모자식간-차용증-이자-설정에-관하여' },
+    taxlyRate: { label: '가족 차용 최저 이자율 (세무 상담 글)', url: 'https://taxly.kr/post/1667-증여세-가족-등-타인으로부터-차용시-세법상-문제가-없는-가장-낮은-이자율-적용방법' },
+    taxlyLoan: { label: '가족 간 전세금 차용 상담 (세무 상담 글)', url: 'https://taxly.kr/qna/140409-가족간-전세금-차용시-기간-및-이자율-문의' },
+    taxlyGift: { label: '가족 간 전세자금 차용과 증여세 (세무 상담 글)', url: 'https://taxly.kr/qna/16208-가족간-전세자금-차용시-증여세-문제' },
+    taxlyNote: { label: '부모 차용증 이자 설정 (세무 상담 글)', url: 'https://taxly.kr/qna/133077-부모자식간-차용증-이자-설정에-관하여' },
     transtax: { label: '차용 이자율 계산 사례', url: 'https://m.cafe.daum.net/transtax/PpOm/289' },
-    hugCompare: { label: 'HF·SGI 보증료 비교', url: 'https://safehomes.kr/insights/kn-20260713-1608-hf-전세보증금반환보증-sgi서울보증과-보증료-비교/' },
+    hugCompare: { label: 'HF·서울보증보험(SGI) 보증료 비교', url: 'https://safehomes.kr/insights/kn-20260713-1608-hf-전세보증금반환보증-sgi서울보증과-보증료-비교/' },
     hug: { label: 'HUG 주택도시보증공사', url: 'https://www.khug.or.kr' },
     rtms: { label: '부동산거래관리시스템 (임대차 신고)', url: 'https://rtms.molit.go.kr' },
     iros: { label: '인터넷등기소', url: 'https://www.iros.go.kr' },
@@ -226,18 +243,31 @@
   /* ======================= 기본값 ======================= */
   const DEFAULT_TIMES = { bankA: '09:20', recv: '09:30', keys: '09:45', registry: '10:00', toC: '10:15', broker: '10:40', bank: '11:00', movein: '14:00' };
   const LINE_META = {
-    mover: { auto: 'mover', low: 1500000, high: 2800000, conf: 'low', basis: '서울 20평대 3인 포장이사 150만~280만원, 모델 기준가 197만원(에어컨 제외). 방문견적 3곳으로 다시 맞추기' },
+    mover: { auto: 'mover', low: 1500000, high: 2800000, conf: 'low', basis: '서울 20평대 3인 포장이사 약 150만~280만원(부가세 별도 시세), 모델 기준가 197만원(에어컨 제외). 예산에는 실제로 낼 돈(부가세 포함)을 넣어요. 방문견적 3곳으로 다시 맞추기' },
     lg: { auto: 'lg', low: 300000, high: 800000, conf: 'low', basis: 'LG 이전설치: 냉장고 약 12만·건조기 약 11만(2개 이상 10% 할인)·운송비 약 4만원, 스탠드 에어컨 31.8만원(2025-11 기준). 1544-7777 확인' },
-    clean: { low: 300000, high: 450000, conf: 'low', basis: '입주청소 30만~45만원 (24평 안팎)' },
-    wardrobe: { low: 500000, high: 2000000, conf: 'low', basis: '옷장 50만~200만원 — 붙박이장이 없어져 필요. 이사 후 실측하고 사도 돼요' },
+    clean: { low: 300000, high: 450000, conf: 'low', basis: '입주청소 30만~45만원 (24평 안팎). 직접 청소하면 0원 — 사전방문 때 집 상태를 보고 정해요' },
+    wardrobe: { low: 500000, high: 2000000, conf: 'low', basis: '옷장 50만~200만원 — 붙박이장이 없어져 꼭 필요해요. 사전방문(10/10~10/11) 때 실측 → 집주인 벽 고정 동의 10/14까지 → 10/18까지 주문 → 설치는 이사 후 11/4~11/6 (선반입이 되면 11/2)' },
     washer: { low: 600000, high: 1100000, conf: 'low', basis: '통돌이 세탁기 60만~110만원. 고장 세탁기는 폐가전 무상방문수거(1599-0903)' },
     waste: { auto: 'waste', low: 0, high: 100000, conf: 'low', basis: '대형폐기물 스티커 품목당 약 1.5만원(강서구 단가표 확인). 폐가전은 무상수거' },
     elevator: { auto: 'elevator', low: 0, high: 200000, conf: 'low', basis: '단지당 0~10만원, 관리사무소마다 달라요 — 두 관리사무소에 확인' },
     internet: { low: 0, high: 50000, conf: 'low', basis: '통신사 이전설치비(보통 수만원 이내) — 통신사에 확인' },
-    hug: { auto: 'hug', optional: true, low: 736000, high: 819200, conf: 'mid', basis: 'HUG 아파트 요율 연 약 0.115~0.128% × 2년 (3.2억이면 약 74만~82만원). 2025~2026 개편 여부는 신청 화면에서 확인' },
-    deco: { low: 200000, high: 600000, conf: 'low', basis: '커튼·소품 20만~60만원' },
+    hug: { auto: 'hug', optional: true, low: 736000, high: 819200, conf: 'mid', basis: 'HUG 아파트 요율 연 약 0.115~0.128% × 2년 (3.2억이면 약 74만~82만원). 전입·확정일자 뒤 11월 중 가입할 때 내는 돈이라 11/3 당일 현금과는 따로예요. 2025~2026 개편 여부는 신청 화면에서 확인' },
+    deco: { low: 200000, high: 600000, conf: 'low', basis: '커튼·소품 20만~60만원. 사전방문 때 창 치수를 재서 안방·아이방 커튼(또는 블라인드)만 10/25까지 주문해 이사 날 달고, 나머지는 살아 보며 천천히' },
     reserve: { low: 0, high: 500000, conf: 'low', basis: '예상 못 한 지출 대비 (배관 연장, 실외기 앵글, 추가 인력 등)' },
   };
+  /* 예산 묶음 — 11/3 전후에 꼭 현금이 필요한 돈과 살림 구입·선택 항목을 나눠 봄 */
+  const GROUPS = [
+    { id: 'essential', icon: '🚚', label: '꼭 드는 이사 비용', short: '꼭 드는 비용', what: '이사 날 전후로 반드시 나가는 돈 — 11/3 남는 돈으로 낼 수 있어야 해요',
+      desc: '이사 날 전후로 반드시 나가는 돈이에요 (이사업체, LG 가전 이전, 엘리베이터 사용료, 대형폐기물, 인터넷 이전). 11/3에 남는 돈으로 이걸 낼 수 있는지가 가장 중요해요.' },
+    { id: 'purchase', icon: '🛒', label: '새로 사는 살림', short: '살림 구입', what: '새로 사는 물건 — 필요하지만 카드 할부로 나눠 낼 수 있어요',
+      desc: '이사비가 아니라 새로 사는 물건이에요 (붙박이장 대신 옷장, 고장 난 세탁기 대신 통돌이, 커튼·소품). 필요하지만 카드 할부로 나눠 낼 수 있어요.' },
+    { id: 'optional', icon: '🗂', label: '선택·나중에', short: '선택·나중에', what: '안 해도 되거나 이사 뒤에 내는 돈 (HUG 보증료는 전입 후 11월 중 가입할 때 내요)',
+      desc: '안 해도 되거나(입주청소) 이사 뒤에 내는 돈(HUG 보증료는 전입 후 11월 중 가입할 때), 혹시 몰라 잡아 둔 예비비예요.' },
+  ];
+  const GROUP_BY_ID = {};
+  GROUPS.forEach((g) => { GROUP_BY_ID[g.id] = g; });
+  const GROUP_OF = { mover: 'essential', lg: 'essential', elevator: 'essential', waste: 'essential', internet: 'essential', wardrobe: 'purchase', washer: 'purchase', deco: 'purchase', clean: 'optional', hug: 'optional', reserve: 'optional' };
+  const groupOf = (l) => (l && GROUP_BY_ID[l.group] ? l.group : (l && GROUP_OF[l.id]) || 'purchase');
   const REFUND_META = {
     jangsu: { conf: 'mid', basis: '공동주택관리법 시행령 제31조 — 세입자가 낸 장기수선충당금은 소유자에게 돌려받을 수 있어요(약 20만~50만원 추정). 관리사무소 납부확인서로 금액 확정' },
     hfFee: { conf: 'low', basis: 'HF 보증 해지 때 남은 기간 보증료가 돌려받는지 은행에 확인' },
@@ -246,6 +276,7 @@
     const o = Object.assign({ id: MV.uid('bl'), label: '새 항목', amount: 0, auto: true, on: true, paid: false, date: '', memo: '' }, l && typeof l === 'object' ? l : {});
     o.amount = num(o.amount);
     o.label = String(o.label == null ? '' : o.label);
+    o.group = groupOf(o); /* 예전 기록(묶음 없음)은 줄 id 로 채움, 직접 추가한 줄은 '새로 사는 살림' */
     return o;
   }
   function normRefund(l) {
@@ -256,7 +287,7 @@
   }
   function defaultLines() {
     return [
-      { id: 'mover', label: '이사업체 (포장이사)', amount: 1970000 },
+      { id: 'mover', label: '이사업체 (포장이사)', amount: 2167000 },
       { id: 'lg', label: 'LG 가전 이전설치', amount: 565000 },
       { id: 'clean', label: '입주청소', amount: 380000 },
       { id: 'wardrobe', label: '옷장 구매', amount: 1000000 },
@@ -377,12 +408,17 @@
     return eok(sp.size) + ' × ' + (sp.n - 1) + '번' + (sp.last !== sp.size ? ' + 마지막 ' + eok(sp.last) : ' + 1번 더');
   }
 
-  function computeFlow(f) {
+  function computeFlow(f, move) {
     const direct = f.loan.lien === 'exists';
     const payoff = nn(f.loan.payoff);
     const receive = nn(f.old.receive);
     const rentPart = f.newHome.rentOnMoveDay ? nn(f.newHome.rent) : 0;
-    const cTotal = nn(f.newHome.balance) + rentPart + nn(f.newHome.extraToC);
+    const balanceC = nn(f.newHome.balance), extraC = nn(f.newHome.extraToC);
+    const cTotal = balanceC + rentPart + extraC;
+    /* C에게 보내는 돈은 잔금·월세·기타를 따로 이체 (영수증도 나눠 받게) — 1회 한도로는 잔금만 나눔 */
+    const partsC = [{ key: 'balance', label: '잔금', amount: balanceC }];
+    if (rentPart) partsC.push({ key: 'rent', label: '월세', amount: rentPart, sep: true, memo: monthTxt(move) + ' 월세' });
+    if (extraC) partsC.push({ key: 'extra', label: '기타', amount: extraC, sep: true });
     const broker = nn(f.broker.planned);
     const perTx = pos(f.flow.limits && f.flow.limits.perTx);
     const daily = pos(f.flow.limits && f.flow.limits.daily);
@@ -400,22 +436,34 @@
         id, kind: STEP_KIND[id], amount: amountOf[id] != null ? amountOf[id] : null,
         /* 사용자가 비운 시각('')은 그대로 비워 둠 — 저장된 값이 없을 때만 기본 시각 */
         time: typeof tv === 'string' ? tv : (DEFAULT_TIMES[id] || ''),
-        done: !!(f.flow.done && f.flow.done[id]), warnings: [], chunks: null, split: null, splitN: 1,
+        done: !!(f.flow.done && f.flow.done[id]), warnings: [], chunks: null, split: null, splitN: 1, seps: [], txCount: 0, partLabel: '',
       };
       if (s.done) doneCount++;
       if (s.kind === 'in') {
         if (s.amount < 0) s.warnings.push({ level: 'bad', text: '받을 돈이 0원보다 적어요 — 대출 완제액이 A가 줄 돈보다 커요. 금액을 다시 확인하세요.' });
         bal += s.amount; inSum += s.amount;
       } else if (s.kind === 'out') {
-        bal -= s.amount; outSum += s.amount; maxOut = Math.max(maxOut, s.amount);
-        s.split = splitInfo(s.amount, txLimit);
-        s.splitN = s.split.n;
+        /* 이체 묶음: C에게는 잔금·월세·기타를 따로, 나머지는 한 건. 1회 한도로 나누는 건 묶음마다 */
+        const parts = id === 'toC' ? partsC : [{ key: 'main', label: '', amount: s.amount }];
+        const main = parts[0];
+        const big = Math.max.apply(null, parts.map((p) => p.amount));
+        bal -= s.amount; outSum += s.amount; maxOut = Math.max(maxOut, big);
+        s.split = splitInfo(main.amount, txLimit);
+        s.splitN = s.split.n;       // 첫 묶음(잔금)을 1회 한도 때문에 나누는 횟수
         s.chunks = s.split.chunks;
+        s.partLabel = main.label;   // '잔금' (C) / '' (그 밖)
+        s.seps = parts.slice(1).map((p) => Object.assign({}, p, { split: splitInfo(p.amount, txLimit) }));
+        s.txCount = s.splitN + sum(s.seps, (p) => p.split.n);
         if (bal < 0) s.warnings.push({ level: 'bad', text: '이 단계에서 잔액이 ' + won(-bal) + ' 모자라요 — 보내기 전에 입금부터 확인하세요.' });
-        if (perTx && s.amount > perTx) {
-          s.warnings.push({ level: 'bad', split: true, text: '한 번에 못 보내요: 1회 한도(' + krw(perTx) + ')보다 ' + won(s.amount - perTx) + ' 많아요 → ' + timesTxt(s.splitN) + ' 나눠 보내세요 (매번 ' + krw(perTx) + ' 이하).' });
-          if (s.splitN > SPLIT_LIST) s.warnings.push({ level: 'warn', split: true, text: (s.splitN > 99 ? '100번 넘게' : s.splitN + '번이나') + ' 나눠 보내면 실수·지연 위험이 커요 → 1회 한도를 1억(OTP 보안1등급)으로 올리거나 창구(평일 09~16시)에서 한 번에 보내세요.' });
-        } else if (!perTx && s.amount > txLimit) s.warnings.push({ level: 'info', text: '1회 한도를 아직 몰라서 1억 기준으로 나눴어요 (OTP 보안1등급 기준).' });
+        const over = perTx ? parts.filter((p) => p.amount > perTx) : [];
+        if (over.length) {
+          over.forEach((p) => {
+            const n = splitInfo(p.amount, perTx).n;
+            const who = p.label ? p.label + jo(p.label, '을') + ' ' : '';
+            s.warnings.push({ level: 'bad', split: true, text: (who ? who + '한 번에 못 보내요' : '한 번에 못 보내요') + ': 1회 한도(' + krw(perTx) + ')보다 ' + won(p.amount - perTx) + ' 많아요 → ' + timesTxt(n) + ' 나눠 보내세요 (매번 ' + krw(perTx) + ' 이하).' });
+            if (n > SPLIT_LIST) s.warnings.push({ level: 'warn', split: true, text: (n > 99 ? '100번 넘게' : n + '번이나') + ' 나눠 보내면 실수·지연 위험이 커요 → 1회 한도를 1억(OTP 보안1등급)으로 올리거나 창구(평일 09~16시)에서 한 번에 보내세요.' });
+          });
+        } else if (!perTx && big > txLimit) s.warnings.push({ level: 'info', text: '1회 한도를 아직 몰라서 1억 기준으로 나눴어요 (OTP 보안1등급 기준).' });
         if (daily && outSum > daily && outSum - s.amount <= daily) s.warnings.push({ level: 'bad', text: '여기서 1일 이체한도(' + krw(daily) + ')를 넘어요 — 한도를 올리거나 창구에서 이체하세요.' });
       }
       s.balance = bal;
@@ -471,7 +519,7 @@
         const p = (est.pay && isNum(est.pay.typical) && est.pay.typical > 0) ? est.pay : est;
         return { value: Math.round(p.typical / 1000) * 1000, src: 'est', note: '짐·견적 화면 계산값 · 부가세 포함' + (isNum(p.low) && isNum(p.high) ? ' (범위 ' + krw(p.low) + '~' + krw(p.high) + ')' : '') };
       }
-      return { value: 1970000, src: 'research', note: '리서치 모델 기준가 (에어컨 제외) — 짐·견적 계산이 생기면 자동으로 바뀌어요' };
+      return { value: 2167000, src: 'research', note: '리서치 모델 기준가 197만원 + 부가세 10% (에어컨 제외) — 짐·견적 계산이 생기면 자동으로 바뀌어요' };
     }
     if (kind === 'lg') {
       const c = est && est.lgCost;
@@ -502,14 +550,22 @@
       const meta = LINE_META[l.id] || null;
       const a = meta && meta.auto ? autoAmount(meta.auto, f, state, est) : null;
       const isAuto = !!(a && l.auto !== false);
-      return Object.assign({}, l, { meta, autoInfo: a, isAuto, value: isAuto ? a.value : num(l.amount), on: l.on !== false });
+      return Object.assign({}, l, { meta, autoInfo: a, isAuto, value: isAuto ? a.value : num(l.amount), on: l.on !== false, group: groupOf(l) });
     });
     const active = lines.filter((l) => l.on);
     const total = sum(active, (l) => l.value);
     const paid = sum(active.filter((l) => l.paid), (l) => l.value);
     const refunds = f.budget.refunds;
+    /* 묶음별 합계 (꺼 둔 줄은 빼고) */
+    const groups = {};
+    GROUPS.forEach((g) => {
+      const gl = active.filter((l) => l.group === g.id);
+      const gt = sum(gl, (l) => l.value);
+      const gp = sum(gl.filter((l) => l.paid), (l) => l.value);
+      groups[g.id] = { id: g.id, total: gt, paid: gp, unpaid: gt - gp, count: gl.length, labels: gl.map((l) => l.label).filter(Boolean) };
+    });
     return {
-      lines, total, paid, unpaid: total - paid, count: active.length,
+      lines, total, paid, unpaid: total - paid, count: active.length, groups,
       refunds, refundsTotal: sum(refunds, (r) => r.amount), refundsPending: sum(refunds.filter((r) => !r.got), (r) => r.amount),
     };
   }
@@ -824,8 +880,16 @@
     if (badChecks.length) {
       A.push({ id: 'recon', level: 'warn', tab: 'sources', anchor: 'fn-recon', text: '돈의 출처·쓰임 검산에서 ' + badChecks.length + '곳이 맞지 않아요: ' + badChecks[0].label });
     }
-    if (c.net < 0) {
-      A.push({ id: 'budget', level: 'warn', tab: 'budget', anchor: 'fn-budget-sum', text: '이사비까지 내면 ' + krw(-c.net) + ' 부족해요 — 예산 탭에서 메우는 방법을 보세요.' });
+    /* 예산: '부족' 하나로 뭉뚱그리지 않고, 11/3 전후 꼭 드는 이사 비용 기준으로 먼저 알림 */
+    const BG = c.budget.groups;
+    if (c.netEssential < 0) {
+      A.push({ id: 'budget', level: 'warn', tab: 'budget', anchor: 'fn-budget-sum',
+        text: '꼭 드는 이사 비용(' + krw(BG.essential.unpaid) + ')까지 내면 ' + D.fmt(c.move) + ' 전후 현금이 ' + krw(-c.netEssential) + ' 부족해요' +
+          (c.flow.rentPart ? ' (월세를 계약서대로 후불로 내면 ' + krw(c.flow.rentPart) + '이 덜 나가요)' : '') + ' — 예산 탭에서 메우는 방법을 보세요.' });
+    } else if (c.net < 0) {
+      A.push({ id: 'budget', level: 'info', tab: 'budget', anchor: 'fn-budget-sum',
+        text: '꼭 드는 이사 비용은 ' + D.fmt(c.move) + ' 남는 돈으로 낼 수 있어요 (여유 ' + krw(c.netEssential) + '). ' +
+          (c.netWithPurchases < 0 ? '옷장·세탁기 같은 살림까지 사면 ' + krw(-c.netWithPurchases) + ' 모자라요 — 카드 할부 등으로 나눠 내세요.' : '선택·나중에 항목까지 모두 내면 ' + krw(-c.net) + ' 모자라요.') });
     }
     if (c.broker.verdict === 'under' && !f.broker.agreed) {
       A.push({ id: 'brokerUnder', level: 'info', tab: 'tax', anchor: 'fn-broker',
@@ -843,9 +907,15 @@
     let est = null;
     try { est = (MV.calc && typeof MV.calc.moveEstimate === 'function') ? MV.calc.moveEstimate(state) : null; } catch (e) { est = null; }
     if (est && typeof est !== 'object') est = null;
-    const flow = computeFlow(f);
+    const flow = computeFlow(f, move);
     const budget = computeBudget(f, state, est);
-    const c = { f, est, today, move, flow, budget, net: flow.leftover - budget.unpaid };
+    const G = budget.groups;
+    const c = {
+      f, est, today, move, flow, budget,
+      net: flow.leftover - budget.unpaid,                                   // 전부 포함
+      netEssential: flow.leftover - G.essential.unpaid,                     // 11/3 전후 꼭 필요한 현금 기준
+      netWithPurchases: flow.leftover - G.essential.unpaid - G.purchase.unpaid, // 살림 구입까지
+    };
     c.broker = computeBroker(f);
     c.gift = computeGift(f, today);
     c.rentCredit = computeRentCredit(f, move);
@@ -870,6 +940,12 @@
       refunds: c.budget.refundsTotal,
       net: c.net,
       netWithRefunds: c.net + c.budget.refundsTotal,
+      essentialUnpaid: c.budget.groups.essential.unpaid,
+      purchaseUnpaid: c.budget.groups.purchase.unpaid,
+      optionalUnpaid: c.budget.groups.optional.unpaid,
+      netEssential: c.netEssential,
+      netWithPurchases: c.netWithPurchases,
+      rentPart: c.flow.rentPart,
       mode: c.flow.direct ? 'direct' : 'self',
       steps: c.flow.steps.map((s) => ({ id: s.id, kind: s.kind, title: stepTitle(s.id, c), amount: s.amount, time: s.time, done: s.done, balance: s.balance })),
       warnings: c.alerts.filter((a) => a.level !== 'info').map((a) => ({ text: a.text, level: a.level })),
@@ -918,7 +994,9 @@
       case 'toC': return [
         '계약서 특약에 적힌 C 본인 명의 계좌로만',
         '계좌를 바꾸자는 연락이 오면 무조건 멈추고 C와 직접 통화',
-        '보증금 잔금과 월세를 나눠 적은 영수증 받기',
+        fl.rentPart
+          ? '월세 ' + krw(fl.rentPart) + '은 잔금과 따로 이체(메모 "' + monthTxt(c.move) + ' 월세")하고, 영수증도 잔금·월세를 나눠 받기'
+          : '잔금 영수증 받기 (월세는 계약서대로 ' + D.fmt(addMonths(c.move, 1)) + '부터 후불)',
         '처음 보내는 계좌라 이상거래탐지로 보류될 수 있어요 → 전날 예금주 조회',
       ];
       case 'broker': return [
@@ -1646,10 +1724,14 @@ div.fn-alert { cursor: default; }
     return [
       tile('is-in', D.fmt(c.move) + ' 받을 돈', eok(fl.inflow), fl.direct ? 'A가 대출을 직접 갚고 남은 돈' : 'A → 내 통장', won(fl.inflow)),
       tile('is-out', D.fmt(c.move) + ' 보낼 돈', eok(fl.outflow), fl.direct ? 'C 잔금 · 중개보수' : 'C 잔금 · 중개보수 · 대출 완제', won(fl.outflow)),
-      tile('', '그날 남는 돈', krw(fl.leftover), '받을 돈 − 보낼 돈', won(fl.leftover)),
-      tile('', '이사비 (아직 낼 돈)', krw(b.unpaid), '예산 ' + krw(b.total) + (b.paid ? ' 중 ' + krw(b.paid) + ' 냄' : ''), won(b.unpaid)),
-      tile('is-final' + (c.net < 0 ? ' is-neg' : ''), c.net < 0 ? '⚠ 최종 부족' : '최종 여유', krw(Math.abs(c.net)),
-        '남는 돈 − 이사비' + (b.refundsTotal ? ' · 들어올 돈 ' + krw(b.refundsTotal) + ' 별도' : ''), won(c.net)),
+      tile('', '그날 남는 돈', krw(fl.leftover), '받을 돈 − 보낼 돈' + (fl.rentPart ? ' (월세 ' + krw(fl.rentPart) + ' 포함해 뺌)' : ''), won(fl.leftover)),
+      tile('', D.fmt(c.move) + ' 전후 꼭 필요한 현금', krw(b.groups.essential.unpaid), '꼭 드는 이사 비용 (이사업체·가전 이전 등, 아직 낼 돈)', won(b.groups.essential.unpaid)),
+      el('div', { class: 'fn-stat is-final' + (c.netEssential < 0 ? ' is-neg' : '') },
+        el('span', { class: 'fn-stat-k' }, c.netEssential < 0 ? '⚠ 꼭 드는 비용 내면 부족' : '꼭 드는 비용 내고 여유'),
+        el('span', { class: 'fn-stat-v', title: won(c.netEssential) }, krw(Math.abs(c.netEssential))),
+        el('span', { class: 'fn-stat-s' }, '살림 구입까지 포함하면 ', el('b', verdictTxt(c.netWithPurchases))),
+        el('span', { class: 'fn-stat-s' }, '전부 포함하면 ', el('b', verdictTxt(c.net)), ' · ',
+          el('a', { href: '#/money/budget', onclick: P.tabLink('budget', 'fn-budget-sum') }, '예산 보기'))),
     ];
   }
 
@@ -1782,7 +1864,7 @@ div.fn-alert { cursor: default; }
     P.bind(() => { const d = !!cur().done; if (doneCb.checked !== d) doneCb.checked = d; });
     const body = el('div', { class: 'fn-step-body' });
     amountBlock(P, id, body);
-    body.appendChild(el('ul', { class: 'fn-notes' }, stepNotes(id, P.c).map((t) => el('li', t))));
+    body.appendChild(P.live('ul', 'fn-notes', () => stepNotes(id, P.c).map((t) => el('li', t))));
     const lk = s0.link;
     if (lk) {
       body.appendChild(el('div', { class: 'fn-prot-link fn-step-link' },
@@ -1839,7 +1921,7 @@ div.fn-alert { cursor: default; }
       const rentBox = el('div', { class: 'callout fn-rentbox fn-anchor', id: 'fn-rent' },
         P.live('p', null, () => [el('b', '📌 월세 지급일 확인 — '), '계약서상 후불이면 첫 월세는 ' + D.fmt(addMonths(P.c.move, 1)) + '. ' + D.fmt(P.c.move) + '에 ' + krw(nn(P.c.f.newHome.rent)) + '을 함께 줄지 중개사·임대인과 확인하고, 주면 영수증/문자로 남기기']),
         el('div', { class: 'row' },
-          checkbox(D.fmt(P.c.move) + '에 첫 월세 함께 지급', f.newHome.rentOnMoveDay, (v) => upd((fin) => { fin.newHome.rentOnMoveDay = v; }, { log: '자금흐름: 11/3 첫 월세 ' + (v ? '함께 지급' : '지급 안 함 (12/3부터)') }), { fk: 'rent-on' }),
+          checkbox(D.fmt(P.c.move) + '에 첫 월세도 보내기 (잔금과 따로 이체)', f.newHome.rentOnMoveDay, (v) => upd((fin) => { fin.newHome.rentOnMoveDay = v; }, { log: '자금흐름: 11/3 첫 월세 ' + (v ? '함께 지급' : '지급 안 함 (12/3부터)') }), { fk: 'rent-on' }),
           el('label', { class: 'fn-inline-money' }, el('span', { class: 'small strong' }, '월세'),
             moneyField('월세', f.newHome.rent, (v) => upd((fin) => { fin.newHome.rent = v; }), { fk: 'amt-rent', bare: true, noHint: true }))),
         checkbox('중개사·C와 확인 완료 (몇 월분인지, 다음 지급일, 마지막 달 처리 — 문자로 남김)', f.newHome.rentConfirmed, (v) => upd((fin) => { fin.newHome.rentConfirmed = v; }), { fk: 'rent-ok' }));
@@ -1851,10 +1933,12 @@ div.fn-alert { cursor: default; }
       body.appendChild(rentBox);
       body.appendChild(P.live('div', 'fn-step-body', () => {
         const fl = P.c.flow, fn = P.c.f.newHome;
-        const parts = [won(num(fn.balance))];
-        if (fl.rentPart) parts.push('월세 ' + won(fl.rentPart));
-        if (num(fn.extraToC)) parts.push('기타 ' + won(num(fn.extraToC)));
-        const out = [el('div', { class: 'fn-total' }, el('span', 'C에게 보낼 돈 합계'), el('b', { class: 'fn-amt is-out' }, won(fl.cTotal)), el('span', { class: 'fn-formula' }, parts.join(' + ')))];
+        const parts = ['잔금 ' + won(nn(fn.balance))];
+        if (fl.rentPart) parts.push('월세 ' + won(fl.rentPart) + ' (따로 이체)');
+        if (nn(fn.extraToC)) parts.push('기타 ' + won(nn(fn.extraToC)) + ' (따로 이체)');
+        /* 잔금 하나뿐이면 같은 숫자를 두 번 쓰지 않고 '잔금만'이라고만 */
+        const formula = parts.length > 1 ? parts.join(' + ') : '잔금만 · 월세는 계약서대로 ' + D.fmt(addMonths(P.c.move, 1)) + '부터 후불';
+        const out = [el('div', { class: 'fn-total' }, el('span', 'C에게 보낼 돈 합계'), el('b', { class: 'fn-amt is-out' }, won(fl.cTotal)), el('span', { class: 'fn-formula' }, formula))];
         if (fl.memoOpen) {
           out.push(el('div', { class: 'callout warn fn-anchor', id: 'fn-memo' },
             el('p', '처음 메모한 합계 ' + won(num(fn.memoTotal)) + '은 잔금 ' + eok(num(fn.balance)) + ' + 월세 ' + krw(num(fn.rent)) + (num(fn.extraToC) ? ' + 기타 ' + krw(num(fn.extraToC)) : '') + ' (= ' + won(num(fn.balance) + num(fn.rent) + num(fn.extraToC)) + ')보다 ',
@@ -1882,13 +1966,22 @@ div.fn-alert { cursor: default; }
     const s = P.c.flow.steps.find((x) => x.id === id);
     if (!s) return null;
     const out = [];
+    const pre = s.partLabel ? s.partLabel + ' ' : '';
     if (s.kind === 'out' && s.split && s.splitN > 1) {
       out.push(s.chunks
-        ? el('div', { class: 'fn-chunks' }, el('span', { class: 'small strong' }, timesTxt(s.splitN) + ' 나눠 보내기:'),
+        ? el('div', { class: 'fn-chunks' }, el('span', { class: 'small strong' }, pre + timesTxt(s.splitN) + ' 나눠 보내기:'),
           s.chunks.map((a, k) => chip((k + 1) + '회 ' + eok(a), 'brand')))
-        : el('div', { class: 'fn-chunks' }, el('span', { class: 'small strong' }, timesTxt(s.splitN) + ' 나눠 보내기:'),
+        : el('div', { class: 'fn-chunks' }, el('span', { class: 'small strong' }, pre + timesTxt(s.splitN) + ' 나눠 보내기:'),
           chip(eok(s.split.size) + ' × ' + timesTxt(s.split.last !== s.split.size ? s.splitN - 1 : s.splitN), 'brand'),
           s.split.last !== s.split.size ? chip('마지막 1번 ' + eok(s.split.last), 'brand') : null));
+    } else if (s.kind === 'out' && s.seps && s.seps.length && s.split && s.split.n === 1) {
+      out.push(el('div', { class: 'fn-chunks' }, el('span', { class: 'small strong' }, pre + '1번:'), chip(eok(s.split.size), 'brand')));
+    }
+    /* 잔금과 따로 보내는 돈 (월세·기타) — 받는 분 메모와 함께 */
+    if (s.kind === 'out' && s.seps && s.seps.length) {
+      out.push(el('div', { class: 'fn-chunks fn-sep-tx' }, el('span', { class: 'small strong' }, '따로 보내기:'),
+        s.seps.map((p) => chip(p.label + ' ' + (p.split.n > 1 ? timesTxt(p.split.n) + ' 나눠 ' + splitSummary(p.split) : krw(p.amount)) + (p.memo ? ' · 메모 "' + p.memo + '"' : ''), 'think')),
+        el('span', { class: 'small muted' }, '잔금과 섞지 않고 따로 보내면 영수증도 나눠 받기 쉬워요')));
     }
     s.warnings.forEach((w) => out.push(el('div', { class: 'fn-warn is-' + w.level, role: w.level === 'bad' ? 'alert' : null }, w.text)));
     if (s.kind === 'ext') {
@@ -1911,9 +2004,10 @@ div.fn-alert { cursor: default; }
           el('div', { class: 'fn-result-k' }, '모두 끝나면 남는 돈'),
           el('div', { class: 'fn-result-v' + (fl.leftover < 0 ? ' is-neg' : ''), title: won(fl.leftover) }, eok(fl.leftover)),
           el('div', { class: 'fn-formula' }, '받을 돈 ' + won(fl.inflow) + ' − 보낼 돈 ' + won(fl.outflow) + ' = ' + won(fl.leftover)),
-          el('p', { class: 'small mb-0 mt-8' }, '아직 낼 이사비 ' + krw(c.budget.unpaid) + '까지 빼면 ',
-            el('b', { style: { color: c.net < 0 ? 'var(--bad)' : 'var(--good)' } }, (c.net < 0 ? '부족 ' : '여유 ') + krw(Math.abs(c.net))),
-            ' · ', el('a', { href: '#/money/budget', onclick: P.tabLink('budget', 'fn-budget-sum') }, '예산 보기 →')),
+          el('p', { class: 'small mb-0 mt-8' }, '꼭 드는 이사 비용 ' + krw(c.budget.groups.essential.unpaid) + '까지 빼면 ',
+            el('b', { style: { color: c.netEssential < 0 ? 'var(--bad)' : 'var(--good)' } }, verdictTxt(c.netEssential)),
+            ' · 살림 구입까지 ' + verdictTxt(c.netWithPurchases) + ' · 전부 포함 ' + verdictTxt(c.net) + ' · ',
+            el('a', { href: '#/money/budget', onclick: P.tabLink('budget', 'fn-budget-sum') }, '예산 보기 →')),
         ];
       }));
   }
@@ -1926,7 +2020,7 @@ div.fn-alert { cursor: default; }
       { key: 'delay', off: -10, text: '지연이체·안심이체(입금계좌지정)가 켜져 있으면 해제하거나 C·중개사·대출 상환계좌를 미리 등록' },
       { key: 'limitAcct', off: -10, text: '받는 통장이 한도제한계좌(1일 100만원 안팎)가 아닌지 확인' },
       { key: 'payoff', re: [/완제\s*금액/], off: -1, text: '우리은행에서 11/3 기준 완제금액(원 단위)·상환계좌·마감시각 받기' },
-      { key: 'payee', re: [/예금주/], off: -1, text: 'C·중개사·상환계좌 예금주 조회 — 처음 보내는 계좌는 이상거래탐지(FDS)로 보류될 수 있어요' },
+      { key: 'payee', re: [/예금주/], off: -1, text: 'C·중개사·상환계좌 예금주 조회 — 처음 보내는 계좌는 이상거래탐지로 보류될 수 있어요' },
       { key: 'registry1', re: [/전입\s*세대\s*확인/], off: -1, text: '새 집 등기부 1차 열람 + 전입세대확인서 발급' },
       { key: 'kit', off: -1, text: '신분증·OTP·휴대폰 충전, 은행 콜센터 번호 저장 (앱이 막히면 창구 이체: 평일 09~16시)' },
     ];
@@ -2210,18 +2304,35 @@ div.fn-alert { cursor: default; }
   function tabBudget(P) {
     const f = P.c.f;
     const lines = P.c.budget.lines;
+    /* 묶음별로 나눠 그림 (꼭 드는 이사 비용 → 새로 사는 살림 → 선택·나중에), 묶음마다 소계 */
+    const groupBlock = (g) => {
+      const gl = lines.filter((l) => l.group === g.id);
+      return el('div', { class: 'fn-bgroup fn-bgroup-' + g.id + ' fn-anchor', id: 'fn-bg-' + g.id, role: 'group', 'aria-label': g.label },
+        P.live('div', 'fn-bgroup-h', () => {
+          const s = P.c.budget.groups[g.id];
+          return [
+            el('h4', { class: 'fn-bgroup-t' }, el('i', { class: 'fn-sw fn-sw-' + g.id, 'aria-hidden': 'true' }), g.icon + ' ' + g.label),
+            el('span', { class: 'fn-bgroup-sum' }, '아직 낼 돈 ', el('b', krw(s.unpaid)), s.paid ? el('span', { class: 'muted' }, ' (낸 돈 ' + krw(s.paid) + ' 별도)') : null),
+          ];
+        }),
+        el('p', { class: 'fn-note fn-bgroup-d' }, g.what),
+        el('div', { class: 'fn-blist' },
+          gl.length ? [
+            el('div', { class: 'fn-bl-head', 'aria-hidden': 'true' }, el('span', '항목'), el('span', '금액'), el('span', '결제일'), el('span', '냄'), el('span', '메모'), el('span', '')),
+            gl.map((l) => budgetRow(P, l)),
+          ] : el('p', { class: 'fn-note fn-bgroup-empty' }, '이 묶음에 항목이 없어요. 다른 줄의 "묶음"을 바꾸면 여기로 옮겨져요.')));
+    };
     const linesCard = el('section', { class: 'card' },
       el('div', { class: 'fn-card-h' }, el('h3', '지출 항목'), el('span', { class: 'spacer' }),
         el('span', { class: 'small muted' }, '중개보수·첫 월세는 11/3 돈 흐름에 이미 들어 있어요')),
-      el('div', { class: 'fn-blist' },
-        el('div', { class: 'fn-bl-head', 'aria-hidden': 'true' }, el('span', '항목'), el('span', '금액'), el('span', '결제일'), el('span', '냄'), el('span', '메모'), el('span', '')),
-        lines.map((l) => budgetRow(P, l))),
+      GROUPS.map(groupBlock),
       el('div', { class: 'row mt-12' },
         el('button', { class: 'btn', type: 'button', onclick: () => {
-          const nl = normLine({ id: MV.uid('bl'), label: '새 항목', amount: 0 });
+          const nl = normLine({ id: MV.uid('bl'), label: '새 항목', amount: 0, group: 'purchase' });
           P.focusAfter = 'bl-label-' + nl.id;
           updStruct((fin) => { fin.budget.lines.push(nl); });
-        } }, '+ 항목 추가')));
+        } }, '+ 항목 추가'),
+        el('span', { class: 'small muted' }, '새 항목은 "새로 사는 살림"에 들어가요 — 줄마다 "묶음"에서 옮길 수 있어요')));
     const refunds = el('section', { class: 'card' },
       el('div', { class: 'fn-card-h' }, el('h3', '들어올 돈'), el('span', { class: 'small muted' }, '받으면 ✓ — 최종 계산에는 따로 표시해요')),
       el('div', { class: 'fn-blist' }, f.budget.refunds.map((r) => refundRow(P, r))),
@@ -2238,24 +2349,57 @@ div.fn-alert { cursor: default; }
   }
 
   function budgetSummary(P) {
-    const c = P.c, b = c.budget, fl = c.flow;
+    const c = P.c, b = c.budget, fl = c.flow, G = b.groups;
+    const ess = G.essential.unpaid, pur = G.purchase.unpaid, opt = G.optional.unpaid;
+    const neg = c.netEssential < 0;
+    const vCls = (n) => 'v ' + (n < 0 ? 'is-bad' : 'is-good');
+    /* 같은 눈금 막대: 남는 돈 한 줄, 앞으로 낼 돈은 묶음별로 쌓고 '남는 돈' 위치에 세로선 */
     const max = Math.max(1, fl.leftover, b.unpaid);
-    const bar = (cls, v) => el('div', { class: 'fn-cmp-track' }, el('i', { class: cls, style: { width: Math.max(0, Math.min(100, v / max * 100)).toFixed(1) + '%' } }));
+    const w = (v) => Math.max(0, Math.min(100, v / max * 100)).toFixed(2) + '%';
+    const seg = (id, v) => (v > 0 ? el('i', { class: 'fn-sw-' + id, style: { width: w(v) }, title: GROUP_BY_ID[id].label + ' ' + won(v) }) : null);
+    const cardOf = (g) => {
+      const s = G[g.id];
+      return el('div', { class: 'fn-gcard' },
+        el('div', { class: 'fn-gcard-h' }, el('i', { class: 'fn-sw fn-sw-' + g.id, 'aria-hidden': 'true' }), el('span', g.icon + ' ' + g.label)),
+        el('b', { class: 'fn-gcard-v', title: won(s.unpaid) }, krw(s.unpaid)),
+        el('span', { class: 'fn-gcard-d' }, g.desc),
+        s.labels.length ? el('span', { class: 'fn-gcard-items' }, '지금 들어 있는 항목: ' + s.labels.join(' · ')) : el('span', { class: 'fn-gcard-items' }, '들어 있는 항목이 없어요'),
+        el('a', { class: 'fn-gcard-go', href: '#/money/budget', onclick: P.tabLink('budget', 'fn-bg-' + g.id) }, '줄 보기 ↓'));
+    };
     return [
       el('div', { class: 'fn-card-h', id: 'fn-budget-sum' }, el('h3', '이사 비용 한눈에')),
-      el('div', { class: 'fn-bstats' },
-        el('div', { class: 'fn-bstat' }, el('div', { class: 'k' }, '예산 합계 (' + b.count + '개)'), el('div', { class: 'v' }, krw(b.total))),
-        el('div', { class: 'fn-bstat' }, el('div', { class: 'k' }, '이미 낸 돈'), el('div', { class: 'v' }, krw(b.paid))),
-        el('div', { class: 'fn-bstat' }, el('div', { class: 'k' }, '앞으로 낼 돈'), el('div', { class: 'v' }, krw(b.unpaid))),
-        el('div', { class: 'fn-bstat' }, el('div', { class: 'k' }, D.fmt(c.move) + ' 뒤 남는 돈'), el('div', { class: 'v' }, krw(fl.leftover)))),
-      el('div', { class: 'fn-cmp' },
-        el('div', { class: 'fn-cmp-row' }, el('span', '남는 돈'), bar('is-left', Math.max(0, fl.leftover)), el('b', krw(fl.leftover))),
-        el('div', { class: 'fn-cmp-row' }, el('span', '앞으로 낼 돈'), bar('is-cost', b.unpaid), el('b', krw(b.unpaid)))),
-      el('div', { class: 'fn-verdict ' + (c.net < 0 ? 'is-bad' : 'is-good') },
-        el('span', { class: 'k' }, c.net < 0 ? '추가로 필요한 돈' : '여유'),
-        el('span', { class: 'v', title: won(c.net) }, krw(Math.abs(c.net))),
-        b.refundsTotal ? el('span', { class: 'small' }, '들어올 돈 ' + krw(b.refundsTotal) + '까지 넣으면 ' + (c.net + b.refundsTotal < 0 ? '부족 ' : '여유 ') + krw(Math.abs(c.net + b.refundsTotal))) : null),
-      basis('low', '리서치 추정: 남는 돈 약 281만~318만원 vs 추가 지출 약 410만~870만원 → 110만~590만원 부족 가능. 견적이 확정되면 다시 계산하세요.', [], '견적·영수증으로 다시 계산'),
+      /* 머리 숫자: 11/3 전후 꼭 필요한 현금 = 꼭 드는 이사 비용(아직 낼 돈) ↔ 그날 남는 돈 */
+      el('div', { class: 'fn-hl ' + (neg ? 'is-bad' : 'is-good') },
+        el('div', { class: 'fn-hl-k' }, D.fmt(c.move) + ' 전후 꼭 필요한 현금'),
+        el('div', { class: 'fn-hl-eq' },
+          el('div', { class: 'fn-hl-cell' }, el('small', '꼭 드는 이사 비용 (아직 낼 돈)'), el('b', { title: won(ess) }, krw(ess))),
+          el('div', { class: 'fn-hl-cell' }, el('small', D.fmt(c.move) + ' 그날 남는 돈'), el('b', { title: won(fl.leftover) }, krw(fl.leftover))),
+          el('div', { class: 'fn-hl-cell fn-hl-res' }, el('small', neg ? '⚠ 부족' : '✓ 여유'), el('b', { title: won(c.netEssential) }, krw(Math.abs(c.netEssential))))),
+        el('div', { class: 'fn-kv fn-hl-more' },
+          el('span', { class: 'k' }, '살림 구입까지 포함하면 (+' + krw(pur) + ')'), el('span', { class: vCls(c.netWithPurchases) }, verdictTxt(c.netWithPurchases)),
+          el('span', { class: 'k' }, '전부 포함하면 (선택·나중에 +' + krw(opt) + ')'), el('span', { class: vCls(c.net) }, verdictTxt(c.net)))),
+      fl.rentPart ? el('div', { class: 'callout fn-rent-tip' },
+        el('p', { class: 'mb-0' }, el('b', '월세가 계약서대로 후불이면 ' + D.fmt(c.move) + '에 ' + krw(fl.rentPart) + '을 안 내도 돼서 남는 돈이 그만큼 늘어요'),
+          ' — 그러면 꼭 드는 비용 기준 ' + verdictTxt(c.netEssential + fl.rentPart) + '. ',
+          el('a', { href: '#/money/flow', onclick: P.tabLink('flow', 'fn-rent') }, '월세 지급일 확인 →'))) : null,
+      el('div', { class: 'callout kid fn-why-big' },
+        el('p', { class: 'mb-0' }, el('b', '남는 돈이 ' + krw(fl.leftover) + '인데 ' + krw(b.unpaid) + '이 다 필요한가요? '),
+          '아니요. ' + krw(b.unpaid) + '은 예산 전부예요. 그중 ' + D.fmt(c.move) + ' 전후에 꼭 현금으로 나가는 건 "꼭 드는 이사 비용" ' + krw(ess) + '이에요. ' +
+          '"새로 사는 살림" ' + krw(pur) + '은 이사비가 아니라 물건 값이라 카드 할부로 나눠 낼 수 있고, ' +
+          '"선택·나중에" ' + krw(opt) + '은 안 해도 되거나(입주청소) 이사 뒤에 내는 돈(HUG 보증료)이에요.')),
+      el('div', { class: 'fn-cmp', role: 'img', 'aria-label': '같은 눈금 비교 — 그날 남는 돈 ' + krw(fl.leftover) + ', 앞으로 낼 돈 ' + krw(b.unpaid) + ' (꼭 드는 비용 ' + krw(ess) + ', 살림 구입 ' + krw(pur) + ', 선택·나중에 ' + krw(opt) + ')' },
+        el('div', { class: 'fn-cmp-row' }, el('span', '그날 남는 돈'), el('div', { class: 'fn-cmp-track' }, el('i', { class: 'is-left', style: { width: w(Math.max(0, fl.leftover)) } })), el('b', krw(fl.leftover))),
+        el('div', { class: 'fn-cmp-row' }, el('span', '앞으로 낼 돈'),
+          el('div', { class: 'fn-cmp-track fn-cmp-stack' }, seg('essential', ess), seg('purchase', pur), seg('optional', opt),
+            fl.leftover > 0 ? el('span', { class: 'fn-cmp-mark', style: { left: w(fl.leftover) }, title: '그날 남는 돈 ' + won(fl.leftover) }) : null),
+          el('b', krw(b.unpaid)))),
+      el('div', { class: 'fn-legend', 'aria-hidden': 'true' },
+        GROUPS.map((g) => el('span', el('i', { class: 'fn-sw-' + g.id }), g.short + ' ' + krw(G[g.id].unpaid))),
+        fl.leftover > 0 ? el('span', el('i', { class: 'fn-mark-key' }), '세로선 = 그날 남는 돈') : null),
+      el('div', { class: 'fn-gcards' }, GROUPS.map(cardOf)),
+      b.refundsPending ? el('p', { class: 'small muted mb-0' }, '들어올 돈 ' + krw(b.refundsPending) + '(장기수선충당금 등)은 받는 날이 정해지지 않아 위 계산에 넣지 않았어요 — 받으면 그만큼 여유가 늘어요.') : null,
+      el('p', { class: 'small muted mb-0' }, '전체 예산 ' + krw(b.total) + ' (' + b.count + '개) · 이미 낸 돈 ' + krw(b.paid) + ' · 앞으로 낼 돈 ' + krw(b.unpaid)),
+      basis('low', '금액은 견적 전 추정이에요(조사 자료 기준). 견적·영수증이 생기면 아래 줄을 고치면 위 계산이 바로 바뀌어요.', [], '견적·영수증으로 다시 계산'),
     ];
   }
 
@@ -2273,7 +2417,15 @@ div.fn-alert { cursor: default; }
     const labelCell = el('div', { class: 'fn-bl-label' },
       textField('항목 이름', l.label, (v) => updSilent((fin) => { const x = fin.budget.lines.find((y) => y.id === l.id); if (x) x.label = v; }), { fk: 'bl-label-' + l.id, bare: true }),
       meta ? el('div', { class: 'fn-range' }, el('span', '보통 ' + (meta.low ? krw(meta.low) : '0원') + ' ~ ' + krw(meta.high)),
-        basis(meta.conf, meta.basis, meta.auto === 'hug' ? [LINK.hug] : [], meta.conf === 'mid' ? 'HUG에 확인' : '견적·영수증으로 확인', true)) : null);
+        basis(meta.conf, meta.basis, meta.auto === 'hug' ? [LINK.hug] : [], meta.conf === 'mid' ? 'HUG에 확인' : '견적·영수증으로 확인', true)) : null,
+      /* 묶음 옮기기 — 바꾸면 그 묶음 아래로 줄이 옮겨 가고 위 합계가 바로 바뀜 */
+      el('label', { class: 'fn-bl-grp' }, el('span', '묶음'),
+        selectField('묶음 옮기기', l.group, GROUPS.map((g) => [g.id, g.icon + ' ' + g.label]), (v) => {
+          if (!GROUP_BY_ID[v]) return;
+          setLine((x) => { x.group = v; }, true);
+          const nm = curLine().label || '항목';
+          MV.ui.toast('“' + nm + '”' + jo(nm, '을') + ' "' + GROUP_BY_ID[v].label + '"' + jo(GROUP_BY_ID[v].label, '으로') + ' 옮겼어요');
+        }, { fk: 'bl-group-' + l.id, bare: true })));
     // 금액
     const amountCell = el('div', { class: 'fn-bl-amount' });
     if (meta && meta.auto) {
@@ -2283,7 +2435,7 @@ div.fn-alert { cursor: default; }
           const a = x.autoInfo || { value: 0, note: '' };
           return [el('b', won(a.value)), el('small', a.note)];
         }));
-        amountCell.appendChild(el('div', { class: 'fn-bl-actions' }, chip('자동', 'kid'),
+        amountCell.appendChild(el('div', { class: 'fn-bl-actions' }, chip('자동', 'kid'), meta.auto === 'mover' ? chip('부가세 포함', '') : null,
           el('button', { class: 'btn btn-sm fn-mini-btn', type: 'button', 'data-fk': 'bl-manual-' + l.id, onclick: () => {
             const v = curLine().value;
             P.focusAfter = 'bl-amt-' + l.id;
@@ -2292,7 +2444,7 @@ div.fn-alert { cursor: default; }
           meta.auto === 'mover' || meta.auto === 'lg' ? el('a', { class: 'small', href: '#/stuff/estimate' }, '짐·견적 →') : null));
       } else {
         amountCell.appendChild(moneyField('금액', l.value, (v) => setLine((x) => { x.amount = v; }), { fk: 'bl-amt-' + l.id, bare: true }));
-        amountCell.appendChild(el('div', { class: 'fn-bl-actions' }, chip('직접', ''),
+        amountCell.appendChild(el('div', { class: 'fn-bl-actions' }, chip('직접', ''), meta.auto === 'mover' ? el('span', { class: 'small muted' }, '부가세 포함 금액으로') : null,
           el('button', { class: 'btn btn-sm fn-mini-btn', type: 'button', 'data-fk': 'bl-auto-' + l.id, onclick: () => setLine((x) => { x.auto = true; }, true) }, '자동 계산으로')));
       }
       if (meta.optional) {
@@ -2350,27 +2502,39 @@ div.fn-alert { cursor: default; }
   }
 
   function budgetAdvice(P) {
-    const c = P.c;
+    const c = P.c, G = c.budget.groups, fl = c.flow;
     const refundBack = c.rentCredit.credit + c.housing.saving;
-    if (c.net >= 0) {
-      return [
-        el('div', { class: 'fn-card-h' }, el('h3', '💡 여유가 있어요')),
-        el('p', { class: 'small' }, '남는 돈으로 이사비를 낼 수 있어요. 남는 ' + krw(c.net) + '은 예비비로 두고, 견적이 확정되면 다시 확인하세요.'),
-        el('ul', { class: 'fn-ul small' },
-          el('li', '방문견적 3곳을 받아 "부가세 포함 총액"으로 계약하기 (카드 수수료 전가는 금지)'),
-          el('li', '옷장·커튼은 새 집 실측 후 사도 늦지 않아요')),
-      ];
-    }
+    const li = (b, t) => el('li', el('b', b), t);
+    const sec = (g, items) => [el('h4', { class: 'fn-adv-h' }, el('i', { class: 'fn-sw fn-sw-' + g.id, 'aria-hidden': 'true' }), g.icon + ' ' + g.label), el('ul', { class: 'fn-ul small' }, items)];
+    const title = c.netEssential < 0
+      ? '💡 꼭 드는 비용 부족분 ' + krw(-c.netEssential) + ' 메우기'
+      : c.net < 0 ? '💡 꼭 드는 비용은 돼요 — 나머지는 나눠 내기' : '💡 여유가 있어요';
+    const lead = c.netEssential < 0
+      ? D.fmt(c.move) + ' 남는 돈으로 꼭 드는 이사 비용을 다 내기엔 ' + krw(-c.netEssential) + ' 모자라요. 아래 순서로 메워 보세요.'
+      : c.net < 0
+        ? '꼭 드는 이사 비용은 ' + D.fmt(c.move) + ' 남는 돈으로 낼 수 있어요(여유 ' + krw(c.netEssential) + '). 살림 구입·선택 항목은 시기와 결제 방법을 나눠서 내면 돼요.'
+        : '남는 돈으로 예산 전부를 낼 수 있어요. 남는 ' + krw(c.net) + '은 예비비로 두고, 견적이 확정되면 다시 확인하세요.';
     return [
-      el('div', { class: 'fn-card-h' }, el('h3', '💡 ' + krw(-c.net) + '을 메우는 방법'), guideLink('budget-cut')),
-      el('ol', { class: 'fn-ul small' },
-        el('li', el('b', '장기수선충당금 돌려받기'), ' — 약 20만~50만원. 구집 관리사무소 납부확인서로 A에게 청구.'),
-        el('li', el('b', '카드 무이자 할부'), '로 옷장·세탁기 결제 시기를 나누기.'),
-        el('li', el('b', '안 쓰는 물건 중고 판매'), ' — 붙박이장에서 나온 물건·책·장난감.'),
-        el('li', el('b', '이사업체 단가 협상'), ' — 11/3(화)은 평일이고 손없는날이 아니라 할증이 없어요. 견적 3곳 비교.'),
-        el('li', el('b', '급하지 않은 구매 미루기'), ' — 옷장·커튼·소품은 이사 후 실측하고 천천히.'),
-        el('li', el('b', '연말정산 환급'), ' — 2027년 2월 약 ' + krw(refundBack) + ' (월세 공제 ' + krw(c.rentCredit.credit) + ' + 주택자금 공제 ' + krw(c.housing.saving) + '). 시기는 나중이라 당장 현금은 아니에요.')),
-      basis('low', '리서치 예산 조언(finance_verified F16). 금액은 추정이에요.', [], '견적 확정 후 다시 계산'),
+      el('div', { class: 'fn-card-h' }, el('h3', title), guideLink('budget-cut')),
+      el('p', { class: 'small' }, lead),
+      sec(GROUP_BY_ID.essential, [
+        fl.rentPart ? li('월세 후불 확인', ' — 계약서대로 ' + D.fmt(addMonths(c.move, 1)) + '에 내면 ' + D.fmt(c.move) + '에 ' + krw(fl.rentPart) + '이 덜 나가요. 중개사·C와 확정하세요.') : null,
+        li('장기수선충당금 돌려받기', ' — 약 20만~50만원. 구집 관리사무소 납부확인서로 A에게 청구.'),
+        li('이사업체 단가 협상', ' — 11/3(화)은 평일이고 손없는날이 아니라 손없는날·주말 할증은 없고, 월초라 업체에 따라 약 5% 붙을 수 있어요. 방문견적 3곳을 "부가세 포함 총액"으로 비교하세요 (카드 수수료 전가는 금지).'),
+      ]),
+      sec(GROUP_BY_ID.purchase, [
+        li('옷장은 미루지 않기', ' — 붙박이장이 없어져 꼭 필요해요. 사전방문(10/10~10/11) 때 실측 → 집주인 벽 고정 동의 10/14까지 → 10/18까지 주문 → 설치는 이사 후 11/4~11/6 (선반입이 되면 11/2).'),
+        li('커튼은 두 방만 먼저', ' — 사전방문 때 창 치수를 재서 안방·아이방 커튼(또는 블라인드)만 10/25까지 주문해 이사 날 달고, 나머지 커튼·소품은 살아 보며 천천히.'),
+        li('카드 무이자 할부', '로 옷장·세탁기 값을 나눠 내기 — ' + D.fmt(c.move) + ' 현금이 줄지 않아요.'),
+        li('안 쓰는 물건 중고 판매', ' — 붙박이장에서 나온 물건·책·장난감.'),
+      ]),
+      sec(GROUP_BY_ID.optional, [
+        li('입주청소', ' — 사전방문 때 집 상태를 보고 정해요. 직접 하면 0원.'),
+        li('HUG 보증료', ' — 전입·확정일자 뒤 11월 중 가입할 때 내요. ' + D.fmt(c.move) + ' 당일 현금이 아니에요.'),
+        li('예비비', ' — 혹시 몰라 잡아 둔 돈이라 안 쓰면 그대로 남아요.'),
+      ]),
+      el('p', { class: 'small mb-0' }, el('b', '연말정산 환급'), ' — 2027년 2월 약 ' + krw(refundBack) + ' (월세 공제 ' + krw(c.rentCredit.credit) + ' + 주택자금 공제 ' + krw(c.housing.saving) + '). 시기는 나중이라 당장 현금은 아니에요.'),
+      basis('low', '조사 자료(예산 조언). 금액은 추정이에요.', [], '견적 확정 후 다시 계산'),
     ];
   }
 
@@ -2734,7 +2898,7 @@ div.fn-alert { cursor: default; }
         state),
       el('ul', { class: 'fn-ul small' },
         el('li', '확인: 중개사와 C에게 신고필증 사본을 요청 (신고됐다면 확정일자 부여일도)'),
-        el('li', '안 됐으면: 주민센터나 부동산거래관리시스템(rtms)에서 양쪽 서명 계약서를 첨부해 바로 신고 — 지연기간이 짧을수록 과태료가 낮아요'),
+        el('li', '안 됐으면: 주민센터나 부동산거래관리시스템 누리집에서 양쪽 서명 계약서를 첨부해 바로 신고 — 지연기간이 짧을수록 과태료가 낮아요'),
         el('li', '과태료는 임대인·임차인 모두에게 나올 수 있으니 C와 함께 정리'),
         el('li', '전입신고 때 계약서를 내면 신고로 간주되지만, 그때까지 지연기간만 길어져요')),
       guideLink('report', '임대차 신고 가이드'));
@@ -2755,7 +2919,7 @@ div.fn-alert { cursor: default; }
       el('ul', { class: 'fn-ul small' },
         el('li', '요건: 수도권 보증금 7억 이하, (보증금 + 선순위채권)이 시세의 90% 이하 — 59㎡ 아파트·보증금 3.2억이면 큰 근저당만 없으면 가능성이 높아요'),
         el('li', '가입하면 HUG가 임대인 C에게 보증금 반환채권 양도를 통지해요. 동의는 필요 없지만, 멀리 사는 C가 놀라지 않게 중개사를 통해 미리 알려 두세요'),
-        el('li', 'HF 전세지킴보증, SGI 상품과 보증료·조건을 비교해 보세요')));
+        el('li', 'HF 전세지킴보증, 서울보증보험(SGI) 상품과 보증료·조건을 비교해 보세요')));
   }
 
   function addToChecklist(P, r) {
@@ -2807,10 +2971,11 @@ div.fn-alert { cursor: default; }
       const cb = el('input', { type: 'checkbox', checked: !!s.done, 'aria-label': stepTitle(s.id, c) + ' 완료' });
       cb.addEventListener('change', () => setStepDone(P, s.id, cb.checked));
       const extra = [];
-      if (s.splitN > 1) extra.push(timesTxt(s.splitN) + ' 나눠: ' + splitSummary(s.split));
+      if (s.splitN > 1) extra.push((s.partLabel ? s.partLabel + ' ' : '') + timesTxt(s.splitN) + ' 나눠: ' + splitSummary(s.split));
+      (s.seps || []).forEach((p) => extra.push(p.label + ' ' + krw(p.amount) + '은 따로 이체' + (p.memo ? ' (메모 "' + p.memo + '")' : '')));
       if (memo[s.id]) extra.push('계좌: ' + memo[s.id]);
       if (s.id === 'recv') extra.push('잔액으로 확인한 뒤에만 열쇠 인계');
-      if (s.id === 'toC') extra.push('계약서 특약의 C 본인 계좌만 · 잔금/월세 나눈 영수증');
+      if (s.id === 'toC') extra.push('계약서 특약의 C 본인 계좌만' + (fl.rentPart ? ' · 잔금·월세 나눈 영수증' : ' · 잔금 영수증'));
       if (s.id === 'broker') extra.push('현금영수증 확인');
       if (s.id === 'bank') extra.push('완제확인서 · 상환증명서 받기');
       if (s.id === 'registry') extra.push('소유자 C · 새 근저당·가압류·신탁 없음');
