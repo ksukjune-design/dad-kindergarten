@@ -12,14 +12,14 @@
                           added:   [{ id, name, kind, x, y, w, h }]     직접 그린 방
                           deleted: [roomId]                             지운 원래 방 (그 방에만 붙은 문·창·고정물도 숨김)
                           size:    { width, depth } | 없음              전체 크기 (외곽·치수선·화면 맞춤이 따라감)
-                          doorsAdded:   [{ id, x, y, width, orientation, swing, hinge, room }]
+                          doorsAdded:   [{ id, x, y, width, orientation, swing, hinge, room }]   room 을 지우면 숨김 (그린 방이면 함께 지움 · 되돌리기 가능)
                           doorsDeleted: ['x,y,o']                       지운 원래 문 (x·y·방향으로 만든 고정 키)
                         }
                         병합 도면 = 원래 − 지운 방 + 그린 방 + 덮어쓰기 + 전체 크기 (점검·자동 배치·비교·면적 모두 이것을 씀)
             planBg    = { old: Bg|null, new: Bg|null }   평면도 사진 (백업 파일에 함께 들어감)
                         Bg = { src: 'data:image/jpeg;base64,…'(긴 변 1600px 이하), natW, natH (px),
                                cmPerPx, x, y (cm, 회전 반영 외곽의 좌상단), opacity 0.15–1, rot 0|90|180|270,
-                               show, fade (도면 칸 흐리게), calibrated }
+                               show, fade (도면 칸 흐리게), calibrated, aligned (축척 뒤 위치까지 맞췄는지 — false 면 '위치 맞추기' 안내) }
             ui.plan   = { grid, snap, zoom:{new,old}, filter, infoOpen, laundryRoom, bgPanel }
    조작     끌기(마우스·터치·펜, 도면 밖으로는 못 나감 · 가장자리에서 자동 스크롤) · 두 손가락 확대/축소(도면만)
             키보드 단축키는 도면에 초점이 있거나 마우스가 도면 위에 있을 때만 (방향키·R·Delete·Esc)
@@ -269,26 +269,53 @@
     const t = bg.rot === 90 ? [H, 0] : bg.rot === 180 ? [W, H] : bg.rot === 270 ? [0, W] : [0, 0];
     return 'translate(' + r2(x + t[0]) + ' ' + r2(y + t[1]) + ')' + (bg.rot ? ' rotate(' + bg.rot + ')' : '');
   }
+  const LEN_MIN = 20, LEN_MAX = 5000;   // 축척 맞추기: 받아 주는 실제 길이 (cm)
   /**
-   * 실제 길이 글자 → cm. '3300mm' '3.3m' '330' '330cm' '3,300' '3.3미터'
-   * unit: 'auto'(단위 없는 숫자는 1500 이상이면 mm 로 봄 — 도면 치수 '3,300' 은 mm) | 'cm' | 'mm' | 'm'
-   * → { cm, how } 또는 null
+   * 실제 길이 글자 → cm. '3300mm' '3.3m' '330' '330cm' '3,300' '1,200' '3,3m' '3.3미터'
+   * unit: 'auto' | 'cm' | 'mm' | 'm' (단위 고르기). est: 지금 사진 크기로 잰 길이(cm, 없으면 0)
+   * 단위 없는 숫자(단위 자동)는:
+   *  - 천 단위 쉼표('1,200' '3,300')가 있으면 도면 치수 → mm
+   *  - 아니면 기본(1500 이상 mm · 20 미만 m · 그 밖 cm)으로 읽되, 사진 크기로 잰 길이(est)가 다른 읽기(cm/mm/m)에
+   *    훨씬(2배 넘게) 가까우면 그쪽으로 — 예: 사진에서 약 80cm 인 곳에 '1200' → 120cm(mm)
+   * → { cm, how, unit, guessed, alts:[{unit, cm}] } 또는 null
    */
-  function parseLen(text, unit) {
-    const s = String(text == null ? '' : text).trim().replace(/[\s,]/g, '').toLowerCase();
+  function parseLen(text, unit, est) {
+    let s = String(text == null ? '' : text).trim().toLowerCase().replace(/\s+/g, '');
+    let grouped = false;
+    const mc = /^(\d+(?:,\d+)+)(.*)$/.exec(s);
+    if (mc) {
+      if (/^\d{1,3}(,\d{3})+$/.test(mc[1])) { grouped = true; s = mc[1].replace(/,/g, '') + mc[2]; }   // 1,200 · 10,500 (천 단위)
+      else if (/^\d+,\d{1,2}$/.test(mc[1])) s = mc[1].replace(',', '.') + mc[2];                          // 3,3m (소수점 쉼표)
+      else return null;
+    }
     const m = /^(\d+(?:\.\d+)?|\.\d+)(mm|cm|m|밀리|미리|밀리미터|센티|센치|센티미터|미터)?$/.exec(s);
     if (!m) return null;
     const v = parseFloat(m[1]);
     if (!(v > 0)) return null;
     let u = m[2] || '';
     if (/^(밀리|미리|밀리미터)$/.test(u)) u = 'mm'; else if (/^(센티|센치|센티미터)$/.test(u)) u = 'cm'; else if (u === '미터') u = 'm';
-    let how = '';
+    const toCm = (uu) => (uu === 'mm' ? v / 10 : uu === 'm' ? v * 100 : v);
+    let how = '', guessed = false;
     if (!u) {
       if (unit === 'cm' || unit === 'mm' || unit === 'm') u = unit;
-      else { u = v >= 1500 ? 'mm' : 'cm'; how = v >= 1500 ? '숫자가 커서 mm로 봤어요' : 'cm로 봤어요'; }
+      else if (grouped) { u = 'mm'; how = '도면 치수(mm)로 봤어요'; guessed = true; }
+      else {
+        guessed = true;
+        u = v >= 1500 ? 'mm' : v < LEN_MIN ? 'm' : 'cm';
+        how = u === 'mm' ? '숫자가 커서 mm로 봤어요' : u === 'm' ? '작은 숫자라 m로 봤어요' : 'cm로 봤어요';
+        if (est > 0) {
+          const dist = (uu) => Math.abs(Math.log(toCm(uu) / est));
+          const cands = ['cm', 'mm', 'm'].filter((uu) => (uu !== 'm' || v < 50) && toCm(uu) >= LEN_MIN && toCm(uu) <= LEN_MAX);
+          const near = cands.slice().sort((a, b) => dist(a) - dist(b))[0];
+          if (near && near !== u && dist(near) + Math.LN2 < dist(u)) {
+            u = near;
+            how = '사진에서 잰 길이(약 ' + Math.round(est) + 'cm)와 가까워 ' + u + '로 봤어요';
+          }
+        }
+      }
     }
-    const cm = u === 'mm' ? v / 10 : u === 'm' ? v * 100 : v;
-    return { cm, how };
+    const alts = guessed ? ['mm', 'cm', 'm'].filter((uu) => uu !== u && (uu !== 'm' || v < 50) && toCm(uu) >= LEN_MIN && toCm(uu) <= LEN_MAX).map((uu) => ({ unit: uu, cm: toCm(uu) })) : [];
+    return { cm: toCm(u), how, unit: u, guessed, alts };
   }
   /** data URL → Blob (긴 data URL 을 매번 그리지 않도록 blob: 주소로 바꿔 씀) */
   function dataUrlToBlob(u) {
@@ -347,8 +374,9 @@
     const natW = num(b.natW, 0), natH = num(b.natH, 0), cmPerPx = num(b.cmPerPx, 0);
     if (!(natW > 0 && natH > 0 && cmPerPx > 0)) return null;
     const rot = [0, 90, 180, 270].includes(+b.rot) ? +b.rot : 0;
+    // aligned: 축척을 맞춘 뒤 3단계(왼쪽 위 모서리 맞추기)까지 끝냈는지 — 예전 자료(값 없음)는 끝낸 것으로
     return { src: b.src, natW, natH, cmPerPx, x: num(b.x, 0), y: num(b.y, 0), rot,
-      opacity: MV.clamp(num(b.opacity, 0.5), 0.15, 1), show: b.show !== false, fade: b.fade !== false, calibrated: !!b.calibrated };
+      opacity: MV.clamp(num(b.opacity, 0.5), 0.15, 1), show: b.show !== false, fade: b.fade !== false, calibrated: !!b.calibrated, aligned: b.aligned !== false };
   }
   function prefsOf(st) {
     if (!st.ui || typeof st.ui !== 'object') st.ui = {};
@@ -432,13 +460,14 @@
     });
     const rooms = kept.concat(added);
     const arr = (a) => (Array.isArray(a) ? a.filter((x) => x && typeof x === 'object') : []);
-    // 지운 방에만 붙은 문·창·트인 곳·고정물은 숨김 (남은 원래 방의 벽에도 걸쳐 있으면 그대로 둠)
-    const liveRooms = kept.filter((r) => r.w > 0 && r.h > 0);
+    // 지운 방에만 붙은 문·창·트인 곳·고정물은 숨김 (남은 방 — 원래 방·직접 그린 방 — 의 벽에도 걸쳐 있으면 그대로 둠)
+    const liveRooms = rooms.filter((r) => r.w > 0 && r.h > 0);
     const deadRooms = removed.filter((r) => r.w > 0 && r.h > 0);
+    const onLive = (o, L) => liveRooms.some((r) => segOnRect(o, L, r));
     const segHidden = (o) => {
       if (!deadRooms.length) return false;
       const L = segLen(o);
-      return deadRooms.some((d) => segOnRect(o, L, d)) && !liveRooms.some((r) => segOnRect(o, L, r));
+      return deadRooms.some((d) => segOnRect(o, L, d)) && !onLive(o, L);
     };
     const rectHidden = (f) => {
       if (!deadRooms.length) return false;
@@ -450,18 +479,25 @@
     const doorsGone = baseDoors.filter((d) => delDoors.has(doorKey(d)));
     const doors = baseDoors.filter((d) => !delDoors.has(doorKey(d)) && !segHidden(d));
     const doorsAdded = [];
+    // 직접 추가한 문: 그 문을 단 방(room)이 지워졌거나(원래 방) 없어졌으면(그린 방) 숨김 — 남은 방의 벽 위에도 있으면 그대로 둠
+    const liveIds = new Set(rooms.map((r) => r.id));
+    let doorsHidden = 0;
     E.doorsAdded.forEach((d, i) => {
       if (!d || typeof d !== 'object') return;
       const id = d.id != null ? String(d.id) : 'door' + i;
-      doorsAdded.push({ x: num(d.x, 0), y: num(d.y, 0), width: Math.max(10, num(d.width, NEW_DOOR_W)), orientation: d.orientation === 'v' ? 'v' : 'h',
+      const door = { x: num(d.x, 0), y: num(d.y, 0), width: Math.max(10, num(d.width, NEW_DOOR_W)), orientation: d.orientation === 'v' ? 'v' : 'h',
         swing: ['up', 'down', 'left', 'right'].includes(d.swing) ? d.swing : (d.orientation === 'v' ? 'right' : 'down'),
-        hinge: d.hinge === 'end' ? 'end' : 'start', room: d.room != null ? String(d.room) : '', note: '직접 추가한 문', _key: 'a:' + id, _added: true, id });
+        hinge: d.hinge === 'end' ? 'end' : 'start', room: d.room != null ? String(d.room) : '', note: '직접 추가한 문', _key: 'a:' + id, _added: true, id };
+      const ownerGone = !!door.room && !liveIds.has(door.room);
+      if ((ownerGone || segHidden(door)) && !onLive(door, door.width)) { doorsHidden++; return; }
+      doorsAdded.push(door);
     });
     const p = Object.assign({}, base, {
       key, rooms, doors: doors.concat(doorsAdded),
       windows: arr(base.windows).filter((w) => !segHidden(w)),
       fixtures: arr(base.fixtures).filter((f) => !rectHidden(f)),
-      builtins: arr(base.builtins).filter((f) => !rectHidden(f)),
+      // 붙박이장은 옷 수납 길이 비교에 쓰이므로 방을 지워도 남김 (실측으로 따로 확인)
+      builtins: arr(base.builtins),
       name: String(base.name || PLAN_LABEL[key]), short: String(base.short || PLAN_LABEL[key]),
     });
     // 전체 크기
@@ -471,6 +507,8 @@
     p.width = sz ? sz.width : bw0;
     p.depth = sz ? sz.depth : bd0;
     p.sizeEdited = !!sz && (Math.abs(sz.width - bw0) > 0.05 || Math.abs(sz.depth - bd0) > 0.05);
+    p.sizeSet = !!sz;   // 전체 크기를 직접 넣었으면 치수선도 그 크기로 (방이 더 커도)
+    p.doorsHidden = doorsHidden;
     p.removed = removed;
     p.edits = { rooms: kept.filter((r) => r.edited).length, added: added.length, deleted: removed.length, size: p.sizeEdited,
       doorsAdded: doorsAdded.length, doorsDeleted: doorsGone.length };
@@ -1109,13 +1147,16 @@
       deco.appendChild(svg('path', Object.assign({ d: 'M' + r1(fx) + ' ' + r1(fy) + ' A' + g.w + ' ' + g.w + ' 0 0 ' + sweep + ' ' + r1(ox) + ' ' + r1(oy), fill: 'none', stroke: 'var(--ink-3)', 'stroke-width': 1, 'stroke-dasharray': '4 3' }, NS)));
       deco.appendChild(line(hx, hy, ox, oy, { stroke: d._added ? 'var(--brand)' : 'var(--ink-2)', 'stroke-width': 2.2, 'stroke-linecap': 'round' }));
     });
-    // 7-1) 전체 크기 외곽 (직접 고쳤거나 치수 수정 중일 때)
-    if ((plan.sizeEdited || o.edit) && plan.width > 0 && plan.depth > 0) {
+    // 7-1) 전체 크기 외곽 (직접 넣었거나 치수 수정 중일 때)
+    if ((plan.sizeSet || o.edit) && plan.width > 0 && plan.depth > 0) {
       deco.appendChild(svg('rect', Object.assign({ class: 'fp-outline', x: 0, y: 0, width: r1(plan.width), height: r1(plan.depth), fill: 'none',
         stroke: o.edit ? 'var(--brand)' : 'var(--ink-3)', 'stroke-width': 1.2, 'stroke-dasharray': '10 5', 'stroke-opacity': o.edit ? 0.8 : 0.6 }, NS)));
     }
     // 8) 방 이름 + 치수 + 면적
-    validRooms(plan).forEach((r) => {
+    // 방 위에 겹쳐 그린 방이 있으면 그 자리와, 먼저 놓인 다른 방 이름표를 피해서 놓음 (글자끼리 겹치지 않게)
+    const vrs = validRooms(plan);
+    const labelBoxes = [];
+    vrs.forEach((r, ri) => {
       if (r.edited || r.added) deco.appendChild(svg('rect', Object.assign({ x: r1(r.x + 9), y: r1(r.y + 9), width: Math.max(0, r1(r.w - 18)), height: Math.max(0, r1(r.h - 18)), fill: 'none', stroke: 'var(--brand)', 'stroke-width': 1.2, 'stroke-dasharray': '6 4' }, NS)));
       if (r.w < 20 || r.h < 20) return;
       const maxW = r.w * 0.88;
@@ -1133,6 +1174,7 @@
       const lw = Math.max(nm.w, sub ? textW(sub, sfs) : 0), lh = sub ? h1 + h2 : h1;
       const pad = Math.min(6, r.w * 0.04);
       const rects = (o.items || []).map((it) => it.r).concat(plan.builtins.map(fxRect), plan.fixtures.map(fxRect).filter((fr) => fr.w >= 30 && fr.h >= 30));
+      vrs.slice(ri + 1).forEach((o2) => { const i = inter(r, o2); if (i) rects.push({ x: Math.max(r.x, o2.x), y: Math.max(r.y, o2.y), w: i.w, h: i.h }); });
       let best = null;
       [[0.5, 0.5], [0.5, 0.27], [0.5, 0.73], [0.3, 0.5], [0.7, 0.5], [0.3, 0.27], [0.7, 0.27], [0.3, 0.73], [0.7, 0.73], [0.5, 0.12], [0.5, 0.88]].some(([fx, fy]) => {
         const x = MV.clamp(r.x + fx * r.w, r.x + lw / 2 + pad, r.x + r.w - lw / 2 - pad);
@@ -1140,11 +1182,13 @@
         const box = { x: x - lw / 2, y: y - lh / 2, w: lw, h: lh };
         let ov = 0;
         rects.forEach((rr) => { const i = inter(box, rr); if (i) ov += i.w * i.h; });
+        labelBoxes.forEach((rr) => { const i = inter(box, rr); if (i) ov += 4 * i.w * i.h; });
         if (!best || ov < best.ov) best = { x, y, ov };
         return ov === 0;
       });
       const cx = best ? best.x : r.x + r.w / 2, cy = best ? best.y : r.y + r.h / 2;
       const top = cy - lh / 2;
+      labelBoxes.push({ x: cx - lw / 2, y: top, w: lw, h: lh });
       const halo = { 'paint-order': 'stroke', stroke: roomFill(r.kind), 'stroke-linejoin': 'round' };
       deco.appendChild(T(cx, top + h1 / 2, nm.text, nm.fs, Object.assign({ 'data-fit': r1(maxW), fill: 'var(--ink)', 'font-weight': 800, 'stroke-width': r2(nm.fs * 0.28) }, halo)));
       if (sub) deco.appendChild(T(cx, top + h1 + h2 / 2, sub, sfs, Object.assign({ 'data-fit': r1(maxW), class: 'num', fill: 'var(--ink-3)', 'font-weight': 600, 'stroke-width': r2(sfs * 0.28) }, halo)));
@@ -1153,20 +1197,22 @@
     const front = ['top', 'bottom', 'left', 'right'].includes(plan.front) ? plan.front : null;
     const dimFs = fz(10);
     if (!o.compact) {
+      // 치수선: 전체 크기를 직접 넣었으면 그 크기(외곽선)를, 아니면 그림 범위를 잼. 선 자리는 그림 범위 바깥(방과 겹치지 않게)
+      const db = plan.sizeSet && plan.width > 0 && plan.depth > 0 ? { x: 0, y: 0, w: plan.width, h: plan.depth } : b;
       const dimY = front === 'top' ? b.y + b.h + MARGIN * 0.3 : b.y - MARGIN * 0.3;
       const tY = front === 'top' ? dimY + dimFs * 0.9 : dimY - dimFs * 0.9;
       const tick = fz(4);
-      deco.appendChild(line(b.x, dimY, b.x + b.w, dimY, { stroke: 'var(--ink-3)', 'stroke-width': 1 }));
-      deco.appendChild(line(b.x, dimY - tick, b.x, dimY + tick, { stroke: 'var(--ink-3)', 'stroke-width': 1 }));
-      deco.appendChild(line(b.x + b.w, dimY - tick, b.x + b.w, dimY + tick, { stroke: 'var(--ink-3)', 'stroke-width': 1 }));
-      deco.appendChild(T(b.x + b.w / 2, tY, Math.round(b.w) + 'cm', dimFs, { fill: 'var(--ink-2)', 'font-weight': 600, class: 'num' }));
+      deco.appendChild(line(db.x, dimY, db.x + db.w, dimY, { stroke: 'var(--ink-3)', 'stroke-width': 1 }));
+      deco.appendChild(line(db.x, dimY - tick, db.x, dimY + tick, { stroke: 'var(--ink-3)', 'stroke-width': 1 }));
+      deco.appendChild(line(db.x + db.w, dimY - tick, db.x + db.w, dimY + tick, { stroke: 'var(--ink-3)', 'stroke-width': 1 }));
+      deco.appendChild(T(db.x + db.w / 2, tY, Math.round(db.w) + 'cm', dimFs, { fill: 'var(--ink-2)', 'font-weight': 600, class: 'num' }));
       const dimX = front === 'left' ? b.x + b.w + MARGIN * 0.3 : b.x - MARGIN * 0.3;
       const tX = front === 'left' ? dimX + dimFs * 0.9 : dimX - dimFs * 0.9;
-      deco.appendChild(line(dimX, b.y, dimX, b.y + b.h, { stroke: 'var(--ink-3)', 'stroke-width': 1 }));
-      deco.appendChild(line(dimX - tick, b.y, dimX + tick, b.y, { stroke: 'var(--ink-3)', 'stroke-width': 1 }));
-      deco.appendChild(line(dimX - tick, b.y + b.h, dimX + tick, b.y + b.h, { stroke: 'var(--ink-3)', 'stroke-width': 1 }));
-      const cyy = b.y + b.h / 2;
-      deco.appendChild(T(tX, cyy, Math.round(b.h) + 'cm', dimFs, { fill: 'var(--ink-2)', 'font-weight': 600, class: 'num', transform: 'rotate(-90 ' + r1(tX) + ' ' + r1(cyy) + ')' }));
+      deco.appendChild(line(dimX, db.y, dimX, db.y + db.h, { stroke: 'var(--ink-3)', 'stroke-width': 1 }));
+      deco.appendChild(line(dimX - tick, db.y, dimX + tick, db.y, { stroke: 'var(--ink-3)', 'stroke-width': 1 }));
+      deco.appendChild(line(dimX - tick, db.y + db.h, dimX + tick, db.y + db.h, { stroke: 'var(--ink-3)', 'stroke-width': 1 }));
+      const cyy = db.y + db.h / 2;
+      deco.appendChild(T(tX, cyy, Math.round(db.h) + 'cm', dimFs, { fill: 'var(--ink-2)', 'font-weight': 600, class: 'num', transform: 'rotate(-90 ' + r1(tX) + ' ' + r1(cyy) + ')' }));
     }
     if (front) {
       const fs = fz(11);
@@ -1502,9 +1548,11 @@
 .fp-svg .fp-wizpt { cursor: grab; touch-action: none; }
 .fp-stage.is-capture, .fp-stage.is-capture .fp-svg { touch-action: none; }
 .fp-stage.is-move .fp-svg { cursor: move; }
-.fp-bgbar { display: flex; flex-direction: column; gap: 8px; margin: 0 0 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); font-size: .86rem; }
+.fp-bgbar { display: flex; flex-direction: column; gap: 8px; margin: 0 0 8px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); font-size: .86rem; }
 .fp-bgrow { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; }
 .fp-bgrow > .fp-bglabel { font-weight: 800; margin-right: 2px; }
+.fp-bgdesc { flex: 1 1 120px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fp-bgclose { margin-left: auto; }
 .fp-bgbody { display: flex; flex-direction: column; gap: 8px; padding-top: 8px; border-top: 1px dashed var(--line); }
 .fp-bgmore { gap: 2px; }
 .fp-bgrow .spacer { flex: 1; }
@@ -1530,6 +1578,10 @@
 .fp-lenin .select { flex: 0 0 auto; width: auto; }
 .fp-lenout { font-size: .8rem; font-weight: 700; color: var(--ink-2); }
 .fp-lenout.is-bad { color: var(--bad); }
+.fp-lenalt { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; margin-top: 4px; font-weight: 600; }
+.fp-lenalt .btn { min-height: 36px; padding: 0 10px; font-size: .8rem; }
+.fp-lenwarn { margin-top: 4px; color: var(--ink); background: var(--warn-bg); border-radius: 8px; padding: 4px 8px; }
+.fp-wizhelpbtn { display: none; }
 .fp-nudge { display: inline-flex; gap: 2px; }
 .fp-nudge .btn { width: 38px; padding: 0; }
 .fp-tools { display: inline-flex; flex-wrap: wrap; gap: 2px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px; padding: 2px; }
@@ -1543,11 +1595,18 @@
 .fp-del-list { list-style: none; margin: 4px 0 0; padding: 0; }
 .fp-del-list li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 4px 0; font-size: .88rem; }
 @media (max-width: 600px) {
-  .fp-bgbar { padding: 8px; }
+  .fp-bgbar { padding: 6px 8px; }
+  .fp-bgdesc { display: none; }
   .fp-tools { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .fp-tools .btn { padding: 0 6px; }
   .fp-bgscale { display: none; }
   .fp-wizbar { top: calc(var(--topbar-h) + 4px); padding: 8px 10px; }
+  /* 폰: 안내 띠를 낮게 (설명은 '설명 보기'로), 길이를 넣는 2단계는 띠가 따라오지 않게 (자판과 함께 찍은 점을 가리지 않게) */
+  .fp-wizhelpbtn { display: inline-flex; }
+  .fp-wizrow { gap: 4px; }
+  .fp-wizrow > .btn { padding: 0 8px; }
+  .fp-wizbar:not(.is-help) .fp-wizhelp { display: none; }
+  .fp-wizbar.is-typing { position: static; }
 }
 `);
 
@@ -1681,7 +1740,7 @@
       const bg = bgOf(key);
       const showBg = !!bg && bg.show;
       // 사진 전체가 보여야 할 때(맞추는 중·치수 수정 중·아직 축척을 안 맞춤)만 사진 외곽까지 그림 범위를 넓힘
-      const vb = viewBoxFor(plan, items, showBg && (editMode || wiz || !bg.calibrated) ? bgBox(bg) : null);
+      const vb = viewBoxFor(plan, items, showBg && (editMode || wiz || !bg.calibrated || !bg.aligned) ? bgBox(bg) : null);
       const fitS = Math.max(0.08, Math.min(cw / vb.w, maxH / vb.h));
       const s = fitS * curZoom();
       const ae = document.activeElement;
@@ -1755,8 +1814,11 @@
         plan.floor ? el('span', { class: 'chip' }, plan.floor + '층') : null,
         confidenceChip(plan),
         plan.edited ? el('span', { class: 'chip brand', title: editSummary(plan) || '실측으로 고친 곳이 있어요' }, '📏 실측 반영됨') : null,
-        cur.bg ? el('span', { class: 'chip ' + (cur.bg.calibrated ? 'good' : 'warn'), title: cur.bg.calibrated ? '평면도 사진 축척을 맞췄어요' : '평면도 사진 축척을 아직 안 맞췄어요' },
-          '🖼 사진' + (cur.bg.calibrated ? ' · 축척 맞춤' : ' · 축척 미확인')) : null,
+        cur.bg ? (() => {
+          const ok = cur.bg.calibrated && cur.bg.aligned;
+          return el('span', { class: 'chip ' + (ok ? 'good' : 'warn'), title: ok ? '평면도 사진 축척·위치를 맞췄어요' : cur.bg.calibrated ? '축척은 맞췄고, 도면 왼쪽 위 모서리(위치)를 아직 안 맞췄어요' : '평면도 사진 축척을 아직 안 맞췄어요' },
+            '🖼 사진' + (ok ? ' · 축척 맞춤' : cur.bg.calibrated ? ' · 위치 미확인' : ' · 축척 미확인'));
+        })() : null,
         el('span', { class: 'chip kid' }, '놓은 짐 ' + items.length + '개'),
         v.bad ? el('span', { class: 'chip bad' }, '문제 ' + v.bad) : null,
         v.warn ? el('span', { class: 'chip warn' }, '주의 ' + v.warn) : null);
@@ -1769,8 +1831,9 @@
       doorDel: '지울 문(빨간 점선 칸)을 누르세요.',
     };
     function drawEditBar() {
-      editBar.hidden = !editMode;
-      if (!editMode) { editBar.textContent = ''; return; }
+      // 사진 맞추기 중엔 안내 띠만 (도구를 눌러도 도면 누르기는 맞추기가 받으므로 헷갈리지 않게 숨김)
+      editBar.hidden = !editMode || !!wiz;
+      if (!editMode || wiz) { editBar.textContent = ''; return; }
       const plan = cur.plan;
       // 도구 단추에 초점이 있었으면 다시 그린 뒤에도 같은 단추에
       const ae = document.activeElement;
@@ -1807,13 +1870,16 @@
       bBg.setAttribute('aria-pressed', String(!!p.bgPanel));
       zoomV.textContent = Math.round(curZoom() * 100) + '%';
     }
-    /** 요소가 화면 밖이면 부드럽게 보이는 곳으로 */
+    /** 요소가 화면 밖(위 막대·아래 메뉴 뒤 포함)이면 부드럽게 보이는 곳으로 — 아래가 잘렸으면 위끝이 가려지지 않는 만큼만 올림 */
     function revealEl(node) {
       requestAnimationFrame(() => {
         if (!node || !node.isConnected || node.hidden) return;
         const r = node.getBoundingClientRect();
         const top = pxv('--topbar-h', 56) + 8, bot = window.innerHeight - pxv('--bottom-h', 0) - 8;
-        if (r.top < top || r.top > bot - 60) window.scrollBy({ top: r.top - top - 8, behavior: 'smooth' });
+        let dy = 0;
+        if (r.top < top || r.top > bot - 60) dy = r.top - top - 8;
+        else if (r.bottom > bot) dy = Math.min(r.bottom - bot + 8, r.top - top - 8);
+        if (Math.abs(dy) > 1) window.scrollBy({ top: dy, behavior: 'smooth' });
       });
     }
 
@@ -1837,8 +1903,8 @@
       const bg = cur.bg;
       const open = prefs().bgPanel;
       // 사진 도구 펼침: 직접 펼치거나 접기 전까지는 '축척을 아직 안 맞췄으면 펼침'
-      const toolsOn = bg ? (toolsOpen == null ? !bg.calibrated : toolsOpen) : false;
-      const sg = [open, !!bg, bg ? [bg.show, bg.fade, bg.rot, bg.calibrated, Math.round(bg.cmPerPx * 1e4), bg.natW, bg.natH, bg.src.length] : null, !!wiz, toolsOn];
+      const toolsOn = bg ? (toolsOpen == null ? !bg.calibrated || !bg.aligned : toolsOpen) : false;
+      const sg = [open, !!bg, bg ? [bg.show, bg.fade, bg.rot, bg.calibrated, bg.aligned, Math.round(bg.cmPerPx * 1e4), bg.natW, bg.natH, bg.src.length] : null, !!wiz, toolsOn];
       if (!changed('bgbar', sg) && !force) { syncOpacity(); return; }
       // 맞추는 동안엔 안내 띠가 대신하므로 사진 도구는 접어 둠
       bgBar.hidden = !open || !!wiz;
@@ -1848,9 +1914,11 @@
         put(bgBar,
           el('div', { class: 'fp-bgrow' },
             el('span', { class: 'fp-bglabel' }, '🖼 평면도 사진'),
-            el('span', { class: 'small muted', style: { flex: '1 1 220px', minWidth: '0' } }, '진짜 평면도를 캡처해서 깔면, 그 위에서 방·문을 맞춰 도면을 고칠 수 있어요.'),
+            el('span', { class: 'small muted fp-bgdesc', title: '진짜 평면도를 캡처해서 깔면, 그 위에서 방·문을 맞춰 도면을 고칠 수 있어요' }, '진짜 평면도를 깔고 그 위에서 도면 고치기'),
             btn('📷 사진 고르기', () => fileIn.click(), { class: 'btn fp-b btn-primary' }),
-            helpDetails()));
+            helpDetails(),
+            btn('✕', () => { setPref('bgPanel', false); drawBgBar(true); syncToolbar(); try { bBg.focus({ preventScroll: true }); } catch (e) { /* 무시 */ } },
+              { class: 'btn fp-b btn-ghost btn-icon fp-bgclose', 'aria-label': '평면도 사진 줄 닫기', title: '닫기 — 위의 “🖼 평면도 사진” 단추로 다시 열어요' })));
         return;
       }
       const range = el('input', { type: 'range', min: '15', max: '100', step: '5', value: String(Math.round(bg.opacity * 100)), 'aria-label': '사진 진하기', class: 'fp-opacity' });
@@ -1864,11 +1932,14 @@
       });
       const tg = (label, on, onClick, title) => btn(label, onClick, { 'aria-pressed': String(!!on), title });
       const bodyId = 'fpbgtools-' + key;
+      // 축척만 맞추고 3단계(위치)를 못 끝냈으면 (다른 탭으로 갔다 오는 등) 이어서 하도록 안내
+      const needPos = bg.calibrated && !bg.aligned;
       put(bgBar,
         el('div', { class: 'fp-bgrow' },
           el('span', { class: 'fp-bglabel' }, '🖼 평면도 사진'),
-          el('span', { class: 'chip ' + (bg.calibrated ? 'good' : 'warn') }, bg.calibrated ? '축척 맞춤 ✓' : '축척을 맞춰 주세요'),
+          el('span', { class: 'chip ' + (bg.calibrated && !needPos ? 'good' : 'warn') }, !bg.calibrated ? '축척을 맞춰 주세요' : needPos ? '위치를 맞춰 주세요' : '축척 맞춤 ✓'),
           bg.calibrated ? el('span', { class: 'tiny muted num fp-bgscale' }, '1px ≈ ' + (Math.round(bg.cmPerPx * 100) / 100) + 'cm') : null,
+          needPos ? btn('📍 위치 맞추기', () => startWiz('origin'), { class: 'btn fp-b btn-primary', 'data-act': 'origin', title: '축척은 맞췄어요 — 사진에서 도면 왼쪽 위 모서리를 눌러 위치를 맞춰요 (3/3)' }) : null,
           el('span', { class: 'spacer' }),
           tg('👁 보이기', bg.show, () => setBg({ show: !bg.show }), '사진 보이기/숨기기'),
           el('button', { type: 'button', class: 'btn fp-b fp-bgmore', 'aria-expanded': String(toolsOn), 'aria-controls': bodyId, 'data-act': 'tools',
@@ -1949,7 +2020,7 @@
         if (!first) first = e;
         // 처음엔 사진 가로를 도면 가로에 맞춰 깔아 둠 (축척 맞추기 전 대략)
         const entry = { src: e.src, natW: e.natW, natH: e.natH, cmPerPx: b.w / e.natW, x: r1(b.x), y: r1(b.y), rot: 0,
-          opacity: prev ? prev.opacity : 0.5, show: true, fade: prev ? prev.fade : true, calibrated: false };
+          opacity: prev ? prev.opacity : 0.5, show: true, fade: prev ? prev.fade : true, calibrated: false, aligned: false };
         res = saveBg(entry, '🖼 ' + PLAN_LABEL[key] + ' 평면도 사진 ' + (prev ? '바꿈' : '올림') + ' (' + e.natW + '×' + e.natH + 'px, ' + kb(e.src.length) + ')');
         if (res !== 'quota') { used = e; break; }
       }
@@ -1974,8 +2045,10 @@
       const box = bgBox(bg);
       const nb = Object.assign({}, bg, { rot: (bg.rot + 90) % 360 });
       const d = bgDims(nb);
-      setBg({ rot: nb.rot, x: r1(box.x + box.w / 2 - d.bw / 2), y: r1(box.y + box.h / 2 - d.bh / 2) }, '🖼 ' + PLAN_LABEL[key] + ' 평면도 사진 90° 돌림');
-      if (bg.calibrated) toast('사진을 돌렸어요 — 도면과 어긋났으면 위치를 다시 맞춰 주세요', { action: { label: '위치 맞추기', onClick: () => startWiz('origin') }, ms: 5000 });
+      // 축척을 맞춘 사진을 돌리면 도면과 어긋나므로 위치를 다시 맞추도록 (축척은 그대로)
+      setBg(Object.assign({ rot: nb.rot, x: r1(box.x + box.w / 2 - d.bw / 2), y: r1(box.y + box.h / 2 - d.bh / 2) }, bg.calibrated ? { aligned: false } : {}),
+        '🖼 ' + PLAN_LABEL[key] + ' 평면도 사진 90° 돌림');
+      if (bg.calibrated) toast('사진을 돌렸어요 — 도면 왼쪽 위 모서리를 눌러 위치를 다시 맞춰 주세요', { action: { label: '위치 맞추기', onClick: () => startWiz('origin') }, ms: 5000 });
     }
     function deleteBg() {
       MV.ui.confirm(PLAN_LABEL[key] + ' 평면도 사진을 지울까요? 고친 도면(방·문·크기)은 그대로 남아요.', { danger: true, okLabel: '사진 지우기', title: '사진 지우기' }).then((ok) => {
@@ -1988,7 +2061,7 @@
     }
 
     /* ---- 축척 맞추기 · 위치 옮기기 ---- */
-    const GEO = ['cmPerPx', 'x', 'y', 'rot', 'calibrated', 'show'];
+    const GEO = ['cmPerPx', 'x', 'y', 'rot', 'calibrated', 'aligned', 'show'];
     function startWiz(step) {
       const bg = bgOf(key);
       if (!bg) { toast('먼저 평면도 사진을 골라 주세요'); return; }
@@ -2017,11 +2090,15 @@
       if (changedGeo) setBg(Object.assign({}, w.snap)); else refresh();
       toast('사진 맞추기를 취소했어요');
     }
+    /** 맞추기 끝. quiet = 다른 일(치수 수정 등)로 넘어가며 조용히 닫음 → 위치를 못 맞췄으면 '위치 맞추기' 안내가 남음 */
     function finishWiz(quiet) {
       if (!wiz) return;
       const w = wiz;
       wiz = null;
-      drawWizBar(); syncStageMode(); refresh();
+      drawWizBar(); syncStageMode();
+      // 3단계에서 '건너뛰기'·끌어서 맞춘 뒤 '완료'를 누르면 위치도 맞춘 것으로
+      const b = !quiet && bgOf(key);
+      if (b && b.calibrated && !b.aligned) setBg({ aligned: true }); else refresh();
       if (quiet) return;
       if (w.onlyMove) { toast('사진 위치를 옮겼어요'); return; }
       toast('사진 축척·위치를 맞췄어요 — 이제 사진 선을 따라 방을 고쳐 보세요', { action: editMode ? null : { label: '✏️ 치수 수정', onClick: () => { editMode = true; tool = 'room'; sel = null; syncStageMode(); refresh(); } }, ms: 6000 });
@@ -2034,14 +2111,21 @@
     function drawWizBar() {
       wizBar.hidden = !wiz;
       wizBar.textContent = '';
-      if (!wiz) return;
+      if (!wiz) { wizBar.className = 'callout fp-wizbar'; return; }
+      const typing = wiz.step === 'pts' && wiz.pts.length >= 2;
+      // 폰: 설명은 '설명 보기'로 접어 두고(띠가 낮아져 사진을 덜 가림), 길이를 넣는 2단계는 띠가 따라오지 않게(자판과 함께 도면을 덮지 않게)
+      wizBar.className = 'callout fp-wizbar' + (typing ? ' is-typing' : '') + (wiz.help ? ' is-help' : '');
       const cancel = btn('취소', cancelWiz, { class: 'btn fp-b btn-ghost', title: '맞추기 전으로 되돌리기' });
-      const T = (t, d) => [el('div', { class: 'fp-wizt' }, t), d ? el('div', { class: 'fp-wizd' }, d) : null];
+      const helpId = 'fpwizhelp-' + key;
+      const helpBtn = () => el('button', { type: 'button', class: 'btn fp-b btn-ghost fp-wizhelpbtn', 'aria-expanded': String(!!wiz.help), 'aria-controls': helpId,
+        'aria-label': wiz.help ? '설명 접기' : '설명 보기', title: wiz.help ? '설명 접기' : '설명 보기',
+        onclick: () => { wiz.help = !wiz.help; drawWizBar(); const b2 = wizBar.querySelector('.fp-wizhelpbtn'); if (b2) b2.focus({ preventScroll: true }); } }, '설명 ', el('span', { 'aria-hidden': 'true' }, wiz.help ? '▴' : '▾'));
+      const T = (t, d) => [el('div', { class: 'fp-wizt' }, t), d ? el('div', { class: 'fp-wizd fp-wizhelp', id: helpId }, d) : null];
       if (wiz.step === 'pts' && wiz.pts.length < 2) {
         put(wizBar, T('📏 축척 맞추기 1/3 · 길이를 아는 두 점을 누르세요',
           '사진 속 전체 가로 양 끝이나, “3,300”처럼 치수가 적힌 선의 양 끝을 차례로 누르세요. 두 손가락으로 벌려 확대하면 더 정확하고, 찍은 점은 끌어서 옮길 수 있어요.'),
         el('div', { class: 'fp-wizrow' }, el('span', { class: 'chip brand', 'aria-live': 'polite' }, '찍은 점 ' + wiz.pts.length + '/2'), el('span', { class: 'spacer' }),
-          wiz.pts.length ? btn('다시 찍기', () => { wiz.pts = []; drawOverlay(); drawWizBar(); }) : null, cancel));
+          wiz.pts.length ? btn('다시 찍기', () => { wiz.pts = []; drawOverlay(); drawWizBar(); }) : null, helpBtn(), cancel));
       } else if (wiz.step === 'pts') {
         if (!wiz.lenIn) {
           wiz.lenIn = el('input', { class: 'input num', type: 'text', inputmode: 'decimal', autocomplete: 'off', placeholder: '예: 330 · 3300mm · 3.3m', 'aria-label': '두 점 사이 실제 길이' });
@@ -2054,42 +2138,60 @@
         wiz.lenOut = el('div', { class: 'fp-lenout', 'aria-live': 'polite' });
         wiz.distEl = el('span', { class: 'num' }, Math.round(wizDist()) + 'cm');
         put(wizBar, T('📏 축척 맞추기 2/3 · 두 점 사이 실제 길이를 넣으세요'),
-          el('div', { class: 'fp-wizd' }, '지금 사진 크기로는 약 ', wiz.distEl, '예요. 도면에 적힌 숫자(보통 mm)를 그대로 넣어도 돼요.'),
+          el('div', { class: 'fp-wizd fp-wizhelp', id: helpId }, '지금 사진 크기로는 약 ', wiz.distEl, '예요. 도면에 적힌 숫자(“3,300”·“1,200”처럼 보통 mm)를 그대로 넣어도 돼요.'),
           el('div', { class: 'fp-wizrow' }, el('label', { class: 'fp-lenin' }, wiz.lenIn, wiz.unitSel)),
           wiz.lenOut,
           el('div', { class: 'fp-wizrow' }, btn('다음 →', applyScale, { class: 'btn fp-b btn-primary', 'data-act': 'next' }), btn('다시 찍기', () => { wiz.pts = []; drawOverlay(); drawWizBar(); }),
-            el('span', { class: 'spacer' }), cancel));
+            el('span', { class: 'spacer' }), helpBtn(), cancel));
         updLen();
         if (!coarse) setTimeout(() => { if (wiz && wiz.lenIn && wiz.lenIn.isConnected) wiz.lenIn.focus({ preventScroll: true }); }, 30);
+        // 폰에선 이 단계의 띠가 제자리에 있으므로, 화면 밖이면 보이는 곳으로
+        if (mm('(max-width: 600px)')) revealEl(wizBar);
       } else if (wiz.step === 'origin') {
         put(wizBar, T('📏 축척 맞추기 3/3 · 도면 왼쪽 위 모서리를 누르세요',
           '사진에서 바깥벽 왼쪽 위 모서리를 누르면, 그 점이 도면의 (0,0) — 주황 십자 자리 — 로 옮겨져요. 끌어서 맞춰도 돼요.'),
-        el('div', { class: 'fp-wizrow' }, btn('✋ 끌어서 맞추기', () => setWizStep('move')), btn('건너뛰기', () => finishWiz()), el('span', { class: 'spacer' }), cancel));
+        el('div', { class: 'fp-wizrow' }, btn('✋ 끌어서 맞추기', () => setWizStep('move')), btn('건너뛰기', () => finishWiz(), { title: '위치는 지금 그대로 두기' }), el('span', { class: 'spacer' }), helpBtn(), cancel));
       } else if (wiz.step === 'move') {
         const nb = (label, dx, dy) => btn(label, () => nudgeBg(dx, dy), { class: 'btn fp-b btn-icon', 'aria-label': '사진 ' + ({ '◀': '왼쪽', '▶': '오른쪽', '▲': '위', '▼': '아래' })[label] + '으로 2cm' });
         put(wizBar, T('✋ 사진 위치 옮기기 · 사진을 끌어서 도면 선에 맞추세요',
-          '손가락이나 마우스로 끌어요. 화살표 단추는 2cm씩 (키보드 방향키 1cm · Shift 10cm). 옮기는 동안엔 손가락으로 화면이 움직이지 않아요.'),
+          '손가락이나 마우스로 끌어요. 화살표 단추는 2cm씩 (키보드 방향키 1cm · Shift 10cm). 옮기는 동안엔 도면 위를 쓸어도 화면이 움직이지 않아요 — 화면을 움직이려면 도면 바깥(이 안내 띠·여백)을 쓸거나, 사진을 화면 끝까지 끌면 따라 움직여요.'),
         el('div', { class: 'fp-wizrow' }, el('span', { class: 'fp-nudge', role: 'group', 'aria-label': '사진 조금씩 옮기기' }, nb('◀', -2, 0), nb('▲', 0, -2), nb('▼', 0, 2), nb('▶', 2, 0)),
-          el('span', { class: 'spacer' }), btn('완료', () => finishWiz(), { class: 'btn fp-b btn-primary' }), cancel));
+          el('span', { class: 'spacer' }), helpBtn(), btn('완료', () => finishWiz(), { class: 'btn fp-b btn-primary' }), cancel));
       }
     }
+    const fmtLen = (cm) => (Math.round(cm * 10) / 10) + 'cm';
     function updLen() {
       if (!wiz || !wiz.lenOut) return;
       const t = wiz.lenIn.value;
-      const r = parseLen(t, wiz.unitSel.value);
-      wiz.lenOut.className = 'fp-lenout';
-      if (!String(t).trim()) { wiz.lenOut.textContent = '숫자만 넣으면 cm예요 (1500 넘으면 mm로 봐요).'; return; }
-      if (!r) { wiz.lenOut.className = 'fp-lenout is-bad'; wiz.lenOut.textContent = '숫자로 읽을 수 없어요 (예: 330 · 3300mm · 3.3m)'; return; }
-      const bad = r.cm < 20 || r.cm > 5000;
-      wiz.lenOut.className = 'fp-lenout' + (bad ? ' is-bad' : '');
-      wiz.lenOut.textContent = '= ' + (Math.round(r.cm * 10) / 10) + 'cm (' + (Math.round(r.cm) / 100) + 'm)' + (r.how ? ' · ' + r.how : '') + (bad ? ' — 20cm~50m 사이로 넣어 주세요' : '');
+      const est = wizDist();
+      const r = parseLen(t, wiz.unitSel.value, est);
+      const out = wiz.lenOut;
+      out.className = 'fp-lenout';
+      out.textContent = '';
+      if (!String(t).trim()) { out.textContent = '숫자만 넣으면 단위를 알아서 짐작해요 (“3,300”처럼 쉼표가 있으면 mm).'; return; }
+      if (!r) { out.className = 'fp-lenout is-bad'; out.textContent = '숫자로 읽을 수 없어요 (예: 330 · 3300mm · 3.3m)'; return; }
+      const bad = r.cm < LEN_MIN || r.cm > LEN_MAX;
+      out.className = 'fp-lenout' + (bad ? ' is-bad' : '');
+      put(out, el('div', '= ' + fmtLen(r.cm) + ' (' + (Math.round(r.cm) / 100) + 'm)' + (r.how ? ' · ' + r.how : '') + (bad ? ' — 20cm~50m 사이로 넣어 주세요' : '')));
+      // 단위를 짐작했으면 다르게 읽는 단추 (한 번 누르면 그 단위로 고정 — '단위 자동'으로 되돌릴 수 있음)
+      if (r.alts.length) {
+        const raw = String(t).trim();
+        put(out, el('div', { class: 'fp-lenalt' }, el('span', { class: 'tiny muted' }, '다르게 읽기:'),
+          r.alts.map((a) => el('button', { type: 'button', class: 'btn btn-sm fp-b', 'data-unit': a.unit,
+            onclick: () => { wiz.unitSel.value = a.unit; updLen(); try { wiz.unitSel.focus({ preventScroll: true }); } catch (e) { /* 무시 */ } } },
+          (a.unit === 'cm' ? raw.replace(/,/g, '') + 'cm' : raw + a.unit + ' = ' + fmtLen(a.cm)) + '로'))));
+      }
+      // 사진에서 잰 길이와 5배 넘게 다르면 숫자·단위를 한 번 더 보게
+      if (!bad && est > 0 && (r.cm / est > 5 || r.cm / est < 0.2)) {
+        put(out, el('div', { class: 'fp-lenwarn' }, '⚠️ 사진에서 잰 길이(약 ' + Math.round(est) + 'cm)와 많이 달라요 — 숫자·단위를 확인하세요'));
+      }
     }
     function applyScale() {
       if (!wiz || wiz.pts.length < 2) return;
       const bg = bgOf(key);
       if (!bg) return;
-      const r = parseLen(wiz.lenIn.value, wiz.unitSel.value);
-      if (!r || r.cm < 20 || r.cm > 5000) { updLen(); if (!r) { wiz.lenOut.className = 'fp-lenout is-bad'; wiz.lenOut.textContent = '실제 길이를 넣어 주세요 (예: 330 · 3300mm · 3.3m)'; } try { wiz.lenIn.focus(); } catch (e) { /* 무시 */ } return; }
+      const r = parseLen(wiz.lenIn.value, wiz.unitSel.value, wizDist());
+      if (!r || r.cm < LEN_MIN || r.cm > LEN_MAX) { updLen(); if (!r) { wiz.lenOut.className = 'fp-lenout is-bad'; wiz.lenOut.textContent = '실제 길이를 넣어 주세요 (예: 330 · 3300mm · 3.3m)'; } try { wiz.lenIn.focus(); } catch (e) { /* 무시 */ } return; }
       const dPx = wizDist() / bg.cmPerPx;
       if (dPx < 8) { wiz.lenOut.className = 'fp-lenout is-bad'; wiz.lenOut.textContent = '두 점이 너무 가까워요 — 확대해서 더 멀리 떨어진 두 점을 찍어 주세요'; return; }
       const k2 = r.cm / dPx;
@@ -2097,15 +2199,15 @@
       const A = wiz.pts[0];
       const uv = planToBg(bg, A.x, A.y);
       const at0 = bgToPlan(Object.assign({}, bg, { cmPerPx: k2, x: 0, y: 0 }), uv.u, uv.v);
-      setBg({ cmPerPx: k2, x: r2(A.x - at0.x), y: r2(A.y - at0.y), calibrated: true },
-        '📏 ' + PLAN_LABEL[key] + ' 평면도 사진 축척 맞춤 (두 점 ' + (Math.round(r.cm * 10) / 10) + 'cm)');
       wiz.step = 'origin'; wiz.pts = [];
-      drawWizBar(); syncStageMode(); refresh();
+      drawWizBar(); syncStageMode();
+      setBg({ cmPerPx: k2, x: r2(A.x - at0.x), y: r2(A.y - at0.y), calibrated: true, aligned: false },
+        '📏 ' + PLAN_LABEL[key] + ' 평면도 사진 축척 맞춤 (두 점 ' + (Math.round(r.cm * 10) / 10) + 'cm)');
     }
     function setOrigin(P) {
       const bg = bgOf(key);
       if (!bg) return;
-      setBg({ x: r2(bg.x - P.x), y: r2(bg.y - P.y) }, '🖼 ' + PLAN_LABEL[key] + ' 평면도 사진 위치 맞춤');
+      setBg({ x: r2(bg.x - P.x), y: r2(bg.y - P.y), aligned: true }, '🖼 ' + PLAN_LABEL[key] + ' 평면도 사진 위치 맞춤');
       finishWiz();
     }
     function nudgeBg(dx, dy) {
@@ -2127,8 +2229,12 @@
         const P = wiz.pts;
         if (P.length === 2) {
           g.appendChild(svg('line', Object.assign({ x1: r1(P[0].x), y1: r1(P[0].y), x2: r1(P[1].x), y2: r1(P[1].y), stroke: 'var(--brand)', 'stroke-width': 2.5 }, NS)));
+          // 길이 글자는 선과 수직으로, A·B 이름표(점의 오른쪽 위)와 반대쪽에 (가까운 두 점에서도 겹치지 않게)
           const mx = (P[0].x + P[1].x) / 2, my = (P[0].y + P[1].y) / 2;
-          g.appendChild(label(mx, my - px(14), '약 ' + Math.round(wizDist()) + 'cm', px(12)));
+          const L0 = Math.max(1e-6, wizDist());
+          let nx = -(P[1].y - P[0].y) / L0, ny = (P[1].x - P[0].x) / L0;
+          if (nx - ny > 0) { nx = -nx; ny = -ny; }
+          g.appendChild(label(mx + nx * px(24), my + ny * px(24), '약 ' + Math.round(wizDist()) + 'cm', px(12)));
         }
         P.forEach((p, i) => {
           g.appendChild(svg('line', Object.assign({ x1: r1(p.x - px(11)), y1: r1(p.y), x2: r1(p.x + px(11)), y2: r1(p.y), stroke: 'var(--brand)', 'stroke-width': 1.5 }, NS)));
@@ -2777,7 +2883,9 @@
     /** 방 지우기 (원래 방은 '지운 방' 목록에, 그린 방은 목록에서 뺌) → Promise<지웠는지> */
     function deleteRoom(r) {
       const placedIn = cur ? cur.items.filter((o) => hasPt(r, o.r.x + o.r.w / 2, o.r.y + o.r.h / 2)).length : 0;
-      return MV.ui.confirm('「' + r.name + '」' + jo(r.name, '을', '를') + ' 도면에서 지울까요?' + (r.added ? '' : ' 이 방에만 붙은 문·창·고정물도 함께 숨겨져요.')
+      const ownDoors = cur ? cur.plan.doors.filter((d) => d._added && d.room === r.id).length : 0;
+      return MV.ui.confirm('「' + r.name + '」' + jo(r.name, '을', '를') + ' 도면에서 지울까요?'
+        + (r.added ? (ownDoors ? ' 이 방에 단 문도 함께 지워져요.' : '') : ' 이 방에만 붙은 문·창·고정물도 함께 숨겨져요.')
         + (placedIn ? ' 이 방에 놓인 짐 ' + placedIn + '개는 그 자리에 그대로 남아요.' : ''), { danger: true, okLabel: '방 지우기', title: '방 삭제' }).then((ok) => {
         if (!ok) return false;
         let snap = null;
@@ -2785,7 +2893,19 @@
           const E = editsOf(st)[key];
           if (r.added) {
             const i = E.added.findIndex((a) => a && String(a.id) === String(r.srcId));
-            if (i >= 0) { snap = { i, entry: MV.clone(E.added[i]) }; E.added.splice(i, 1); }
+            if (i >= 0) {
+              snap = { i, entry: MV.clone(E.added[i]), doors: [] };
+              E.added.splice(i, 1);
+              // 그린 방은 되살릴 곳이 없으므로, 이 방에 단 문 중 (다른 방 벽에도 걸치지 않아) 이제 숨겨질 문은 함께 지움 — 되돌리기로 다시 살림
+              const after = getPlan(key);
+              const shown = new Set(after ? after.doors.filter((d) => d._added).map((d) => d.id) : []);
+              E.doorsAdded = E.doorsAdded.filter((d, j) => {
+                if (!d || typeof d !== 'object' || String(d.room) !== r.id) return true;
+                if (shown.has(d.id != null ? String(d.id) : 'door' + j)) return true;
+                snap.doors.push({ j, entry: MV.clone(d) });
+                return false;
+              });
+            }
           } else if (!E.deleted.map(String).includes(r.id)) E.deleted.push(r.id);
         }, { log: '🗑 ' + PLAN_LABEL[key] + ' 방 삭제: ' + r.name });
         toast('「' + shortName(r.name, 12) + '」' + jo(r.name, '을', '를') + ' 지웠어요', { action: { label: '되돌리기', onClick: () => restoreRoom(r, snap) } });
@@ -2796,7 +2916,13 @@
       MV.store.update((st) => {
         const E = editsOf(st)[key];
         if (r.added) {
-          if (snap && !E.added.some((a) => a && String(a.id) === String(snap.entry.id))) E.added.splice(Math.min(snap.i, E.added.length), 0, snap.entry);
+          if (snap && !E.added.some((a) => a && String(a.id) === String(snap.entry.id))) {
+            E.added.splice(Math.min(snap.i, E.added.length), 0, snap.entry);
+            // 함께 지웠던 문도 원래 자리(순서)로
+            (snap.doors || []).forEach(({ j, entry }) => {
+              if (!E.doorsAdded.some((z) => z && entry.id != null && z.id === entry.id)) E.doorsAdded.splice(Math.min(j, E.doorsAdded.length), 0, entry);
+            });
+          }
         } else E.deleted = E.deleted.filter((id) => String(id) !== r.id);
       }, { log: '↩ ' + PLAN_LABEL[key] + ' 방 되살림: ' + r.name });
       const plan = getPlan(key);
@@ -2862,7 +2988,7 @@
         body: el('div', { class: 'stack' },
           el('p', { class: 'small muted mb-0' }, '집 바깥벽 기준 전체 가로·세로(cm)예요. 외곽선·치수선·화면 맞춤이 이 크기를 따라가요. 방 크기는 따로 고쳐야 해요.'),
           el('div', { class: 'form-grid' }, field('전체 가로 (cm)', fW), field('전체 세로·깊이 (cm)', fD)),
-          el('div', { class: 'row' }, el('button', { type: 'button', class: 'btn btn-sm fp-b', onclick: () => { fW.value = String(up5(ext.w)); fD.value = String(up5(ext.h)); upd(); } },
+          el('div', { class: 'row' }, el('button', { type: 'button', class: 'btn fp-b', onclick: () => { fW.value = String(up5(ext.w)); fD.value = String(up5(ext.h)); upd(); } },
             '방에 맞추기 (' + up5(ext.w) + '×' + up5(ext.h) + ')')),
           prev),
         actions,
@@ -2931,14 +3057,28 @@
       MV.ui.confirm(PLAN_LABEL[key] + ' 도면에서 고친 것(방 치수·이름·종류, 그린 방, 지운 방, 전체 크기, 문 추가·삭제)을 모두 지우고 원래 도면으로 되돌릴까요? 평면도 사진은 그대로 둬요.', { danger: true, okLabel: '원래대로', title: '도면 전체 원래대로' }).then((ok) => {
         if (!ok) return;
         const plan = getPlan(key);
+        // 짐의 '위치' 이름 되돌리기: 이름을 바꾼 원래 방(지운 방 포함) → 원래 이름, 직접 그린 방 → 그 자리의 원래 방 이름
+        const changes = [];
+        if (plan) {
+          const all = plan.rooms.concat(plan.removed);
+          all.filter((x) => !x.added && x.edited && x.name !== x.orig.name).forEach((x) => changes.push({ rid: x.id, from: x.name, to: x.orig.name }));
+          const origs = all.filter((x) => !x.added && x.orig.w > 0 && x.orig.h > 0).map((x) => x.orig);
+          all.filter((x) => x.added).forEach((a) => {
+            const cx = a.x + a.w / 2, cy = a.y + a.h / 2;
+            let best = null;
+            origs.forEach((o2) => { if (hasPt(o2, cx, cy) && (!best || area(o2) < area(best))) best = o2; });
+            if (best) changes.push({ rid: a.id, from: a.name, to: best.name });
+          });
+        }
+        let moved = 0;
         MV.store.update((st) => {
           const E = editsOf(st)[key];
           E.rooms = {}; E.added = []; E.deleted = []; E.doorsAdded = []; E.doorsDeleted = [];
           delete E.size;
           // 모든 이름을 '바꾸기 전' 기준으로 한꺼번에 되돌림 (작은방1→서재, 서재→옷방 같은 연쇄도 안전하게)
-          if (plan) remapRoomRefs(st, key, plan, plan.rooms.filter((x) => x.edited && !x.added && x.name !== x.orig.name).map((x) => ({ rid: x.id, from: x.name, to: x.orig.name })));
+          if (plan && changes.length) moved = remapRoomRefs(st, key, plan, changes);
         }, { log: '📏 ' + PLAN_LABEL[key] + ' 도면 전체 원래대로' });
-        toast('원래 도면으로 되돌렸어요');
+        toast('원래 도면으로 되돌렸어요' + (moved ? ' · 짐 ' + moved + '개의 “' + (key === 'new' ? '새 집 위치' : '지금 집 위치') + '”도 원래 방 이름으로' : ''));
       });
     }
 
@@ -2983,12 +3123,11 @@
     const stopAuto = () => { if (autoRaf) cancelAnimationFrame(autoRaf); autoRaf = 0; };
     ctx.onCleanup(stopAuto);
     const pxv = (name, d) => { const v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name)); return isFinite(v) ? v : d; };
-    function autoTick() {
-      autoRaf = 0;
-      if (!drag || !drag.moved || !root.isConnected) return;
+    /** 손가락·마우스(cx, cy)가 도면 창·화면 가장자리 가까이 있으면 한 번 굴림 → { moved: 실제로 굴렀는지, go: 계속 살필지 }.
+        topEdge = 화면 위쪽 한계 (기본: 위 막대 아래 — 사진 맞추기 안내 띠가 떠 있으면 그 아래) */
+    function edgeScroll(cx, cy, topEdge) {
       const E = 44;
       const sp = (dist) => Math.round(MV.clamp(2 + dist * 0.25, 2, 16));
-      const { cx, cy } = drag;
       const sr = scroll.getBoundingClientRect();
       let vx = 0, vy = 0, wy = 0;
       if (scroll.scrollWidth > scroll.clientWidth + 1) {
@@ -2997,7 +3136,7 @@
       if (scroll.scrollHeight > scroll.clientHeight + 1) {
         if (cy < sr.top + E) vy = -sp(sr.top + E - cy); else if (cy > sr.bottom - E) vy = sp(cy - sr.bottom + E);
       }
-      const topLim = pxv('--topbar-h', 56) + E, botLim = window.innerHeight - pxv('--bottom-h', 0) - E;
+      const topLim = (topEdge == null ? pxv('--topbar-h', 56) : topEdge) + E, botLim = window.innerHeight - pxv('--bottom-h', 0) - E;
       if (cy < topLim && sr.top < topLim - E) wy = -sp(topLim - cy);
       else if (cy > botLim && sr.bottom > botLim + E) wy = sp(cy - botLim);
       let moved = false, movedY = false;
@@ -3009,8 +3148,27 @@
       }
       // 화면(페이지)은 도면 창이 더 굴러가지 않을 때만 — 둘이 함께 굴러 너무 빨라지지 않게
       if (wy && !movedY) { const y0 = window.scrollY; window.scrollBy(0, wy); moved = moved || window.scrollY !== y0; }
-      if (moved) dragPos();
-      if (moved || vx || vy || wy) autoRaf = requestAnimationFrame(autoTick);
+      return { moved, go: !!(moved || vx || vy || wy) };
+    }
+    function autoTick() {
+      autoRaf = 0;
+      if (!drag || !drag.moved || !root.isConnected) return;
+      const r = edgeScroll(drag.cx, drag.cy);
+      if (r.moved) dragPos();
+      if (r.go) autoRaf = requestAnimationFrame(autoTick);
+    }
+    // 사진 옮기기·점 옮기기·방 그리기도 가장자리에서 화면이 따라가게 (손가락이 도면을 굴리지 못하는 동안 길이 막히지 않도록)
+    let gestRaf = 0;
+    const stopGestAuto = () => { if (gestRaf) cancelAnimationFrame(gestRaf); gestRaf = 0; };
+    ctx.onCleanup(stopGestAuto);
+    function gestTick() {
+      gestRaf = 0;
+      if (!gest || !gest.moved || !root.isConnected) return;
+      const top = pxv('--topbar-h', 56);
+      const wb = !wizBar.hidden && getComputedStyle(wizBar).position === 'sticky' ? wizBar.getBoundingClientRect().bottom : 0;
+      const r = edgeScroll(gest.cx, gest.cy, Math.max(top, wb));
+      if (r.moved) applyGest();
+      if (r.go) gestRaf = requestAnimationFrame(gestTick);
     }
     /** 끌기 취소 (두 번째 손가락이 닿아 확대로 바뀔 때). 다시 그리면 터치 대상이 사라지므로 제자리로만 돌려 놓음 */
     function cancelDrag() {
@@ -3071,11 +3229,11 @@
     }, { passive: false });
 
     // ---- 사진 끌기 · 축척 점 옮기기 · 방 그리기 (마우스·터치·펜) ----
-    /** 방 그리기 점: 5cm 단위, 스냅이 켜져 있으면 가까운 방 벽·외곽에 붙음 */
+    /** 방 그리기 점: 5cm 단위, 스냅이 켜져 있으면 가까운 방 벽·외곽에 붙음 (붙는 거리는 화면 10px, 많아야 12cm — 폰에서 크게 튀지 않게) */
     function snapPt(P) {
       let x = Math.round(P.x / SNAP) * SNAP, y = Math.round(P.y / SNAP) * SNAP;
       if (prefs().snap && cur) {
-        const thr = Math.max(4, 10 / cur.s);
+        const thr = Math.max(4, Math.min(12, 10 / cur.s));
         const xs = [0, cur.plan.width], ys = [0, cur.plan.depth];
         validRooms(cur.plan).forEach((r) => { xs.push(r.x, r.x + r.w); ys.push(r.y, r.y + r.h); });
         let bd = thr;
@@ -3086,26 +3244,48 @@
       return { x: r1(x), y: r1(y) };
     }
     const rectFrom = (a, b) => ({ x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: r1(Math.abs(b.x - a.x)), h: r1(Math.abs(b.y - a.y)) });
+    /** 지금 손가락 위치(gest.cx, cy)로 끄는 중인 것을 다시 그림 — 화면이 굴러가도 맞도록 매번 도면 좌표로 바꿔 계산 */
+    function applyGest() {
+      const g = gest;
+      if (!g || !cur) return;
+      const P = toPlan(g.cx, g.cy);
+      if (g.type === 'bgmove') {
+        g.x = r1(g.x0 + P.x - g.P0.x);
+        g.y = r1(g.y0 + P.y - g.P0.y);
+        const im = svgEl && svgEl.querySelector('.fp-bg image');
+        if (im) im.setAttribute('transform', bgTransform(g.bg, g.x, g.y));
+      } else if (g.type === 'pt') {
+        if (!wiz) return;
+        wiz.pts[g.i] = P;
+        drawOverlay();
+        if (wiz.distEl) wiz.distEl.textContent = Math.round(wizDist()) + 'cm';
+        if (wiz.lenOut) updLen();
+      } else if (g.type === 'draw') {
+        g.rect = rectFrom(g.a, snapPt(P));
+        drawOverlay();
+      }
+    }
     function cancelGest() {
       if (!gest) return;
       const g = gest;
       gest = null;
+      stopGestAuto();
       try { stage.releasePointerCapture(g.id); } catch (err) { /* 무시 */ }
       lastUp = Date.now();
       if (g.type === 'bgmove') { const im = svgEl && svgEl.querySelector('.fp-bg image'); if (im) im.setAttribute('transform', bgTransform(g.bg, g.x0, g.y0)); }
-      if (g.type === 'pt' && wiz && g.p0) wiz.pts[g.i] = g.p0;
+      if (g.type === 'pt' && wiz && g.p0) { wiz.pts[g.i] = g.p0; if (wiz.lenOut) updLen(); }
       drawOverlay();
     }
     stage.addEventListener('pointerdown', (e) => {
       if (!cur || !svgEl || drag || pinch || gest) return;
       if (e.pointerType === 'mouse' && e.button !== 0) return;
-      const base = { id: e.pointerId, sx: e.clientX, sy: e.clientY, moved: false, ptype: e.pointerType };
+      const base = { id: e.pointerId, sx: e.clientX, sy: e.clientY, cx: e.clientX, cy: e.clientY, moved: false, ptype: e.pointerType };
       if (wiz) {
         if (wiz.step === 'move') {
           const bg = bgOf(key);
           if (!bg) return;
           e.preventDefault();
-          gest = Object.assign(base, { type: 'bgmove', bg, x0: bg.x, y0: bg.y, x: bg.x, y: bg.y });
+          gest = Object.assign(base, { type: 'bgmove', bg, x0: bg.x, y0: bg.y, x: bg.x, y: bg.y, P0: toPlan(e.clientX, e.clientY) });
         } else if (wiz.step === 'pts') {
           const t = e.target.closest && e.target.closest('.fp-wizpt');
           if (!t) return;
@@ -3124,30 +3304,21 @@
     });
     stage.addEventListener('pointermove', (e) => {
       if (!gest || e.pointerId !== gest.id) return;
+      gest.cx = e.clientX; gest.cy = e.clientY;
       if (!gest.moved) {
         if (Math.hypot(e.clientX - gest.sx, e.clientY - gest.sy) < (gest.ptype === 'mouse' ? 3 : 6)) return;
         gest.moved = true;
       }
       e.preventDefault();
-      if (gest.type === 'bgmove') {
-        gest.x = r1(gest.x0 + (e.clientX - gest.sx) / cur.s);
-        gest.y = r1(gest.y0 + (e.clientY - gest.sy) / cur.s);
-        const im = svgEl && svgEl.querySelector('.fp-bg image');
-        if (im) im.setAttribute('transform', bgTransform(gest.bg, gest.x, gest.y));
-      } else if (gest.type === 'pt') {
-        wiz.pts[gest.i] = toPlan(e.clientX, e.clientY);
-        drawOverlay();
-        if (wiz.distEl) wiz.distEl.textContent = Math.round(wizDist()) + 'cm';
-      } else if (gest.type === 'draw') {
-        gest.rect = rectFrom(gest.a, snapPt(toPlan(e.clientX, e.clientY)));
-        drawOverlay();
-      }
+      applyGest();
+      if (!gestRaf) gestRaf = requestAnimationFrame(gestTick);
     });
     const endGest = (e) => {
       if (!gest || e.pointerId !== gest.id) return;
       if (e.type === 'pointercancel') { cancelGest(); if (pending) refresh(); return; }
       const g = gest;
       gest = null;
+      stopGestAuto();
       try { stage.releasePointerCapture(e.pointerId); } catch (err) { /* 무시 */ }
       lastUp = Date.now();
       if (g.type === 'bgmove') {
@@ -3181,7 +3352,11 @@
         if (!cur) return;
         const P = toPlan(e.clientX, e.clientY);
         if (wiz.step === 'pts') {
-          if (wiz.pts.length >= 2) wiz.pts = [];
+          // 2단계(길이 넣기)에선 도면을 눌러도 찍은 점을 버리지 않음 (자판을 닫으려고 누르거나 잘못 닿은 손가락)
+          if (wiz.pts.length >= 2) {
+            if (!wiz.tapTip) { wiz.tapTip = true; toast('찍은 점은 끌어서 옮길 수 있어요 · 처음부터 다시 찍으려면 “다시 찍기”를 누르세요', { ms: 3500 }); }
+            return;
+          }
           wiz.pts.push(P);
           drawOverlay(); drawWizBar();
         } else if (wiz.step === 'origin') setOrigin(P);
