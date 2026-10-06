@@ -68,7 +68,7 @@
   const CLOSET_EXCLUDE = /신발|현관|주방|싱크|욕실|선반|팬트리|창고|수납장/;
   const EXPORT_PROPS = ['fill', 'fill-opacity', 'stroke', 'stroke-width', 'stroke-opacity', 'stroke-dasharray',
     'stroke-linejoin', 'stroke-linecap', 'opacity', 'font-family', 'font-size', 'font-weight', 'text-anchor',
-    'dominant-baseline', 'paint-order'];
+    'dominant-baseline', 'paint-order', 'filter'];
 
   /* ---------------- 작은 유틸 ---------------- */
   const num = (v, d) => { const n = parseFloat(v); return isFinite(n) ? n : d; };
@@ -1416,7 +1416,9 @@
     return new Promise((resolve, reject) => {
       const vb = viewBoxFor(plan, o.items);
       const scale = MV.clamp(2400 / vb.w, 1.2, 3);
-      const node = buildSVG(plan, key, { s: scale, vb, interactive: false, edit: false, grid: o.grid, sel: null, issues: o.issues, items: o.items, fontScale: 1.9 });
+      // o.bg = 평면도 사진도 넣기 (그림 안에 data URL 로 담김 — blob: 주소는 그림으로 바꿀 때 못 읽음)
+      const node = buildSVG(plan, key, { s: scale, vb, interactive: false, edit: false, grid: o.grid, sel: null, issues: o.issues, items: o.items, fontScale: 1.9,
+        bg: o.bg ? { bg: o.bg, href: o.bg.src } : null, bgFade: !!(o.bg && o.bg.fade) });
       const holder = el('div', { 'aria-hidden': 'true', style: { position: 'fixed', left: '-30000px', top: '0', pointerEvents: 'none' } }, node);
       document.body.appendChild(holder);
       let xml;
@@ -1454,7 +1456,7 @@
           g.fillStyle = tok('--ink', '#21201d'); g.font = '800 34px ' + font; g.textBaseline = 'alphabetic';
           g.fillText(plan.name, 40, 52);
           g.fillStyle = tok('--ink-3', '#78726a'); g.font = '600 20px ' + font;
-          g.fillText('우리집 이사 · 공간설계 · ' + MV.date.fmtLong(MV.date.today()) + (o.grid ? ' · 격자 50cm' : '') + (plan.edited ? ' · 실측 반영' : ''), 40, 82);
+          g.fillText('우리집 이사 · 공간설계 · ' + MV.date.fmtLong(MV.date.today()) + (o.grid ? ' · 격자 50cm' : '') + (plan.edited ? ' · 실측 반영' : '') + (o.bg ? ' · 평면도 사진' : ''), 40, 82);
           g.drawImage(img, 0, head, W, H);
           c.toBlob((blob) => {
             if (!blob) { reject(new Error('이미지 변환 실패')); return; }
@@ -1920,7 +1922,7 @@
     }
     const TOOL_TIPS = {
       room: '방을 누르면 치수·이름·종류를 고치거나 방을 지울 수 있어요.',
-      draw: '도면 위를 끌어서 새 방을 네모로 그리세요 (5cm 단위, 옆 방 벽에 붙어요). 그리는 동안엔 손가락으로 도면이 움직이지 않아요.',
+      draw: '도면 위를 끌어서 새 방을 네모로 그리세요 (5cm 단위, 옆 방 벽에 붙어요). 그리는 동안엔 손가락으로 도면이 움직이지 않아요. 숫자로 넣어도 돼요.',
       doorAdd: '문을 달 방의 벽(가장자리) 가까이를 누르세요 — 90cm 문이 그 방 안쪽으로 열리게 달려요.',
       doorDel: '지울 문(빨간 점선 칸)을 누르세요.',
     };
@@ -1941,6 +1943,7 @@
           el('button', { type: 'button', class: 'btn btn-sm fp-b', 'data-tool': 'size', onclick: openSizeEditor, title: '도면 전체 가로·세로 (cm)' }, '📐 전체 크기 ' + Math.round(plan.width) + '×' + Math.round(plan.depth))),
         el('div', { class: 'fp-editrow' },
           el('div', { class: 'fp-edittip', 'aria-live': 'polite' }, TOOL_TIPS[tool] + ' 짐은 잠시 잠겨요.'),
+          tool === 'draw' ? el('button', { type: 'button', class: 'btn btn-sm fp-b', 'data-act': 'typed', onclick: () => openRoomEditor(null, typedRoomRect(), true), title: '끌지 않고 가로·세로·X·Y 숫자로 방 추가' }, '🔢 숫자로 넣기') : null,
           plan.edited ? el('button', { type: 'button', class: 'btn btn-sm btn-danger fp-b', onclick: resetAllRooms }, '도면 전체 원래대로') : null,
           el('button', { type: 'button', class: 'btn btn-sm btn-primary fp-b', onclick: () => { editMode = false; tool = 'room'; preview = null; syncStageMode(); refresh(); } }, '완료')));
       if (fTool) { const b = editBar.querySelector('[data-tool="' + fTool + '"]'); if (b) b.focus({ preventScroll: true }); }
@@ -2846,11 +2849,29 @@
       scroll.scrollTop = offT + (p.y - cur.vb.y) * cur.s - ay;
       drawSelBar();
     }
+    /** 그림 저장 — 평면도 사진을 보이게 해 두었으면 사진도 넣을지 물어봄 */
     function doExport() {
       if (!cur) return;
+      const bg = bgOf(key);
+      if (!bg || !bg.show) { runExport(null); return; }
+      ui.modal({
+        title: '⬇ 이미지 저장',
+        body: el('p', { class: 'mb-0' }, '평면도 사진도 그림에 함께 넣을까요? 넣으면 사진 위에 도면과 짐이 겹쳐 그려지고, 파일이 조금 커져요.'),
+        actions: [
+          { label: '취소', kind: 'ghost' },
+          { label: '사진 빼고 저장', onClick: () => { runExport(null); } },
+          { label: '🖼 사진도 넣기', kind: 'primary', onClick: () => { runExport(bg); } },
+        ],
+      });
+    }
+    function runExport(bg) {
+      if (!cur) return;
       bExport.disabled = true;
-      exportPlanPNG(cur.plan, key, { grid: prefs().grid, items: cur.items, issues: cur.v.lv })
-        .then(() => toast('도면 그림(PNG)을 저장했어요'))
+      const opts = { grid: prefs().grid, items: cur.items, issues: cur.v.lv };
+      exportPlanPNG(cur.plan, key, Object.assign({ bg }, opts))
+        .then(() => toast(bg ? '평면도 사진을 넣은 도면 그림(PNG)을 저장했어요' : '도면 그림(PNG)을 저장했어요'))
+        // 사진을 넣다 실패하면 (아주 큰 사진 등) 사진 없이 한 번 더
+        .catch((e) => (bg ? exportPlanPNG(cur.plan, key, opts).then(() => toast('사진을 넣지 못해 도면만 그림(PNG)으로 저장했어요', { ms: 5000 })) : Promise.reject(e)))
         .catch((e) => toast('그림 저장 실패: ' + (e && e.message ? e.message : e)))
         .finally(() => { bExport.disabled = false; });
     }
@@ -2864,8 +2885,19 @@
       for (let i = 2; i < 100; i++) if (!used(b0 + ' ' + i)) return b0 + ' ' + i;
       return b0 + ' ' + (Date.now() % 1000);
     }
-    /** 방 창 — rid: 고칠 방 (원래 방·그린 방) / rect: 방금 그린 네모 (새 방) */
-    function openRoomEditor(rid, rect) {
+    /** 숫자로 방 추가: 지금 화면에 보이는 도면 가운데에 300×300cm 네모 (5cm 단위, 도면 안) */
+    function typedRoomRect() {
+      const plan = cur.plan, b = plan.bounds;
+      const sr = scroll.getBoundingClientRect();
+      const top = Math.max(sr.top, pxv('--topbar-h', 56)), bot = Math.min(sr.bottom, window.innerHeight - pxv('--bottom-h', 0));
+      const left = Math.max(sr.left, 0), right = Math.min(sr.right, window.innerWidth);
+      const c = bot - top > 40 && right - left > 40 ? toPlan((left + right) / 2, (top + bot) / 2) : { x: b.x + b.w / 2, y: b.y + b.h / 2 };
+      const w = Math.min(300, Math.max(MIN_ROOM, Math.floor(b.w / SNAP) * SNAP)), h = Math.min(300, Math.max(MIN_ROOM, Math.floor(b.h / SNAP) * SNAP));
+      const p = clampInto({ x: c.x - w / 2, y: c.y - h / 2, w, h }, b);
+      return { x: Math.round(p.x / SNAP) * SNAP, y: Math.round(p.y / SNAP) * SNAP, w, h };
+    }
+    /** 방 창 — rid: 고칠 방 (원래 방·그린 방) / rect: 방금 그린 네모 (새 방) · typed: 숫자로 넣는 새 방 */
+    function openRoomEditor(rid, rect, typed) {
       const plan = getPlan(key);
       if (!plan) return;
       const isNew = !!rect;
@@ -2911,6 +2943,8 @@
         const v = read();
         const errs = errorsOf(v);
         [f.name, f.w, f.h, f.x, f.y].forEach((i) => { if (errs.some(([j]) => j === i)) i.setAttribute('aria-invalid', 'true'); else i.removeAttribute('aria-invalid'); });
+        // 넣은 숫자대로 도면에 점선 네모를 미리 보여 줌 (창 뒤로 보임)
+        if ([v.x, v.y, v.w, v.h].every(isFinite) && v.w >= MIN_ROOM && v.h >= MIN_ROOM && v.w <= maxDim && v.h <= maxDim) { preview = { x: v.x, y: v.y, w: v.w, h: v.h }; drawOverlay(); }
         prev.textContent = '';
         prev.className = 'fp-area-prev' + (errs.length ? ' is-bad' : '');
         if (errs.length) { put(prev, errs.map(([, msg]) => el('div', '⛔ ' + msg))); return; }
@@ -2953,11 +2987,14 @@
         const same = (o) => ['x', 'y', 'w', 'h'].every((k2) => Math.abs(nv[k2] - r1(o[k2])) < 0.05) && nv.name === o.name && nv.kind === o.kind;
         if (same(r)) return true;                     // 바뀐 게 없으면 저장하지 않음 (실측 반영 표시도 안 생김)
         const before = getPlan(key);
-        let moved = 0;
+        // 지금 자리 (창을 연 뒤 바뀌었을 수 있음) → 이 방에 단 문을 같은 벽을 따라 새 자리로 옮김
+        const from = (before && before.rooms.find((x) => x.id === rid)) || r;
+        let moved = 0, doorsMoved = 0;
         if (isAdded) {
           MV.store.update((st) => {
             const a = editsOf(st)[key].added.find((z) => z && String(z.id) === String(r.srcId));
             if (a) Object.assign(a, nv);
+            doorsMoved = moveRoomDoors(editsOf(st)[key], rid, from, nv);
             moved = remapRoomRefs(st, key, before, [{ rid, from: r.name, to: newName }]);
           }, { log: '✏️ ' + PLAN_LABEL[key] + ' 그린 방 수정: ' + newName + ' ' + Math.round(v.w) + '×' + Math.round(v.h) + 'cm' });
         } else {
@@ -2965,10 +3002,11 @@
           MV.store.update((st) => {
             if (backToOrig) delete editsOf(st)[key].rooms[rid];
             else editsOf(st)[key].rooms[rid] = nv;
+            doorsMoved = moveRoomDoors(editsOf(st)[key], rid, from, nv);
             moved = remapRoomRefs(st, key, before, [{ rid, from: r.name, to: newName }]);
           }, { log: '📏 ' + PLAN_LABEL[key] + (backToOrig ? ' 치수 원래대로: ' + newName : ' 실측 반영: ' + newName + ' ' + Math.round(v.w) + '×' + Math.round(v.h) + 'cm') });
         }
-        if (moved) toast('짐 ' + moved + '개의 “' + (key === 'new' ? '새 집 위치' : '지금 집 위치') + '”도 「' + newName + '」' + joRo(newName) + ' 바꿨어요');
+        afterRoomSave(moved, newName, doorsMoved, false);
         return true;
       };
       let m = null;
@@ -2984,9 +3022,14 @@
           prev.textContent = '⛔ 원래 이름 「' + r.orig.name + '」' + jo(r.orig.name, '을', '를') + ' 지금 다른 방(' + Math.round(clash.w) + '×' + Math.round(clash.h) + ')이 쓰고 있어요. 그 방 이름을 먼저 바꾼 뒤 되돌려 주세요.';
           return false;
         }
-        let moved = 0;
-        MV.store.update((st) => { delete editsOf(st)[key].rooms[rid]; moved = remapRoomRefs(st, key, before, [{ rid, from: r.name, to: r.orig.name }]); }, { log: '📏 ' + PLAN_LABEL[key] + ' 치수 원래대로: ' + r.orig.name });
-        if (moved) toast('짐 ' + moved + '개의 위치 이름도 「' + r.orig.name + '」' + joRo(r.orig.name) + ' 되돌렸어요');
+        let moved = 0, doorsMoved = 0;
+        const from = (before && before.rooms.find((x) => x.id === rid)) || r;
+        MV.store.update((st) => {
+          delete editsOf(st)[key].rooms[rid];
+          doorsMoved = moveRoomDoors(editsOf(st)[key], rid, from, r.orig);
+          moved = remapRoomRefs(st, key, before, [{ rid, from: r.name, to: r.orig.name }]);
+        }, { log: '📏 ' + PLAN_LABEL[key] + ' 치수 원래대로: ' + r.orig.name });
+        afterRoomSave(moved, r.orig.name, doorsMoved, true);
         return true;
       } });
       actions.push({ label: '취소', kind: 'ghost' });
@@ -2995,14 +3038,22 @@
         title: isNew ? '＋ 새 방' : (isAdded ? '✏️ ' : '📏 ') + r.name + ' 고치기',
         body: el('div', { class: 'stack' },
           el('p', { class: 'small muted mb-0' }, isNew
-            ? '그린 네모의 이름과 종류를 정하세요. 숫자(cm)로 더 정확히 고칠 수 있어요. X·Y는 도면 왼쪽 위에서부터의 위치예요.'
+            ? (typed ? '새 방의 이름·종류와 크기(cm)를 넣으세요. X·Y는 도면 왼쪽 위에서부터 방 왼쪽 위 모서리까지예요. 넣는 대로 도면에 점선 네모로 보여요.'
+              : '그린 네모의 이름과 종류를 정하세요. 숫자(cm)로 더 정확히 고칠 수 있어요. X·Y는 도면 왼쪽 위에서부터의 위치예요.')
             : '벽 안쪽 기준 실측값(cm)을 넣으세요. X·Y는 도면 왼쪽 위에서부터의 위치예요. 옆 방은 자동으로 바뀌지 않아요. 이름을 바꾸면 이 방에 둔 짐의 위치 이름도 함께 바뀌어요.'),
           el('div', { class: 'form-grid' }, field('방 이름', f.name), field('종류', f.kind, '다용도실이면 세탁기 점검, 발코니면 면적 따로')),
           el('div', { class: 'form-grid' }, field('가로 W (cm)', f.w), field('세로 H (cm)', f.h), field('X (cm)', f.x), field('Y (cm)', f.y)),
           prev),
         actions,
-        onClose: () => { if (isNew) { preview = null; drawOverlay(); } },
+        onClose: () => { preview = null; drawOverlay(); },
       });
+    }
+    /** 방을 고친 뒤 알림: 위치 이름을 바꾼 짐 · 함께 옮긴 문 */
+    function afterRoomSave(moved, name, doorsMoved, back) {
+      const msgs = [];
+      if (moved) msgs.push('짐 ' + moved + '개의 “' + (key === 'new' ? '새 집 위치' : '지금 집 위치') + '”도 「' + name + '」' + joRo(name) + (back ? ' 되돌렸어요' : ' 바꿨어요'));
+      if (doorsMoved) msgs.push('이 방에 단 문 ' + doorsMoved + '개도 함께 옮겼어요');
+      if (msgs.length) toast(msgs.join(' · '), { ms: msgs.length > 1 ? 5000 : undefined });
     }
     /** 방 지우기 (원래 방은 '지운 방' 목록에, 그린 방은 목록에서 뺌) → Promise<지웠는지> */
     function deleteRoom(r) {

@@ -304,10 +304,20 @@
   }
   S.load = function load() {
     let st = null;
+    let raw = null;
+    S.loadProblem = null;
     try {
-      const raw = global.localStorage.getItem(KEY);
-      if (raw) st = JSON.parse(raw);
-    } catch (e) { S.storageOK = false; }
+      raw = global.localStorage.getItem(KEY);
+    } catch (e) { S.storageOK = false; S.loadProblem = 'blocked'; }
+    if (raw) {
+      try { st = JSON.parse(raw); } catch (e) { st = null; }
+      if (!validState(st)) {
+        // 읽을 수 없는 기록: 지우지 않고 따로 보관한 뒤 새로 시작
+        try { global.localStorage.setItem(KEY + ':corrupt', raw); } catch (e) { /* 무시 */ }
+        S.loadProblem = 'corrupt';
+        st = null;
+      }
+    }
     if (!validState(st)) st = freshState();
     st.inventory = st.inventory || [];
     st.activity = st.activity || [];
@@ -338,6 +348,12 @@
   S.normItem = (it) => normItem(it, !!(it && it.seed));
   S.normInv = (it) => normInv(it, !!(it && it.seed));
   const persistSoon = MV.debounce(() => S.persist(), 250);
+  // 시작할 때 저장소 문제를 한 번 알림 (화면이 그려진 뒤)
+  global.addEventListener('load', () => setTimeout(() => {
+    if (!MV.ui || !MV.ui.toast) return;
+    if (S.loadProblem === 'blocked' && !(MV.sync && MV.sync.mode === 'shared')) MV.ui.toast('이 브라우저는 저장이 막혀 있어 창을 닫으면 기록이 사라져요. ⋯ 메뉴에서 백업 파일을 저장하세요.', { ms: 8000 });
+    else if (S.loadProblem === 'corrupt') MV.ui.toast('저장된 기록을 읽을 수 없어 처음 상태로 열었어요. ⋯ 메뉴에서 백업 파일을 복원하세요.', { ms: 8000 });
+  }, 800));
   // 창을 닫기 직전: 뷰들이 입력 중이던 값을 먼저 반영하도록 'flush' 를 알린 뒤 저장
   const flushAll = () => { try { bus.emit('flush'); } catch (e) { /* 무시 */ } persistSoon.flush(); };
   global.addEventListener('pagehide', flushAll);
@@ -379,8 +395,10 @@
   };
   S.exportJSON = () => JSON.stringify(Object.assign({ _app: 'mv-move', _exportedAt: MV.nowISO() }, S.get()), null, 1);
   S.importJSON = function importJSON(text) {
-    const st = JSON.parse(text);
-    if (!validState(st)) throw new Error('이 앱의 백업 파일이 아닙니다.');
+    let st;
+    try { st = JSON.parse(text); } catch (e) { throw new Error('파일을 읽을 수 없어요. 이 앱에서 저장한 백업 파일(.json)인지 확인해 주세요.'); }
+    const looksOk = validState(st) && (st._app === 'mv-move' || (typeof st.seedVersion === 'number' && st.items.every((i) => i && typeof i.id === 'string' && typeof i.title === 'string')));
+    if (!looksOk) throw new Error('이 앱의 백업 파일이 아니에요.');
     delete st._app; delete st._exportedAt;
     st.inventory = st.inventory || [];
     st.activity = st.activity || [];

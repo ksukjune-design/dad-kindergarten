@@ -47,14 +47,25 @@
       if (!f) return;
       const r = new FileReader();
       r.onload = () => {
+        const text = String(r.result);
+        let info = '';
         try {
-          MV.store.importJSON(String(r.result));
-          m.close();
-          MV.ui.toast('백업에서 복원했어요.');
-        } catch (e) {
-          MV.ui.toast('복원 실패: ' + e.message);
-        }
+          const peek = JSON.parse(text);
+          if (peek && peek.meta) info = (peek._exportedAt ? ' (' + MV.date.time(peek._exportedAt) + ' 에 저장한 파일, 할 일 ' + ((peek.items || []).length) + '개)' : '');
+        } catch (e) { /* importJSON 이 한국어로 알려줌 */ }
+        MV.ui.confirm('지금 기록을 모두 이 백업 파일 내용으로 바꿀까요?' + info + (MV.sync && MV.sync.mode === 'shared' ? ' 공유 중이라 배우자 화면도 함께 바뀌어요.' : ''), { okLabel: '복원하기', danger: true }).then((ok) => {
+          fileInput.value = '';
+          if (!ok) return;
+          try {
+            MV.store.importJSON(text);
+            m.close();
+            MV.ui.toast('백업에서 복원했어요.');
+          } catch (e) {
+            MV.ui.toast('복원하지 못했어요: ' + e.message, { ms: 6000 });
+          }
+        });
       };
+      r.onerror = () => MV.ui.toast('파일을 읽지 못했어요.');
       r.readAsText(f);
     });
     const theme = document.documentElement.dataset.theme || '';
