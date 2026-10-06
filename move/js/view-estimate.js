@@ -974,6 +974,8 @@
 .es-unit { font-size: .76rem; color: var(--ink-3); white-space: nowrap; }
 .es-coef-ctl .chip { margin-top: 8px; }
 .es-coef-ctl .btn { min-height: 36px; }
+.es-coef-err { grid-column: 1 / -1; color: var(--bad); font-weight: 700; font-size: .8rem; }
+.es-coef-row .input[aria-invalid="true"] { border-color: var(--bad); }
 @media (max-width: 640px) {
   .es-coef-row { grid-template-columns: 1fr; }
   .es-coef-ctl { justify-content: flex-start; }
@@ -2149,7 +2151,8 @@
       el('div',
         el('div', { class: 'es-coef-label' }, d.label, d.money && d.unit ? el('span', { class: 'es-unit' }, d.unit) : null, d.ref ? el('span', { class: 'chip' }, '참고용 · 계산 제외') : null),
         el('div', { class: 'es-coef-basis' }, el('span', { class: 'es-bk' }, '근거 '), d.basis, range, ' · 기준값 ' + fmtCoef(d, d.v), srcLinks(d.src))),
-      el('div', { class: 'es-coef-ctl' }, ctl, confChip(d.conf), changed, resetBtn));
+      el('div', { class: 'es-coef-ctl' }, ctl, confChip(d.conf), changed, resetBtn),
+      err);
     upd(() => {
       const v = cur();
       if (document.activeElement !== input) {
