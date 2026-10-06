@@ -6,6 +6,7 @@
 
    설정 찾는 순서
      (a) 주소의 ?connect=<base64url JSON> (아내 초대 링크) → 검사 후 이 브라우저에 저장하고 주소에서 지움
+         (카카오톡 안 브라우저에서는 '다른 브라우저로 열기'로 넘어가도 설정이 따라가게 주소에 남겨 둠)
          (이미 다른 저장소 설정이 있으면 바로 바꾸지 않고 함께 쓰기 화면에서 물어봄 · BAKED 가 있으면 링크는 쓰지 않음)
      (b) 아래 BAKED (저장소에 설정값을 넣어 두면 모든 기기가 자동으로 같은 파이어베이스를 씀)
      (c) 이 브라우저에 저장한 설정 (localStorage 'mv:fb:config' — 함께 쓰기 화면에서 붙여 넣은 것)
@@ -111,10 +112,11 @@
 
   /* ---------- 초대 링크로 들어왔을 때 (app.js 가 화면을 그리기 전에) ---------- */
   let inviteNote = null;
+  const inKakao = () => { try { return /KAKAOTALK/i.test(global.navigator.userAgent || ''); } catch (e) { return false; } };
   let inviteAsk = null;             // { cfg, cur } 이미 다른 저장소 설정이 있어 바꿀지 물어볼 초대 설정
   const sameStore = (a, b) => !!(a && b && a.apiKey === b.apiKey && a.projectId === b.projectId && (a.space || 'ours') === (b.space || 'ours'));
   (function takeInvite() {
-    let params;
+    let params, cur = null;
     try { params = new URLSearchParams(global.location.search); } catch (e) { return; }
     const raw = params.get('connect');
     if (raw === null) return;
@@ -123,7 +125,6 @@
     if (res.ok && BAKED) {
       inviteNote = '이 앱에는 함께 쓰기 설정이 이미 들어 있어서 초대 링크의 설정은 쓰지 않아요. 로그인만 하면 돼요.';
     } else if (res.ok) {
-      let cur = null;
       const raw0 = lsGet(CFG_KEY);
       if (raw0) { const r0 = parseConfig(raw0); if (r0.ok) cur = r0.config; }
       if (cur && !sameStore(cur, res.config)) {
@@ -131,10 +132,26 @@
       } else if (lsSet(CFG_KEY, JSON.stringify(res.config))) inviteNote = cur ? null : '함께 쓰기 연결 정보를 받았어요. 로그인해 주세요.';
       else inviteNote = '이 브라우저는 저장이 막혀 있어 연결 정보를 기억할 수 없어요. 다른 브라우저(크롬·사파리)로 열어 주세요.';
     } else inviteNote = '초대 링크가 올바르지 않아요. 링크를 끝까지 복사했는지 확인하고 다시 받아 주세요.';
-    params.delete('connect');
+    // 카카오톡 안 브라우저: '다른 브라우저로 열기'가 지금 주소를 넘기므로 연결 정보를 주소에 남겨 둠
+    //   (지우면 새 브라우저에는 설정이 없어 로그인 칸이 안 나옴). 저장·설정 지우기 때는 dropConnect() 로 지움.
+    const keep = res.ok && !BAKED && inKakao();
+    if (!keep) params.delete('connect');
     const q = params.toString();
-    try { global.history.replaceState(null, '', global.location.pathname + (q ? '?' + q : '') + '#/together'); } catch (e) { /* 무시 */ }
+    // 함께 쓰기 화면으로 보내는 것은 설정을 처음 받았을 때만. 카카오톡에서 주소에 남은 connect 로 새로 고칠 때
+    //   (이미 같은 저장소 설정이 있음)는 보던 화면(hash)을 그대로 둠
+    const hash = keep && cur && sameStore(cur, res.config) ? global.location.hash : '#/together';
+    try { global.history.replaceState(null, '', global.location.pathname + (q ? '?' + q : '') + hash); } catch (e) { /* 무시 */ }
   })();
+  /** 주소에 남겨 둔 초대 링크 연결 정보를 지움 (다시 열 때 예전 설정이 되살아나지 않게) */
+  function dropConnect() {
+    try {
+      const params = new URLSearchParams(global.location.search);
+      if (params.get('connect') === null) return;
+      params.delete('connect');
+      const q = params.toString();
+      global.history.replaceState(null, '', global.location.pathname + (q ? '?' + q : '') + global.location.hash);
+    } catch (e) { /* 무시 */ }
+  }
 
   function loadConfig() {
     if (BAKED) { const r = parseConfig(BAKED); if (r.ok) return { cfg: r.config, baked: true }; }
@@ -469,8 +486,9 @@
     if (!a || !MV.ui || !MV.ui.confirm) return;
     const pj = (c) => c.projectId + (c.space && c.space !== 'ours' ? ' · 묶음 ' + c.space : '');
     MV.ui.confirm('다른 함께 쓰기 저장소(프로젝트 ' + pj(a.cfg) + ')로 바꿀까요? 지금 설정(프로젝트 ' + pj(a.cur) + ')은 지워지고, 새 저장소에 다시 로그인해야 해요. 이 기기 기록은 그대로 남아요. 누가 보냈는지 모르는 링크라면 [취소]를 누르세요.', { okLabel: '바꾸기', danger: true }).then((ok) => {
-      if (!ok) { MV.ui.toast('초대 링크의 설정은 쓰지 않았어요. 지금 설정을 그대로 써요.'); return; }
-      if (!lsSet(CFG_KEY, JSON.stringify(a.cfg))) { MV.ui.toast('이 브라우저에 저장할 수 없어요 (사생활 보호 창이거나 저장이 막혀 있어요).', { ms: 5000 }); return; }
+      // 취소·저장 실패 때는 주소에 남은 connect 도 지움 (카카오톡에서 새로 고칠 때마다 다시 묻지 않게)
+      if (!ok) { dropConnect(); MV.ui.toast('초대 링크의 설정은 쓰지 않았어요. 지금 설정을 그대로 써요.'); return; }
+      if (!lsSet(CFG_KEY, JSON.stringify(a.cfg))) { dropConnect(); MV.ui.toast('이 브라우저에 저장할 수 없어요 (사생활 보호 창이거나 저장이 막혀 있어요).', { ms: 5000 }); return; }
       const go = () => { try { global.location.hash = '#/together'; global.location.reload(); } catch (e) { /* 무시 */ } };
       closeAdapter();
       if (auth && auth.currentUser) auth.signOut().then(go, go); else go();
@@ -536,6 +554,7 @@
       app = had || fb.initializeApp(Object.assign({}, cfg), 'move');
       try { fb.firestore.setLogLevel('silent'); } catch (e) { /* 무시 */ }
       auth = app.auth();
+      try { auth.languageCode = 'ko'; } catch (e) { /* 무시 */ }   // 비밀번호 재설정 메일·화면을 한국어로 (콘솔 템플릿 언어와 상관없이)
       fs = app.firestore();
       if (emu && !had) {
         fs.useEmulator(emu.host, emu.firestore);
@@ -574,6 +593,7 @@
     if (!r.ok) return r;
     if (BAKED) return { ok: false, error: '이 앱에는 설정값이 이미 들어 있어요. 바꾸려면 저장소의 설정을 고쳐야 해요.' };
     if (!lsSet(CFG_KEY, JSON.stringify(r.config))) return { ok: false, error: '이 브라우저에 저장할 수 없어요 (사생활 보호 창이거나 저장이 막혀 있어요).' };
+    dropConnect();
     if (app) {
       // 이미 다른 설정으로 시작했으면 새로 열어서 새 설정으로 (로그인 상태는 프로젝트마다 따로)
       setTimeout(() => { try { global.location.hash = '#/together'; global.location.reload(); } catch (e) { /* 무시 */ } }, 600);
@@ -583,6 +603,7 @@
   F.clearConfig = function clearConfig() {
     const done = () => {
       lsDel(CFG_KEY);
+      dropConnect();
       closeAdapter();
       Y.detach('local');
       try { global.location.hash = '#/together'; global.location.reload(); } catch (e) { /* 무시 */ }

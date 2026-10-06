@@ -25,6 +25,8 @@
                 AI에게는 makerService 로 보여 주고 'LG 이전'이라고 부르지 않게 함
             고치는 도구는 MV.items/MV.inv/MV.store.update 로만 바꾸고 활동 기록에 '🤖 ' 를 붙입니다.
             삭제 도구는 없습니다. 자금흐름 상태가 아직 없으면 자금흐름 화면이 기본값을 만들게 합니다.
+            할 일은 사람에게 나눠 배정하지 않음: 도구에 담당(owner) 인자가 없고, 와도 무시. 결과·요약에도 owner 를 넣지 않고
+            지시 6-1 로 '사람별로 나누지 말 것'을 알림 (옷·돈의 주인 같은 사실은 그대로)
    🤖 버튼  #/agent 가 아닌 모든 화면 오른쪽 아래 (모달이 열리면 숨김, 화면 아래 입력줄이 있으면 그 위로)
             페이지가 스크롤되는 화면에는 맨 아래 76px 빈 자리(body.ag-fab-pad)를 둬서 마지막 버튼이 가려지지 않게
             화면 안의 목록이 따로 스크롤되면(태블릿·데스크톱 체크리스트) 버튼 밑 그 목록 끝에도 빈 자리(.ag-fab-padin)
@@ -61,7 +63,6 @@
   const MAX_TEXT = 4000;              // 입력 최대 글자 수
   const RESULT_BYTES = 28 * 1024;     // 도구 결과 최대 (플랫폼 한도 32KB)
   const MAX_UNDOS = 10;               // 되돌리기를 기억하는 답 수 (이 창에서만)
-  const OWNER_LABEL = { '': '미정', '나': '나', '아내': '아내', '함께': '함께' };
   const PRI_LABEL = { high: '중요', mid: '보통', low: '여유' };
   const PRI_RANK = { high: 0, mid: 1, low: 2 };
   /* 자금흐름 예산에서 '자동 계산'이 되는 항목 (view-finance.js 의 LINE_META.auto) */
@@ -76,11 +77,11 @@
     capability_removed: ['이 앱 버전에서는 AI 비서를 쓸 수 없어요', '클로드 앱을 최신으로 업데이트한 뒤 다시 열어 보세요.'],
   };
   const SUGGESTIONS = [
-    { id: 'week', icon: '🗓', label: '이번 주 할 일 정리', prompt: () => '이번 주 할 일을 담당자별로 정리해 줘. 기한이 지난 일도 같이 알려 줘.' },
+    { id: 'week', icon: '🗓', label: '이번 주 할 일 정리', prompt: () => '이번 주 할 일을 날짜 순서로 정리해 줘. 기한이 지난 일도 같이 알려 줘.' },
     { id: 'late', icon: '⏰', label: '지연된 일과 해결 방법', prompt: () => '기한이 지난 일을 모두 찾아서, 하나씩 오늘 바로 할 수 있는 해결 방법을 알려 줘.' },
     { id: 'budget', icon: '💰', label: '예산·비용 점검', prompt: () => '이사 예산과 ' + D.fmt(D.moveDate()) + ' 뒤 남는 돈을 점검해 줘. 부족하면 얼마나 부족하고 어떻게 메울 수 있는지 알려 줘.' },
     { id: 'plan', icon: '📈', label: '일정(워크플랜) 점검', prompt: () => '이사일까지 주별 워크플랜을 점검해 줘. 밀린 주·일이 몰린 주와 일정을 조정해야 할 일을 알려 줘.' },
-    { id: 'day', icon: '📅', label: () => moveMD() + ' 당일 순서', prompt: () => D.fmt(D.moveDate()) + ' 이사 당일 순서를 시간대별로 알려 줘. 돈 보내는 순서와 각자 맡을 일도 같이.' },
+    { id: 'day', icon: '📅', label: () => moveMD() + ' 당일 순서', prompt: () => D.fmt(D.moveDate()) + ' 이사 당일 순서를 시간대별로 알려 줘. 돈 보내는 순서와 짐 옮기는 순서도 같이.' },
     { id: 'quote', icon: '🚚', label: '이사업체 견적 비교', prompt: () => '받은 이사업체 견적을 모델 추정치와 비교해 줘. 아직 없으면 견적 받을 때 꼭 확인할 점을 알려 줘.' },
     { id: 'kid', icon: '🎒', label: '아이 취학 일정', prompt: () => '아이 취학(2027년 3월 백석초 입학) 관련 일정과 지금 해야 할 일을 정리해 줘.' },
   ];
@@ -88,7 +89,7 @@
     '삼성 에어컨 이전설치 견적 45만원 받았어, 예산에 반영해줘',
     '○○이사업체 견적 210만원, 사다리차 포함 — 견적 비교에 넣어줘',
     '우리은행 질권 확인 끝났어, 체크하고 메모 남겨줘: 질권 없음',
-    '다음 주 월요일까지 입주청소 용품 사기 할 일 추가해줘 @아내 !중요',
+    '다음 주 월요일까지 입주청소 용품 사기 할 일 추가해줘 !중요',
     '남은 예산 얼마나 부족해?',
   ];
 
@@ -138,14 +139,9 @@
     if (+m[1] < 2020 || +m[1] > 2035) throw new Error('날짜 연도를 확인해 주세요: ' + s);
     return D.str(d);
   }
-  function parseOwner(v) {
-    const s = String(v == null ? '' : v).trim().replace(/^@/, '');
-    if (s === '' || s === '없음' || s === '미정' || s === 'none' || s === 'null') return '';
-    if (['나', '남편', '저', 'me', 'husband'].indexOf(s) >= 0) return '나';
-    if (['아내', '와이프', '부인', 'wife'].indexOf(s) >= 0) return '아내';
-    if (['함께', '같이', '둘다', '둘 다', '부부', 'both', 'together'].indexOf(s) >= 0) return '함께';
-    throw new Error('담당자는 나·아내·함께·없음 중 하나로 주세요: ' + clip(v, 20));
-  }
+  /* 할 일은 사람에게 나눠 배정하지 않아요 — 도구에 owner 가 와도 읽지 않고 무시 (옛 기록의 owner 값도 내보내지 않음).
+     owner 가 왔으면 결과에 note 로 알려 비서가 '담당도 바꿨어요'라고 잘못 답하지 않게 함 */
+  const OWNER_NOTE = '할 일은 사람에게 나눠 맡기지 않아서 담당은 바꾸지 않았어요.';
   function parsePri(v) {
     const s = String(v == null ? '' : v).trim().replace(/^!/, '').toLowerCase();
     if (['high', '중요', '높음', '급함', 'urgent'].indexOf(s) >= 0) return 'high';
@@ -585,7 +581,7 @@
     return {
       id: it.id, partId: it.partId, part: partName(it.partId), title: it.title,
       due: D.valid(it.due) ? it.due : null, dueFmt: fmtDue(it.due), done: !!it.done,
-      owner: it.owner || '', priority: it.priority || 'mid', status: MV.items.status(it),
+      priority: it.priority || 'mid', status: MV.items.status(it),
       notes: Array.isArray(it.notes) ? it.notes.length : 0,
     };
   }
@@ -774,12 +770,12 @@
       today, todayFmt: D.fmt(today), moveDate: move, moveDateFmt: D.fmt(move), dday: D.dday(move).label,
       progress: { done: all.done, total: all.total, overdue: all.overdue, dueToday: all.today, open: open.length, openNoDate: open.filter((i) => !D.valid(i.due)).length },
       parts,
-      upcoming14d: soon.slice(0, 40).map((i) => ({ id: i.id, part: i.partId, title: clip(i.title, 70), due: i.due, dueFmt: D.fmt(i.due), owner: i.owner || '', priority: i.priority || 'mid', status: MV.items.status(i) })),
+      upcoming14d: soon.slice(0, 40).map((i) => ({ id: i.id, part: i.partId, title: clip(i.title, 70), due: i.due, dueFmt: D.fmt(i.due), priority: i.priority || 'mid', status: MV.items.status(i) })),
       upcomingMore: Math.max(0, soon.length - 40),
       finance: financeNumbers(),
       estimate: estimateNumbers(),
       inventory: { total: (st.inventory || []).length, byFate: fateCount, bigAppliances: bigAppliances(st), specCheck: specCheck() },
-      recentActivity: (st.activity || []).slice(0, 6).map((a) => D.time(a.at) + ' ' + clip(a.text, 80)),
+      recentActivity: (st.activity || []).filter((a) => a && !(MV.store.isOwnerLog && MV.store.isOwnerLog(a.text))).slice(0, 6).map((a) => D.time(a.at) + ' ' + clip(a.text, 80)),
     };
   }
   /** 규격 확인(모델명으로 크기 확정) 진행 — 가져갈·미정 짐 중 추정 규격·모델명 받은 것 (core MV.inv.spec*) */
@@ -842,7 +838,8 @@
       '3. 금액·법률·세금·은행 규정을 지어내지 마세요. 데이터에 없으면 "확인 필요"라고 쓰고 누구에게 물을지(은행·중개사·세무사·주민센터·관리사무소·이사업체 등) 알려 주세요.',
       '4. 사람 이름·전화번호·계좌번호·주민등록번호·동·호수 같은 개인 식별 정보는 쓰지 마세요. 사람은 A·B·C·중개사로 부르세요.',
       '5. 날짜는 M/D(요일) 형식(예: ' + D.fmt(move) + '), 금액은 "32만원", "2억 9,500만원"처럼 쓰세요. "다음 주 월요일" 같은 말은 [날짜 참고]로 실제 날짜(YYYY-MM-DD)를 계산하세요.',
-      '6. 할 일을 추가·수정할 때 "@아내"·"@나"·"@함께"는 담당자, "!중요"는 priority high("!보통" mid, "!여유" low)예요. 파트를 말하지 않으면 가장 알맞은 파트를 고르세요.',
+      '6. 할 일을 추가·수정할 때 "!중요"는 priority high("!보통" mid, "!여유" low)예요. 파트를 말하지 않으면 가장 알맞은 파트를 고르세요.',
+      '6-1. 할 일을 사람에게 나눠 배정하지 마세요. 할 일은 모두 "우리 집 할 일"이에요 — "아내가 할 일", "남편 담당", "각자 맡을 일"처럼 사람별로 나누거나 정리하지 말고, 날짜·파트·일의 종류(💰 돈·서류, 📦 짐 등)로만 묶으세요. 같은 시간에 두 곳에서 일이 있으면 "그날 편하게 나눠 맡으세요" 정도로만 말하세요. 사용자가 "@아내" 같은 표시를 붙여도 담당으로 다루지 말고 제목에서 빼세요. (옷·돈의 주인을 말하는 사실, 예: 아내 옷은 캐비닛장으로 — 은 그대로 써도 돼요.)',
       '7. 앱 화면 링크를 마크다운으로 붙일 수 있어요: [할 일](#/checklist/<partId>/<itemId>), [지금 할 일](#/checklist/~focus), [예산](#/money/budget), [' + D.fmt(move) + ' 돈 흐름](#/money/flow), [업체 견적](#/stuff/quotes), [이사 견적](#/stuff/estimate), [짐 목록](#/stuff/inventory), [규격 확인](#/stuff/inventory/spec), [대시보드](#/dashboard), [가이드](#/guide/<partId>), [HUG 보증 비교](#/guide/hug). finance.warnings 끝의 (화면: #/money/…)는 그 경고의 링크예요.',
       '8. 예산·부족을 물으면(예: "' + moveMD() + '에 현금 모자라?") 예산 화면(#/money/budget)과 같은 순서로 답하세요: ① 꼭 드는 이사 비용 기준 ' + D.fmt(move) + ' 전후 현금 여유/부족(머리 숫자 — finance.cashVsEssential, numbers.netEssential) ② 새로 사는 살림까지 ③ 선택·나중에까지 전부. "부족"을 한 숫자로 뭉뚱그리지 마세요. 돈 흐름에 11월 월세가 들어 있으면 계약서대로 후불일 때의 숫자(finance.rentNote)도 같이 말하고, 이사 전에 먼저 나갈 돈(finance.beforeMove)도 알려 주세요. 중개보수·잔금·대출 상환·월세는 예산이 아니라 돈 흐름에 이미 들어 있어요.',
       '9. 지난 답에 "(이 답에서 앱에 이미 반영한 변경: …)"이 붙어 있으면 그 변경은 이미 저장됐어요 — 같은 변경을 다시 하지 마세요.',
@@ -1295,7 +1292,6 @@
   }
 
   /* ---- 도구 정의 (중요한 순서 — limits.tools.maxCount 가 작으면 앞에서부터) ---- */
-  const S_OWNER = { type: 'string', enum: ['나', '아내', '함께', '없음'], description: '담당자 (없음 = 미정)' };
   const S_PRI = { type: 'string', enum: ['high', 'mid', 'low'], description: 'high=중요, mid=보통, low=여유' };
   const S_DATE = { type: ['string', 'null'], description: 'YYYY-MM-DD (지우려면 null)' };
   const S_MONEY = { type: ['number', 'string'], description: '원 단위 숫자 또는 "32만원"·"5만 5천원"·"2.1억" 같은 금액 하나 (범위는 안 됨)' };
@@ -1311,7 +1307,7 @@
     },
     {
       name: 'list_items', label: '할 일 찾는 중',
-      description: '체크리스트 할 일을 찾아요. 결과 {total, items:[{id, partId, part, title, due, dueFmt, done, owner, priority, status, notes(메모 수)}]} — 기한 순. status: open=미완료(기본), overdue=기한 지남, today=오늘 마감, week=미완료 중 7일 안 마감(지난 것 포함), done=완료, all=전부. 고치기 전에 이걸로 정확한 id 를 찾으세요.',
+      description: '체크리스트 할 일을 찾아요. 결과 {total, items:[{id, partId, part, title, due, dueFmt, done, priority, status, notes(메모 수)}]} — 기한 순. status: open=미완료(기본), overdue=기한 지남, today=오늘 마감, week=미완료 중 7일 안 마감(지난 것 포함), done=완료, all=전부. 고치기 전에 이걸로 정확한 id 를 찾으세요.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -1320,7 +1316,6 @@
           dueFrom: { type: 'string', description: '이 날짜(YYYY-MM-DD) 이후 기한만' },
           dueTo: { type: 'string', description: '이 날짜(YYYY-MM-DD) 이전 기한만' },
           query: { type: 'string', description: '제목·설명·메모에서 찾을 말 (띄어쓰기로 여러 단어 = 모두 포함)' },
-          owner: S_OWNER,
           limit: { type: 'integer', minimum: 1, maximum: 60, description: '기본 30' },
         },
       },
@@ -1332,7 +1327,6 @@
         if (partId && !MV.parts.get(partId)) throw new Error('파트 id "' + partId + '"가 없어요. 파트: ' + MV.parts.list().map((p) => p.id + '(' + p.name + ')').join(', '));
         const from = a.dueFrom ? parseDate(a.dueFrom, 'dueFrom') : null;
         const to = a.dueTo ? parseDate(a.dueTo, 'dueTo') : null;
-        const owner = has(a, 'owner') && a.owner !== '' ? parseOwner(a.owner) : null;
         const words = str(a.query, 100).toLowerCase().split(/\s+/).filter(Boolean);
         const limit = MV.clamp(Math.round(num(a.limit) || 30), 1, 60);
         const list = MV.items.list((it) => {
@@ -1346,7 +1340,6 @@
           if ((from || to) && !D.valid(it.due)) return false;
           if (from && it.due < from) return false;
           if (to && it.due > to) return false;
-          if (owner !== null && (it.owner || '') !== owner) return false;
           if (words.length) {
             const hay = (it.title + ' ' + (it.detail || '') + ' ' + (it.notes || []).map((n) => n.text).join(' ') + ' ' + partName(it.partId)).toLowerCase();
             if (!words.every((w) => hay.indexOf(w) >= 0)) return false;
@@ -1358,7 +1351,7 @@
     },
     {
       name: 'get_item', label: '할 일 자세히 보는 중',
-      description: '할 일 하나의 자세한 내용: 설명(detail), 링크, 연결된 가이드, 최근 메모 10개. 결과 {id, part, title, detail, due, done, owner, priority, links, guide, notes:[{id, text, at}], notesTotal}.',
+      description: '할 일 하나의 자세한 내용: 설명(detail), 링크, 연결된 가이드, 최근 메모 10개. 결과 {id, part, title, detail, due, done, priority, links, guide, notes:[{id, text, at}], notesTotal}.',
       inputSchema: { type: 'object', properties: { id: { type: 'string', description: '할 일 id' } }, required: ['id'] },
       run: (a) => {
         const it = needItem(a.id);
@@ -1376,11 +1369,11 @@
     },
     {
       name: 'update_item', label: '할 일 고치는 중',
-      description: '할 일 하나를 고쳐요: done(완료 체크/해제), due(기한, YYYY-MM-DD 또는 null), owner, priority, title, detail. 바꿀 것만 넣으세요. 결과 {id, title, changed:[바뀐 내용]}.',
+      description: '할 일 하나를 고쳐요: done(완료 체크/해제), due(기한, YYYY-MM-DD 또는 null), priority, title, detail. 바꿀 것만 넣으세요. 결과 {id, title, changed:[바뀐 내용]}.',
       inputSchema: {
         type: 'object',
         properties: {
-          id: { type: 'string' }, done: { type: 'boolean' }, due: S_DATE, owner: S_OWNER, priority: S_PRI,
+          id: { type: 'string' }, done: { type: 'boolean' }, due: S_DATE, priority: S_PRI,
           title: { type: 'string' }, detail: { type: 'string', description: '설명 전체를 이 글로 바꿈 (덧붙이려면 add_note)' },
         },
         required: ['id'],
@@ -1391,25 +1384,26 @@
         const diffs = [];
         if (has(a, 'done')) { const d = toBool(a.done); if (d !== !!it.done) { patch.done = d; patch.doneAt = d ? MV.nowISO() : null; diffs.push(d ? '완료로 체크' : '완료 해제'); } }
         if (has(a, 'due')) { const due = parseDate(a.due, '기한'); if (due !== (D.valid(it.due) ? it.due : null)) { patch.due = due; diffs.push('기한 ' + fmtDue(it.due) + ' → ' + fmtDue(due)); } }
-        if (has(a, 'owner')) { const o = parseOwner(a.owner); if (o !== (it.owner || '')) { patch.owner = o; diffs.push('담당 ' + OWNER_LABEL[it.owner || ''] + ' → ' + OWNER_LABEL[o]); } }
         if (has(a, 'priority')) { const p = parsePri(a.priority); if (p !== (it.priority || 'mid')) { patch.priority = p; diffs.push('우선순위 ' + (PRI_LABEL[it.priority] || '보통') + ' → ' + PRI_LABEL[p]); } }
         if (has(a, 'title')) { const t = str(a.title, 200); if (!t) throw new Error('제목이 비어 있어요.'); if (t !== it.title) { patch.title = t; diffs.push('제목 “' + clip(it.title, 30) + '” → “' + clip(t, 30) + '”'); } }
         if (has(a, 'detail')) { const d = String(a.detail == null ? '' : a.detail).slice(0, 5000); if (d !== (it.detail || '')) { patch.detail = d; diffs.push('설명 바꿈'); } }
-        if (!diffs.length) return { id: it.id, title: it.title, changed: [], note: '이미 그 상태라 바꾼 것이 없어요.' };
+        if (!diffs.length) return { id: it.id, title: it.title, changed: [], note: has(a, 'owner') ? OWNER_NOTE : '이미 그 상태라 바꾼 것이 없어요.' };
         const onlyDone = Object.keys(patch).every((k) => k === 'done' || k === 'doneAt');
         const logText = onlyDone ? (patch.done ? '🤖 ✅ 완료: ' : '🤖 ↩︎ 다시 열기: ') + it.title : '🤖 항목 수정: ' + it.title + ' (' + diffs.join(', ') + ')';
         mutate(ctx, () => MV.items.update(it.id, patch, logText), { items: [it.id] });
         const now = MV.items.get(it.id) || it;
         record(ctx, (patch.done === true && onlyDone ? '✅ ' : '✏️ ') + '“' + clip(now.title, 40) + '” — ' + diffs.join(', '), itemHref(now));
-        return { id: now.id, title: now.title, changed: diffs, item: compactItem(now) };
+        const res = { id: now.id, title: now.title, changed: diffs, item: compactItem(now) };
+        if (has(a, 'owner')) res.note = OWNER_NOTE;   // 담당은 말없이 버리지 않고 알려 줌
+        return res;
       },
     },
     {
       name: 'add_item', label: '할 일 추가하는 중',
-      description: '체크리스트에 새 할 일을 추가해요. partId 는 list_parts 의 id (예: buy=가구구매, money=통장업무). 결과 {id, part, title, due, owner, priority}.',
+      description: '체크리스트에 새 할 일을 추가해요. partId 는 list_parts 의 id (예: buy=가구구매, money=통장업무). 결과 {id, part, title, due, priority}.',
       inputSchema: {
         type: 'object',
-        properties: { partId: { type: 'string' }, title: { type: 'string' }, due: S_DATE, owner: S_OWNER, priority: S_PRI, detail: { type: 'string' } },
+        properties: { partId: { type: 'string' }, title: { type: 'string' }, due: S_DATE, priority: S_PRI, detail: { type: 'string' } },
         required: ['partId', 'title'],
       },
       run: (a, ctx) => {
@@ -1420,15 +1414,16 @@
         const title = str(a.title, 200);
         if (!title) throw new Error('할 일 제목이 비어 있어요.');
         const due = has(a, 'due') ? parseDate(a.due, '기한') : null;
-        const owner = has(a, 'owner') ? parseOwner(a.owner) : '';
         const priority = has(a, 'priority') ? parsePri(a.priority) : 'mid';
         const detail = has(a, 'detail') ? String(a.detail == null ? '' : a.detail).slice(0, 5000) : '';
         const dup = MV.items.list((x) => x.partId === p.id && !x.done && String(x.title || '').replace(/\s+/g, '') === title.replace(/\s+/g, ''))[0];
         if (dup) throw new Error('같은 제목의 할 일이 이미 있어요 (id ' + dup.id + ', 기한 ' + fmtDue(dup.due) + '). 고치려면 update_item 을 쓰세요.');
-        const it = MV.store.normItem({ partId: p.id, title, due, owner, priority, detail, order: Date.now() });
+        const it = MV.store.normItem({ partId: p.id, title, due, priority, detail, order: Date.now() });
         mutate(ctx, () => MV.store.update((st) => { st.items.push(it); }, { log: '🤖 할 일 추가: ' + title }), { items: [it.id] });
-        record(ctx, '➕ 할 일 추가: “' + clip(title, 40) + '” (' + p.name + ' · ' + fmtDue(due) + ' · ' + OWNER_LABEL[owner] + ' · ' + PRI_LABEL[priority] + ')', itemHref(it));
-        return { id: it.id, partId: p.id, part: p.name, title, due, dueFmt: fmtDue(due), owner, priority };
+        record(ctx, '➕ 할 일 추가: “' + clip(title, 40) + '” (' + p.name + ' · ' + fmtDue(due) + ' · ' + PRI_LABEL[priority] + ')', itemHref(it));
+        const res = { id: it.id, partId: p.id, part: p.name, title, due, dueFmt: fmtDue(due), priority };
+        if (has(a, 'owner')) res.note = OWNER_NOTE;
+        return res;
       },
     },
     {
@@ -1648,7 +1643,7 @@
     },
     {
       name: 'get_workplan', label: '워크플랜 보는 중',
-      description: '주별 워크플랜(일정): 이번 주부터 이사 다음 주까지 주마다 할 일 수·완료·지연, 미완료 중요 일, 담당자별 미완료 수. 이번 주 전에 기한이 지난 미완료 일도 따로. 일정 점검·밀린 주 찾기에 쓰세요.',
+      description: '주별 워크플랜(일정): 이번 주부터 이사 다음 주까지 주마다 할 일 수·완료·지연, 미완료 중요 일. 이번 주 전에 기한이 지난 미완료 일도 따로. 일정 점검·밀린 주 찾기에 쓰세요.',
       inputSchema: { type: 'object', properties: { weeks: { type: 'integer', minimum: 1, maximum: 10, description: '보여 줄 주 수 (기본: 이사 다음 주까지)' } } },
       run: (a) => {
         const today = D.today();
@@ -1657,7 +1652,7 @@
         const untilMove = Math.max(1, Math.floor(D.diff(start, D.weekStart(move)) / 7) + 2);
         const n = MV.clamp(Math.round(num(a.weeks) || untilMove), 1, 10);
         const items = MV.items.list();
-        const brief = (i) => ({ id: i.id, title: clip(i.title, 60), due: i.due, dueFmt: D.fmt(i.due), owner: i.owner || '', priority: i.priority || 'mid' });
+        const brief = (i) => ({ id: i.id, title: clip(i.title, 60), due: i.due, dueFmt: D.fmt(i.due), priority: i.priority || 'mid' });
         const before = items.filter((i) => !i.done && D.valid(i.due) && i.due < start).sort(byDue);
         const weeks = [];
         for (let k = 0; k < n; k++) {
@@ -1665,13 +1660,10 @@
           const we = D.add(ws, 6);
           const inW = items.filter((i) => D.valid(i.due) && i.due >= ws && i.due <= we);
           const open = inW.filter((i) => !i.done).sort(byDue);
-          const owners = {};
-          open.forEach((i) => { const o = OWNER_LABEL[i.owner || ''] || '미정'; owners[o] = (owners[o] || 0) + 1; });
           weeks.push({
             week: D.fmt(ws) + '~' + D.fmt(we), start: ws, end: we, isMoveWeek: move >= ws && move <= we,
             total: inW.length, done: inW.length - open.length, open: open.length,
             overdue: open.filter((i) => i.due < today).length,
-            openByOwner: owners,
             importantOpen: open.filter((i) => i.priority === 'high').slice(0, 8).map(brief),
           });
         }
@@ -1699,7 +1691,7 @@
         const tasks = MV.items.list((i) => i.partId === 'moveday' || (D.valid(i.due) && i.due >= lo && i.due <= hi))
           .sort((x, y) => byDue(x, y))
           .slice(0, 30)
-          .map((i) => ({ id: i.id, part: partName(i.partId), title: clip(i.title, 70), due: i.due, dueFmt: fmtDue(i.due), owner: i.owner || '', done: !!i.done, detail: clip(i.detail, 260) }));
+          .map((i) => ({ id: i.id, part: partName(i.partId), title: clip(i.title, 70), due: i.due, dueFmt: fmtDue(i.due), done: !!i.done, detail: clip(i.detail, 260) }));
         return { moveDate: move, moveDateFmt: D.fmt(move), moneySteps: steps, tasks, links: { money: '#/money/flow', moveday: '#/checklist/moveday', guide: '#/guide/moveday' } };
       },
     },

@@ -23,6 +23,7 @@
             MV.items.list(filterFn) / byPart(id) / get(id) / add(p) / update(id, patch)
             MV.items.remove(id) / toggle(id) / addNote(id, text) / removeNote(id, noteId)
             MV.items.status(item) → 'done'|'overdue'|'today'|'soon'|'week'|'later'|'nodate'
+            할 일은 '우리 집 할 일' — 나·아내로 담당을 나누지 않음 (옛 기록의 owner 값은 보이지 않게 둠)
    짐목록   MV.inv.list(filterFn) / get / add / update / remove / volume(item) m³
             MV.inv.CATS / MV.inv.FATES / MV.inv.cat(id) / MV.inv.fate(id)
             MV.inv.editor(idOrNull, {preset, defaults, onSave}) 편집 모달
@@ -248,6 +249,8 @@
        parts: [{ id, name, emoji, group, desc, guide, order }],
        items: [{ id, partId, title, detail, due, done, doneAt, priority, owner,
                  notes: [{ id, text, at }], links: [{label,url}], guide, order, seed, createdAt, updatedAt }],
+                 // owner: 옛 기록 호환용으로만 남김 (기본 ''). 할 일은 사람에게 나눠 배정하지 않으므로
+                 //        화면·거르기·정렬·검색·복사 글·AI 비서 어디에도 쓰지 않음
        inventory: [{ id, name, cat, fate, qty, w, d, h, url, room, roomNew, brand, model, lg, ac, tag, note, assumed, seed }],
                  // model: 명판·라벨에 적힌 모델명 (규격 확인용, 없으면 '')
                  // tag: 'fridge'|'washer'|'dryer'|'wardrobe'|'bed'|'sofa'|'tv'|'desk'|'table'|'shelf'|'aircon'|'' (의미 검색용)
@@ -364,9 +367,19 @@
     });
     return n;
   }
+  /* 옛 기록(편집 창에 담당 칸이 있던 때)의 '👤 담당 변경: …' 활동 줄은 지움 — 할 일을 사람에게 나누지 않으므로
+     최근 활동·AI 비서 요약에 다시 나오지 않게. 지운 것이 있으면 true */
+  const OWNER_LOG = /^\s*(?:🤖\s*)?👤\s*담당 변경\s*:/;
+  function dropOwnerLog(state) {
+    if (!state || !Array.isArray(state.activity)) return false;
+    const n = state.activity.length;
+    state.activity = state.activity.filter((a) => !(a && OWNER_LOG.test(String(a.text || ''))));
+    return state.activity.length !== n;
+  }
   function mergeSeed(state) {
+    const dropped = dropOwnerLog(state);
     const seed = MV.seed;
-    if (!seed || !seed.version || (state.seedVersion || 0) >= seed.version) return false;
+    if (!seed || !seed.version || (state.seedVersion || 0) >= seed.version) return dropped;
     const deleted = new Set(state.meta.deletedSeed || []);
     const partIds = new Set(state.parts.map((p) => p.id));
     const itemIds = new Set(state.items.map((i) => i.id));
@@ -433,6 +446,8 @@
   S.afterPersist = [];
   S.KEY = KEY;
   S.mergeSeed = (st) => mergeSeed(st);
+  /** '👤 담당 변경' 같은 옛 담당 활동 줄인지 (보여 주거나 AI 비서에 넘기지 않음) */
+  S.isOwnerLog = (text) => OWNER_LOG.test(String(text || ''));
   S.normItem = (it) => normItem(it, !!(it && it.seed));
   S.normInv = (it) => normInv(it, !!(it && it.seed));
   const persistSoon = MV.debounce(() => S.persist(), 250);
@@ -610,7 +625,6 @@
     return 'later';
   };
   I.PRIORITY = { high: { label: '중요', cls: 'bad' }, mid: { label: '보통', cls: 'warn' }, low: { label: '여유', cls: '' } };
-  I.OWNERS = ['', '나', '아내', '함께'];
 
   /* ---------------- 짐 목록 ---------------- */
   const V = MV.inv = {};

@@ -26,7 +26,6 @@
 
   const LEASE_END = '2026-11-18';            // 원래 전세 만기 (계약서 기준, 고정)
   const PRI = { high: 0, mid: 1, low: 2 };
-  const OWNER_CLS = { '나': '', '아내': 'kid', '함께': 'think' };
   const FLAG_LIMIT = 3;                      // 주간 칸 맨 위 '중요' 깃발 수 (나머지 중요 항목은 파트 묶음 안에 ⚑)
   const ROW_BUDGET = 7;                      // 주간 칸에서 파트 묶음으로 먼저 보여 줄 항목 수 (나머지는 '+n' / 파트 칩)
   const KEEP_DONE = 2;                       // '지금 할 일'에 줄 그어 남겨 둘 '방금 완료' 항목 수
@@ -495,7 +494,6 @@ button.db-wk-head:hover { background:var(--bg-3); }
     const p = partOf(pm, i.partId);
     const cb = el('input', { type: 'checkbox', checked: !!i.done, 'aria-label': (i.done ? '다시 열기: ' : '완료: ') + i.title, dataset: { id: i.id } });
     cb.addEventListener('change', () => onToggle(i.id, cb));
-    const owner = i.owner ? el('span', { class: 'chip ' + (OWNER_CLS[i.owner] || '') }, '👤 ' + i.owner) : null;
     return el('div', { class: 'db-task' + (i.done ? ' is-done' : ''), dataset: { dbKey: 'row-' + i.id } },
       el('label', { class: 'db-check', title: i.done ? '다시 열기' : '완료로 표시' }, cb),
       el('div', { class: 'db-task-main' },
@@ -504,8 +502,7 @@ button.db-wk-head:hover { background:var(--bg-3); }
           // 파트 칩은 표시만 (작은 누름 대상이 제목 링크 바로 밑에 겹치지 않게 — 파트 이동은 '파트별 진행' 타일로)
           el('span', { class: 'chip', title: p.name }, (p.emoji || '📌') + ' ' + clip(p.name, 10)),
           MV.ui.dueChip(i.due, i.done),
-          i.priority === 'high' && !i.done ? el('span', { class: 'chip bad' }, '중요') : null,
-          owner)));
+          i.priority === 'high' && !i.done ? el('span', { class: 'chip bad' }, '중요') : null)));
   }
   function onToggle(id, cb) {
     const it = MV.items.get(id);
@@ -1366,7 +1363,7 @@ button.db-wk-head:hover { background:var(--bg-3); }
 
   /* ======================= 섹션: 최근 활동 · 바로가기 ======================= */
   function activityCard() {
-    const acts = (MV.store.get().activity || []).slice(0, 8);
+    const acts = (MV.store.get().activity || []).filter((a) => !(a && MV.store.isOwnerLog && MV.store.isOwnerLog(a.text))).slice(0, 8);   // 옛 '👤 담당 변경' 줄은 빼고
     return el('section', { class: 'card db-activity db-span-7', 'aria-label': '최근 활동', dataset: { dbDeep: '1' } },
       head('🕘', '최근 활동', null, moreLink('전체 기록 →', '#/checklist/~activity'), 'act-head'),
       acts.length

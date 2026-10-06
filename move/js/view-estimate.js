@@ -3335,7 +3335,7 @@
       x.addEventListener('change', () => updQuote(id, { [key]: x.checked }));
       return el('label', { class: 'check es-check' }, x, el('span', label));
     };
-    const note = el('textarea', { class: 'textarea', rows: '2', placeholder: '메모 (담당자, 특약 가능 여부, 느낌 등)', 'aria-label': '메모', 'data-fk': 'q-' + id + '-note' }, q0.note || '');
+    const note = el('textarea', { class: 'textarea', rows: '2', placeholder: '메모 (상담한 직원, 특약 가능 여부, 느낌 등)', 'aria-label': '메모', 'data-fk': 'q-' + id + '-note' }, q0.note || '');
     textCommit(note, (v) => updQuote(id, { note: v }));
     const badges = el('div', { class: 'es-qbadges' });
     const normTxt = el('div', { class: 'es-qnorm' });

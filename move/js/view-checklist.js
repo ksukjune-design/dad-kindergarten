@@ -41,14 +41,9 @@
   ];
   const PRI_RANK = { high: 0, mid: 1, low: 2 };
   const PRI_LABEL = { high: '중요', mid: '보통', low: '여유' };
-  const OWNER_FILTERS = [['', '전체'], ['나', '나'], ['아내', '아내'], ['함께', '함께']];
-  const OWNER_CHIP = { '나': 'kid', '아내': 'think', '함께': '' };
-  /* '나'·'아내' 거르기는 둘이 '함께' 하는 일도 보여 줌 (내가 챙길 일 = 내 일 + 함께 할 일) */
-  const OWNER_WITH_TOGETHER = { '나': true, '아내': true };
-  const OWNER_TITLES = { '': '모든 담당 보기', '나': '나 담당 + 함께 하는 일', '아내': '아내 담당 + 함께 하는 일', '함께': '함께 하는 일만' };
+  /* 할 일은 사람에게 나눠 배정하지 않음 ('우리 집 할 일'). 옛 기록에 남은 owner 값은 보이지도, 거르기·정렬·검색에도 쓰이지 않음 */
   const EMOJIS = ['📌', '🏠', '📦', '🧹', '🔧', '📝', '💳', '📞', '🚗', '🏫', '🧒', '🪴', '🎁', '🧾', '🛋️', '🔑'];
   const PRI_WORDS = { '': 'high', '!': 'high', '중요': 'high', '높음': 'high', '급함': 'high', '긴급': 'high', '보통': 'mid', '중간': 'mid', '여유': 'low', '낮음': 'low' };
-  const OWNER_WORDS = { '나': '나', '내가': '나', '아내': '아내', '와이프': '아내', '함께': '함께', '같이': '함께', '우리': '함께', '둘다': '함께' };
   const WEEK = ['일', '월', '화', '수', '목', '금', '토'];
   const TITLE_MAX = 300;   // 스레드 제목 칸과 같은 한도
 
@@ -87,11 +82,11 @@
   const NOTE_PH_TOUCH = '메모 남기기… (보내기로 저장)';   // 폰 한 줄에 들어가게 짧게
   const NOTE_PH_KEYS = '메모 남기기… (엔터: 저장 · 쉬프트\u2060+\u2060엔터: 줄바꿈)';   // \u2060(보이지 않는 글자): '쉬프트+엔터' 가운데서 줄이 갈리지 않게
   /* 할 일 입력창 예시: 칸 너비에 맞는 것 중 가장 긴 것 (잘린 예시는 오히려 헷갈림) */
-  const COMP_PH = ['할 일 추가… 예) 우리은행 방문 ~10/15 !중요 @아내', '할 일 추가… 예) 은행 ~10/15', '할 일 추가…'];
+  const COMP_PH = ['할 일 추가… 예) 우리은행 방문 ~10/15 !중요', '할 일 추가… 예) 은행 ~10/15', '할 일 추가…'];
   const MOVE_PH = '📁 파트 옮기기';
   const isSpecial = (ch) => !!ch && ch.charAt(0) === '~';
 
-  function ui() { return MV.store.ensure('checklistUI', { hideDone: true, owner: '' }); }
+  function ui() { return MV.store.ensure('checklistUI', { hideDone: true }); }
   function setUI(patch) { MV.store.update(() => { Object.assign(ui(), patch); }); }
 
   function hashFor(ch, itemId, q) {
@@ -120,11 +115,6 @@
     return (+a.order || 0) - (+b.order || 0);
   }
   const cmpDone = (a, b) => String(b.doneAt || '').localeCompare(String(a.doneAt || ''));
-  function ownerMatch(it, f) {
-    if (!f) return true;
-    if (f === '함께') return it.owner === '함께';
-    return it.owner === f || it.owner === '함께';
-  }
   /* 이모지 칸에는 글자 하나(그래핌)만: '가나다라…' 같은 긴 글이 제목을 밀어내지 않게 */
   let segmenter = null;
   try { segmenter = window.Intl && Intl.Segmenter ? new Intl.Segmenter('ko', { granularity: 'grapheme' }) : null; } catch (e) { segmenter = null; }
@@ -194,10 +184,12 @@
     }
     return null;
   }
+  /* 예전에 빠른 추가에서 담당으로 쓰던 낱말 — 이제는 제목에서 빼기만 함 (r.dropped) */
+  const OLD_OWNER_WORDS = ['나', '내가', '아내', '와이프', '함께', '같이', '우리', '둘다', '둘이'];
   /* 같은 종류 토큰이 여러 번이면 마지막 것을 쓰고, 미리보기에서 알려 줌 (r.multi) */
   function parseQuick(raw) {
-    const r = { title: '', due: null, priority: null, owner: null, bad: [], multi: [] };
-    const seen = { due: 0, priority: 0, owner: 0 };
+    const r = { title: '', due: null, priority: null, bad: [], multi: [], dropped: [] };
+    const seen = { due: 0, priority: 0 };
     const keep = [];
     String(raw || '').split(/\s+/).filter(Boolean).forEach((w) => {
       const head = w.charAt(0); const rest = w.slice(1);
@@ -212,7 +204,9 @@
         if (p) { r.priority = p; seen.priority++; return; }
         keep.push(w); return;
       }
-      if ((head === '@' || head === '＠') && OWNER_WORDS[rest]) { r.owner = OWNER_WORDS[rest]; seen.owner++; return; }
+      /* '@아내'·'@나' 같은 옛 담당 표시는 제목에서 빼기만 함 (할 일을 사람에게 나누지 않으므로 담당으로 쓰지 않음).
+         그 밖의 '@○○'(이메일·상호 등)는 제목 글로 둠 */
+      if ((head === '@' || head === '＠') && OLD_OWNER_WORDS.indexOf(rest) >= 0) { r.dropped.push(w); return; }
       keep.push(w);
     });
     Object.keys(seen).forEach((k) => { if (seen[k] > 1) r.multi.push(k); });
@@ -811,13 +805,13 @@
         const n = (x) => its.filter((it) => st(it) === x).length;
         sum = ['sp', n('overdue'), n('today'), its.length];
       } else if (ch === '~done') {
-        sum = ['done', MV.items.list((it) => it.done && ownerMatch(it, u.owner)).length];
+        sum = ['done', MV.items.list((it) => it.done).length];
       } else if (ch === '~search' && cur.q) {
         sum = ['search', listItemsFor('~search').length];
       } else if (ch === '~activity') {
         sum = ['act', (MV.store.get().activity || []).length];
       }
-      const sig = JSON.stringify([ch, cur.q, info.emoji, info.name, info.desc, info.part ? (info.part.guide || '') : '', !!info.missing, u.owner || '', !!u.hideDone, sum]);
+      const sig = JSON.stringify([ch, cur.q, info.emoji, info.name, info.desc, info.part ? (info.part.guide || '') : '', !!info.missing, !!u.hideDone, sum]);
       if (sig === headSig) return;
       headSig = sig;
 
@@ -860,16 +854,12 @@
       let filters = null;
       if (ch !== '~activity' && !info.missing && !(ch === '~search' && !cur.q)) {
         const showHide = !!info.part || ch === '~search';
-        const ownSeg = seg(OWNER_FILTERS, u.owner || '', (v) => setUI({ owner: v }), '담당자로 거르기', 'own:');
-        MV.$$('.ck-seg-b', ownSeg).forEach((b) => { const t = OWNER_TITLES[b.dataset.v]; if (t) b.title = t; });
-        filters = el('div', { class: 'ck-filters' },
-          el('div', { class: 'ck-own' }, ownSeg,
-            OWNER_WITH_TOGETHER[u.owner] ? el('span', { class: 'ck-own-note', title: OWNER_TITLES[u.owner] }, '+함께 포함') : null),
-          showHide ? el('button', {
+        filters = !showHide ? null : el('div', { class: 'ck-filters' },
+          el('button', {
             type: 'button', class: 'ck-toggle', 'aria-pressed': String(!!u.hideDone), 'data-fkey': 'hide',
             title: '켜 두면 끝낸 일은 아래 “완료” 묶음에 접혀 있어요',
             onclick: () => { mem.doneOpen = {}; setUI({ hideDone: !ui().hideDone }); },
-          }, el('span', { class: 'ck-switch', 'aria-hidden': 'true' }), '완료 숨기기') : null);
+          }, el('span', { class: 'ck-switch', 'aria-hidden': 'true' }), '완료 숨기기'));
       }
       put(sub,
         info.desc ? el('p', { class: 'ck-head-desc' }, info.desc) : null,
@@ -941,7 +931,6 @@
       const sp = isSpecial(ch);
       const today = D.today();
       const dd = D.dday(D.moveDate());
-      const u = ui();
       const lines = [];
       const items = listItemsFor(ch);
       if (ch === '~done') {
@@ -950,13 +939,13 @@
         done.forEach((it) => lines.push('☑ ' + (sp ? '[' + ((MV.parts.get(it.partId) || {}).name || '파트 없음') + '] ' : '') + it.title));
       } else {
         const open = items.filter((it) => !it.done).sort(cmpItems);
-        lines.push(info.emoji + ' ' + info.name + ' — 남은 할 일 ' + open.length + '개' + (u.owner ? ' (' + u.owner + (OWNER_WITH_TOGETHER[u.owner] ? ' + 함께' : '') + ')' : ''));
+        lines.push(info.emoji + ' ' + info.name + ' — 남은 할 일 ' + open.length + '개');
         lines.push('(' + D.fmt(today) + ' 기준 · 이사 ' + (dd.n === 0 ? '오늘' : dd.label) + ')');
         open.forEach((it) => {
           const p = MV.parts.get(it.partId);
           const due = dueText(it.due);
           lines.push('☐ ' + (it.priority === 'high' ? '❗' : '') + (sp ? '[' + (p ? p.name : '파트 없음') + '] ' : '') + it.title +
-            (due ? ' (' + due + ')' : '') + (it.owner ? ' · ' + it.owner : ''));
+            (due ? ' (' + due + ')' : ''));
         });
         const doneN = items.length - open.length;
         if (!sp && doneN) lines.push('— 끝낸 일 ' + doneN + '개');
@@ -975,7 +964,6 @@
 
     /* ---------- 목록 ---------- */
     function listItemsFor(ch) {
-      const u = ui();
       let items;
       if (ch === '~search') {
         const terms = termsOf(cur.q);
@@ -991,7 +979,7 @@
       } else if (MV.parts.get(ch)) {
         items = MV.items.byPart(ch);
       } else items = [];
-      return items.filter((it) => ownerMatch(it, u.owner));
+      return items;
     }
 
     function rowFor(it, ch, opts) {
@@ -1018,7 +1006,6 @@
       if (opts.doneMeta) meta.push(el('span', { class: 'chip good' }, '✓ ' + D.time(it.doneAt) + ' 완료'));
       else meta.push(MV.ui.dueChip(it.due, it.done));
       if (it.priority === 'high' && !it.done) meta.push(el('span', { class: 'chip bad' }, '중요'));
-      if (it.owner) meta.push(el('span', { class: 'chip ' + (OWNER_CHIP[it.owner] || '') }, it.owner));
       const nn = notesOf(it).length;
       if (nn) meta.push(el('span', { class: 'ck-meta-n', title: '메모 ' + nn + '개' }, '💬 ' + nn));
       if (it.guide) meta.push(el('span', { class: 'ck-meta-n', title: '관련 가이드가 있어요' }, '📖'));
@@ -1059,10 +1046,9 @@
       if (ch === '~search' && !termsOf(cur.q).length) return nodeBlocks(emptyState('🔍', '찾을 말을 입력하세요. 제목·설명·메모를 모두 뒤져요.'));
       const items = listItemsFor(ch);
       const showPart = !!info.special;
-      const resetOwner = () => (u.owner ? el('button', { type: 'button', class: 'btn btn-sm', onclick: () => setUI({ owner: '' }) }, '모든 담당 보기') : null);
 
       if (ch === '~done') {
-        if (!items.length) return nodeBlocks(emptyState('🌱', u.owner ? '“' + u.owner + '” 담당으로 끝낸 일이 아직 없어요.' : '아직 끝낸 일이 없어요. 하나씩 체크해 볼까요?', resetOwner()));
+        if (!items.length) return nodeBlocks(emptyState('🌱', '아직 끝낸 일이 없어요. 하나씩 체크해 볼까요?'));
         items.sort(cmpDone);
         const realToday = D.str(new Date()); const yest = D.add(realToday, -1);
         const days = []; const byDay = new Map();
@@ -1080,8 +1066,7 @@
       }
 
       if (!items.length) {
-        if (ch === '~search') return nodeBlocks(emptyState('🔍', '“' + cur.q + '”와(과) 맞는 항목이 없어요.', resetOwner()));
-        if (u.owner) return nodeBlocks(emptyState('👤', '“' + u.owner + '” 담당 항목이 여기엔 없어요.', resetOwner()));
+        if (ch === '~search') return nodeBlocks(emptyState('🔍', '“' + cur.q + '”와(과) 맞는 항목이 없어요.'));
         if (ch === '~focus') return nodeBlocks(emptyState('😌', '급한 일이 없어요! 다음 일주일을 미리 볼까요?', el('button', { type: 'button', class: 'btn btn-sm', onclick: () => goChannel('~week') }, '🗓 7일 이내 보기')));
         if (ch === '~week') return nodeBlocks(emptyState('🗓', '7일 안에 마감인 일이 없어요.', el('button', { type: 'button', class: 'btn btn-sm', onclick: () => goChannel('~all') }, '📋 전체 보기')));
         if (ch === '~all') return nodeBlocks(emptyState('🎉', '남은 할 일이 하나도 없어요. 수고하셨어요!'));
@@ -1125,7 +1110,7 @@
     function rowSig(it, ch, opts) {
       const p = MV.parts.get(it.partId);
       return [ch, ch === '~search' ? cur.q + '\u0002' + haystack(it) : '', D.today(), it.title, it.done ? 1 : 0, it.doneAt || '', it.due || '',
-        it.priority || '', it.owner || '', notesOf(it).length, it.guide ? 1 : 0, it.partId,
+        it.priority || '', notesOf(it).length, it.guide ? 1 : 0, it.partId,
         opts.showPart && p ? (p.emoji || '') + p.name : '', lingering.has(it.id) ? 1 : 0, opts.showPart ? 1 : 0, opts.doneMeta ? 1 : 0].join('\u0001');
     }
     function getRow(it, ch, opts) {
@@ -1174,7 +1159,7 @@
       return { icon: '•', text };
     }
     function buildActivity() {
-      const acts = (MV.store.get().activity || []).slice(0, 300);
+      const acts = (MV.store.get().activity || []).filter((a) => !(a && MV.store.isOwnerLog && MV.store.isOwnerLog(a.text))).slice(0, 300);   // 옛 '👤 담당 변경' 줄은 빼고
       if (!acts.length) return [emptyState('🕘', '아직 기록이 없어요.')];
       const byTitle = new Map();
       MV.items.list().forEach((i) => { if (i.title && !byTitle.has(i.title)) byTitle.set(i.title, i); });
@@ -1382,22 +1367,20 @@
       composer.classList.toggle('ck-has-text', !!raw.trim());
       if (!raw.trim()) {
         put(compPrev, el('span', { class: 'ck-hint' },
-          '빠른 입력: ', el('code', '~10/15'), ' ', el('code', '~내일'), ' ', el('code', '~D-3'), ' 마감 · ', el('code', '!중요'), ' · ', el('code', '@아내')));
+          '빠른 입력: ', el('code', '~10/15'), ' ', el('code', '~내일'), ' ', el('code', '~D-3'), ' 마감 · ', el('code', '!중요'), ' 중요도'));
         return;
       }
       const p = parseQuick(raw);
-      const u = ui();
-      const owner = p.owner != null ? p.owner : (u.owner || '');
       const chips = [];
       if (p.due) {
         const dd = D.dday(p.due);
         chips.push(el('span', { class: 'chip ' + (dd.n < 0 ? 'bad' : dd.n <= 3 ? 'warn' : 'brand') }, '📅 ' + D.fmt(p.due) + ' · ' + (dd.n === 0 ? '오늘' : dd.label)));
       } else chips.push(el('span', { class: 'chip' }, '📅 기한 없음'));
       if (p.priority) chips.push(el('span', { class: 'chip ' + (p.priority === 'high' ? 'bad' : '') }, PRI_LABEL[p.priority]));
-      if (owner) chips.push(el('span', { class: 'chip ' + (OWNER_CHIP[owner] || '') }, '👤 ' + owner + (p.owner == null ? ' (필터)' : '')));
       p.bad.forEach((b) => chips.push(el('span', { class: 'chip warn' }, '“' + b + '” 날짜를 못 읽었어요')));
+      if (p.dropped.length) chips.push(el('span', { class: 'chip ck-prev-drop', title: '모든 할 일은 우리 집 할 일이에요' }, '할 일은 나눠 맡지 않아요 — ' + p.dropped.map((w) => '“' + w + '”').join(' ') + ' 표시는 빼고 저장해요'));
       if (p.multi.length) {
-        const nm = { due: '날짜', priority: '중요도', owner: '담당' };
+        const nm = { due: '날짜', priority: '중요도' };
         chips.push(el('span', { class: 'chip warn', title: '같은 종류를 두 번 이상 적으면 마지막 것만 저장돼요' }, '여러 번 적은 ' + p.multi.map((k) => nm[k]).join('·') + ' → 마지막 것으로'));
       }
       if (isSpecial(effCh())) {
@@ -1438,10 +1421,9 @@
       const ch = effCh();
       const partId = isSpecial(ch) ? compPart.value : ch;
       if (!partId || !MV.parts.get(partId)) { MV.ui.toast('추가할 파트를 먼저 만들어 주세요'); return; }
-      const owner = p.owner != null ? p.owner : (ui().owner || '');
       compInput.value = ''; mem.draft = '';
       hideCompNote();
-      const it = MV.items.add({ partId, title: p.title.slice(0, TITLE_MAX).trim(), due: p.due || null, priority: p.priority || 'mid', owner });
+      const it = MV.items.add({ partId, title: p.title.slice(0, TITLE_MAX).trim(), due: p.due || null, priority: p.priority || 'mid' });
       pendingFlash = { id: it.id, partId, title: it.title };
       updatePreview();
       compInput.focus({ preventScroll: true });
@@ -1698,15 +1680,11 @@
           quick('지우기', () => null, '마감 지우기')),
         f.dueInfo);
 
-      // 중요도·담당
+      // 중요도
       f.prio = seg([['high', '중요', 'ck-seg-bad'], ['mid', '보통'], ['low', '여유']], it.priority || 'mid', (v) => {
         const x = curItem(); if (!x || (x.priority || 'mid') === v) return;
         MV.items.update(id, { priority: v }, '🚩 중요도 변경: ' + x.title + ' → ' + PRI_LABEL[v]);
       }, '중요도');
-      f.owner = seg([['', '없음'], ['나', '나'], ['아내', '아내'], ['함께', '함께']], it.owner || '', (v) => {
-        const x = curItem(); if (!x || (x.owner || '') === v) return;
-        MV.items.update(id, { owner: v }, '👤 담당 변경: ' + x.title + ' → ' + (v || '없음'));
-      }, '담당');
 
       // 설명
       f.detail = el('textarea', { class: 'textarea ck-detail', id: 'ck-detail-' + String(id).replace(/[^\w-]/g, ''), rows: '3', 'aria-label': '설명', placeholder: '자세한 내용, 전화번호, 준비물, 결정한 것…' });
@@ -1732,8 +1710,7 @@
         f.title,
         el('div', { class: 'ck-fields' },
           el('div', { class: 'ck-field' }, el('span', { class: 'ck-field-l' }, '마감'), dueBox),
-          el('div', { class: 'ck-field' }, el('span', { class: 'ck-field-l' }, '중요도'), f.prio),
-          el('div', { class: 'ck-field' }, el('span', { class: 'ck-field-l' }, '담당'), f.owner)),
+          el('div', { class: 'ck-field' }, el('span', { class: 'ck-field-l' }, '중요도'), f.prio)),
         el('div', { class: 'ck-sec' }, el('label', { class: 'ck-sec-h', for: f.detail.id }, '설명'), f.detail, f.detailPrev),
         el('div', { class: 'ck-sec' }, el('div', { class: 'ck-sec-h' }, '링크', el('button', { type: 'button', class: 'btn btn-ghost btn-sm ck-addlink', onclick: addLink }, '+ 링크 추가')), f.links, f.guide),
         el('div', { class: 'ck-sec ck-thread-sec' }, el('div', { class: 'ck-sec-h ck-thread-h' }, '💬 메모', f.notesCount), f.notes),
@@ -1831,7 +1808,6 @@
         f.dueInfo.title = D.fmtLong(dueStr) + ' · ' + dd.label;
       } else put(f.dueInfo, el('span', { class: 'chip' }, '기한 없음'));
       f.prio.set(it.priority || 'mid');
-      f.owner.set(it.owner || '');
       // 링크·가이드
       const links = linksOf(it);
       const lsig = JSON.stringify(links);
@@ -2132,8 +2108,6 @@
 .ck-prog-sp { flex: 1 1 auto; max-width: none; }
 .ck-prog-txt { font-size: .78rem; font-weight: 700; color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .ck-filters { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-left: auto; }
-.ck-own { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.ck-own-note { font-size: .72rem; font-weight: 700; color: var(--ink-3); white-space: nowrap; }
 
 /* 세그먼트·토글 */
 .ck-seg { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-radius: 10px; background: var(--bg-3); }
@@ -2242,6 +2216,7 @@
 .ck-composer:focus-within .ck-comp-prev, .ck-composer.ck-has-text .ck-comp-prev { display: flex; }
 .ck-comp-prev code { font-size: .74rem; }
 .ck-prev-to { font-weight: 700; color: var(--ink-2); }
+.ck-prev-drop { white-space: normal; font-weight: 500; color: var(--ink-3); line-height: 1.5; padding-top: 2px; padding-bottom: 2px; }
 .ck-prev-warn { color: var(--bad); font-weight: 700; }
 .ck-shake { animation: ck-shake .3s; }
 @keyframes ck-shake { 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
@@ -2333,7 +2308,7 @@
   .ck-addlink, .ck-del, .ck-guide-link, .ck-link { min-height: 36px; }
   .ck-x { width: 36px; height: 36px; }
   .ck-note-del { width: 36px; height: 36px; }
-  /* 태블릿(700px 이상)에서도: 마감 바로가기, 중요도·담당, 목록의 담당 거르기 */
+  /* 태블릿(700px 이상)에서도: 마감 바로가기, 중요도 고르기 */
   .ck-quick, .ck-seg-b { min-height: 36px; }
   .ck-search-clear { width: 36px; height: 36px; }
 }

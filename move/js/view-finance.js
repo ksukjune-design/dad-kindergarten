@@ -3427,7 +3427,7 @@ div.fn-alert { cursor: default; }
     const partOk = MV.parts.get(r.part);
     const part = partOk ? r.part : ((MV.parts.list()[0] || {}).id || '');
     const wasDone = !!r.done;
-    const it = MV.items.add({ partId: part, title: r.title, detail: r.detail, due: r.due, priority: r.urgent ? 'high' : r.conf === 'low' ? 'low' : 'high', owner: '나', done: wasDone, doneAt: wasDone ? MV.nowISO() : null });
+    const it = MV.items.add({ partId: part, title: r.title, detail: r.detail, due: r.due, priority: r.urgent ? 'high' : r.conf === 'low' ? 'low' : 'high', done: wasDone, doneAt: wasDone ? MV.nowISO() : null });
     updStruct((fin) => { if (!fin.links || typeof fin.links !== 'object') fin.links = {}; fin.links['prot-' + r.key] = it.id; });
     MV.ui.toast('체크리스트에 추가했어요', { action: { label: '보기', onClick: () => MV.go('#/checklist/' + encodeURIComponent(it.partId || '_') + '/' + encodeURIComponent(it.id)) } });
   }
