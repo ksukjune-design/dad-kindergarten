@@ -172,7 +172,7 @@
     taxlyGift: { label: '가족 간 전세자금 차용과 증여세 (세무 상담 글)', url: 'https://taxly.kr/qna/16208-가족간-전세자금-차용시-증여세-문제' },
     taxlyNote: { label: '부모 차용증 이자 설정 (세무 상담 글)', url: 'https://taxly.kr/qna/133077-부모자식간-차용증-이자-설정에-관하여' },
     transtax: { label: '차용 이자율 계산 사례', url: 'https://m.cafe.daum.net/transtax/PpOm/289' },
-    hugCompare: { label: 'HF·서울보증보험(SGI) 보증료 비교', url: 'https://safehomes.kr/insights/kn-20260713-1608-hf-전세보증금반환보증-sgi서울보증과-보증료-비교/' },
+    hugCompare: { label: '주택금융공사·서울보증보험 보증료 비교', url: 'https://safehomes.kr/insights/kn-20260713-1608-hf-전세보증금반환보증-sgi서울보증과-보증료-비교/' },
     hug: { label: 'HUG 주택도시보증공사', url: 'https://www.khug.or.kr' },
     rtms: { label: '부동산거래관리시스템 (임대차 신고)', url: 'https://rtms.molit.go.kr' },
     iros: { label: '인터넷등기소', url: 'https://www.iros.go.kr' },
@@ -931,7 +931,7 @@
     } else if (c.net < 0) {
       A.push({ id: 'budget', level: 'info', tab: 'budget', anchor: 'fn-budget-sum',
         text: '꼭 드는 이사 비용은 ' + D.fmt(c.move) + ' 남는 돈으로 낼 수 있어요 (여유 ' + krw(c.netEssential) + '). ' +
-          (c.netWithPurchases < 0 ? '옷장·세탁기 같은 살림까지 사면 ' + krw(-c.netWithPurchases) + ' 모자라요 — 카드 할부 등으로 나눠 내세요.' : '선택·나중에 항목까지 모두 내면 ' + krw(-c.net) + ' 모자라요.') });
+          (c.netWithPurchases < 0 ? '새로 사는 살림(세탁기 등)까지 사면 ' + krw(-c.netWithPurchases) + ' 모자라요 — 카드 할부 등으로 나눠 내세요.' : '선택·나중에 항목(간이 옷장·HUG 보증료)까지 모두 내면 ' + krw(-c.net) + ' 모자라요 — 이사 뒤에 내는 돈이에요.') });
     }
     if (c.broker.verdict === 'under' && !f.broker.agreed) {
       A.push({ id: 'brokerUnder', level: 'info', tab: 'tax', anchor: 'fn-broker',
@@ -2427,8 +2427,9 @@ div.fn-alert { cursor: default; }
       el('div', { class: 'callout kid fn-why-big' },
         el('p', { class: 'mb-0' }, el('b', '남는 돈이 ' + krw(fl.leftover) + '인데 ' + krw(b.unpaid) + '이 다 필요한가요? '),
           '아니요. ' + krw(b.unpaid) + '은 예산 전부예요. 그중 ' + D.fmt(c.move) + ' 전후에 꼭 현금으로 나가는 건 "꼭 드는 이사 비용" ' + krw(ess) + '이에요. ' +
-          '"새로 사는 살림" ' + krw(pur) + '은 이사비가 아니라 물건 값이라 카드 할부로 나눠 낼 수 있고, ' +
-          '"선택·나중에" ' + krw(opt) + '은 안 해도 되거나(입주청소) 이사 뒤에 내는 돈(HUG 보증료)이에요.')),
+          '"새로 사는 살림" ' + krw(pur) + '은 이사비가 아니라 물건 값(통돌이 세탁기 등)이라 카드 할부로 나눠 낼 수 있고, ' +
+          '"선택·나중에" ' + krw(opt) + '은 이사 뒤에 정하거나 내는 돈(간이 옷장, HUG 보증료)이에요.'),
+        el('p', { class: 'mb-0 mt-8 small' }, el('b', '가족이 정한 것: '), '옷장은 이사 후 실측하고 간이 옷장으로 · 커튼·소품은 지금 것 가져감(0원) · 입주청소는 직접(0원) · 예비비는 따로 잡지 않음.')),
       el('div', { class: 'fn-cmp', role: 'img', 'aria-label': '같은 눈금 비교 — 그날 남는 돈 ' + krw(fl.leftover) + ', 앞으로 낼 돈 ' + krw(b.unpaid) + ' (꼭 드는 비용 ' + krw(ess) + ', 살림 구입 ' + krw(pur) + ', 선택·나중에 ' + krw(opt) + ')' },
         el('div', { class: 'fn-cmp-row' }, el('span', '그날 남는 돈'), el('div', { class: 'fn-cmp-track' }, el('i', { class: 'is-left', style: { width: w(Math.max(0, fl.leftover)) } })), el('b', krw(fl.leftover))),
         el('div', { class: 'fn-cmp-row' }, el('span', '앞으로 낼 돈'),
@@ -2454,12 +2455,15 @@ div.fn-alert { cursor: default; }
       row.classList.toggle('is-paid', !!x.paid);
       row.classList.toggle('is-off', x.on === false);
     });
-    const setLine = (fn, struct) => (struct ? updStruct : upd)((fin) => { const x = fin.budget.lines.find((y) => y.id === l.id); if (x) fn(x); });
+    /* 사용자가 한 번이라도 고친 줄은 edited — 다음 기본값 바꿈(마이그레이션)에서 건드리지 않음 */
+    const setLine = (fn, struct) => (struct ? updStruct : upd)((fin) => { const x = fin.budget.lines.find((y) => y.id === l.id); if (x) { fn(x); x.edited = true; } });
+    const setLineSilent = (fn) => updSilent((fin) => { const x = fin.budget.lines.find((y) => y.id === l.id); if (x) { fn(x); x.edited = true; } });
     // 항목명
     const labelCell = el('div', { class: 'fn-bl-label' },
-      textField('항목 이름', l.label, (v) => updSilent((fin) => { const x = fin.budget.lines.find((y) => y.id === l.id); if (x) x.label = v; }), { fk: 'bl-label-' + l.id, bare: true }),
+      textField('항목 이름', l.label, (v) => setLineSilent((x) => { x.label = v; }), { fk: 'bl-label-' + l.id, bare: true }),
       meta ? el('div', { class: 'fn-range' }, el('span', '보통 ' + (meta.low ? krw(meta.low) : '0원') + ' ~ ' + krw(meta.high)),
         basis(meta.conf, meta.basis, meta.auto === 'hug' ? [LINK.hug] : [], meta.conf === 'mid' ? 'HUG에 확인' : '견적·영수증으로 확인', true)) : null,
+      meta && meta.auto === 'hug' ? el('a', { class: 'fn-cl-link fn-hug-link', href: HUG_GUIDE }, '📎 가입하지 않으면? 별첨 보기 →') : null,
       /* 묶음 옮기기 — 바꾸면 그 묶음 아래로 줄이 옮겨 가고 위 합계가 바로 바뀜 */
       el('label', { class: 'fn-bl-grp' }, el('span', '묶음'),
         selectField('묶음 옮기기', l.group, GROUPS.map((g) => [g.id, g.icon + ' ' + g.label]), (v) => {
@@ -2495,9 +2499,9 @@ div.fn-alert { cursor: default; }
     } else {
       amountCell.appendChild(moneyField('금액', l.value, (v) => setLine((x) => { x.amount = v; }), { fk: 'bl-amt-' + l.id, bare: true }));
     }
-    const dateCell = el('div', { class: 'fn-bl-date' }, dateField('결제일', l.date, (v) => updSilent((fin) => { const x = fin.budget.lines.find((y) => y.id === l.id); if (x) x.date = v; }), { fk: 'bl-date-' + l.id, bare: true }));
+    const dateCell = el('div', { class: 'fn-bl-date' }, dateField('결제일', l.date, (v) => setLineSilent((x) => { x.date = v; }), { fk: 'bl-date-' + l.id, bare: true }));
     const paidCell = el('div', { class: 'fn-bl-paid' }, checkbox('냄', l.paid, (v) => setLine((x) => { x.paid = v; }), { fk: 'bl-paid-' + l.id }));
-    const memoCell = el('div', { class: 'fn-bl-memo' }, textField('메모', l.memo, (v) => updSilent((fin) => { const x = fin.budget.lines.find((y) => y.id === l.id); if (x) x.memo = v; }), { fk: 'bl-memo-' + l.id, bare: true, placeholder: '메모 (업체·견적 등)' }));
+    const memoCell = el('div', { class: 'fn-bl-memo' }, textField('메모', l.memo, (v) => setLineSilent((x) => { x.memo = v; }), { fk: 'bl-memo-' + l.id, bare: true, placeholder: '메모 (업체·견적 등)' }));
     const delCell = el('div', { class: 'fn-bl-del' }, !meta ? el('button', {
       class: 'btn btn-ghost btn-icon', type: 'button', 'aria-label': (l.label || '항목') + ' 삭제', title: '삭제', 'data-fk': 'bl-del-' + l.id,
       onclick: () => {
@@ -2555,7 +2559,8 @@ div.fn-alert { cursor: default; }
       ? D.fmt(c.move) + ' 남는 돈으로 꼭 드는 이사 비용을 다 내기엔 ' + krw(-c.netEssential) + ' 모자라요. 아래 순서로 메워 보세요.'
       : c.net < 0
         ? '꼭 드는 이사 비용은 ' + D.fmt(c.move) + ' 남는 돈으로 낼 수 있어요(여유 ' + krw(c.netEssential) + '). 살림 구입·선택 항목은 시기와 결제 방법을 나눠서 내면 돼요.'
-        : '남는 돈으로 예산 전부를 낼 수 있어요. 남는 ' + krw(c.net) + '은 예비비로 두고, 견적이 확정되면 다시 확인하세요.';
+        : '남는 돈으로 예산 전부를 낼 수 있어요. 남는 ' + krw(c.net) + '은 통장에 그대로 두고, 견적이 확정되면 다시 확인하세요.';
+    const hugLink = el('a', { class: 'fn-cl-link', href: HUG_GUIDE }, '가입하지 않으면? 별첨 보기 →');
     return [
       el('div', { class: 'fn-card-h' }, el('h3', title), guideLink('budget-cut')),
       el('p', { class: 'small' }, lead),
@@ -2563,18 +2568,21 @@ div.fn-alert { cursor: default; }
         fl.rentPart ? li('월세 후불 확인', ' — 계약서대로 ' + D.fmt(addMonths(c.move, 1)) + '에 내면 ' + D.fmt(c.move) + '에 ' + krw(fl.rentPart) + '이 덜 나가요. 중개사·C와 확정하세요.') : null,
         li('장기수선충당금 돌려받기', ' — 약 20만~50만원. 구집 관리사무소 납부확인서로 A에게 청구.'),
         li('이사업체 단가 협상', ' — 11/3(화)은 평일이고 손없는날이 아니라 손없는날·주말 할증은 없고, 월초라 업체에 따라 약 5% 붙을 수 있어요. 방문견적 3곳을 "부가세 포함 총액"으로 비교하세요 (카드 수수료 전가는 금지).'),
+        li('행거박스 개수 묻기', ' — 옷장을 이사 전에 사지 않으니 옷은 박스·행거박스로 옮겨요. 업체가 행거박스를 몇 개 가져오는지 물어 견적에 넣어 달라고 하세요.'),
       ]),
       sec(GROUP_BY_ID.purchase, [
-        li('옷장은 미루지 않기', ' — 붙박이장이 없어져 꼭 필요해요. 사전방문(10/10~10/11) 때 실측 → 집주인 벽 고정 동의 10/14까지 → 10/18까지 주문 → 설치는 이사 후 11/4~11/6 (선반입이 되면 11/2).'),
-        li('커튼은 두 방만 먼저', ' — 사전방문 때 창 치수를 재서 안방·아이방 커튼(또는 블라인드)만 10/25까지 주문해 이사 날 달고, 나머지 커튼·소품은 살아 보며 천천히.'),
-        li('카드 무이자 할부', '로 옷장·세탁기 값을 나눠 내기 — ' + D.fmt(c.move) + ' 현금이 줄지 않아요.'),
+        li('통돌이 세탁기 약 50만원', ' — 이사 후 11/4~11/6 배송으로 주문해요. 고장 난 세탁기는 지금 집에서 폐가전 무상방문수거(1599-0903). 카드 무이자 할부로 나누면 ' + D.fmt(c.move) + ' 현금이 줄지 않아요.'),
+        li('커튼·소품은 지금 것 가져가기 (0원)', ' — 새로 사지 않아요. 사전방문 때 창 치수만 재서 지금 커튼이 맞는지 보고, 안 맞으면 이사 후에 조정해요.'),
         li('안 쓰는 물건 중고 판매', ' — 붙박이장에서 나온 물건·책·장난감.'),
       ]),
       sec(GROUP_BY_ID.optional, [
-        li('입주청소', ' — 사전방문 때 집 상태를 보고 정해요. 직접 하면 0원.'),
-        li('HUG 보증료', ' — 전입·확정일자 뒤 11월 중 가입할 때 내요. ' + D.fmt(c.move) + ' 당일 현금이 아니에요.'),
-        li('예비비', ' — 혹시 몰라 잡아 둔 돈이라 안 쓰면 그대로 남아요.'),
+        li('간이 옷장은 이사 후 (약 20만원, 추정)', ' — 이사 전에는 사지 않아요. 이사 후 방을 실측하고 이케아 등에서 간이 옷장이나 행거를 사요. 키 큰 옷장을 고르면 그때 벽 고정이 필요한지 확인. ' + D.fmt(c.move) + ' 현금에는 넣지 않아요.'),
+        el('li', el('b', 'HUG 보증료'), ' — 전입·확정일자 뒤 11월 중 가입할 때 내요. ' + D.fmt(c.move) + ' 당일 현금이 아니에요. ', hugLink),
       ]),
+      el('h4', { class: 'fn-adv-h' }, '🧹 돈 안 드는 것 (가족이 정함)'),
+      el('ul', { class: 'fn-ul small' },
+        li('입주청소는 직접 (0원)', ' — 업체를 부르지 않아요. 청소용품(세제·고무장갑·걸레·곰팡이 제거제·쓰레기봉투)을 미리 사 두고, ' + D.fmt(c.move) + ' 열쇠를 받은 직후나 ' + D.fmt(D.add(c.move, 1)) + ' 짐 풀기 전에 시간을 잡아요.'),
+        li('예비비는 따로 잡지 않았어요', ' — 견적·영수증이 생기면 위 줄을 고쳐 다시 확인하세요.')),
       el('p', { class: 'small mb-0' }, el('b', '연말정산 환급'), ' — 2027년 2월 약 ' + krw(refundBack) + ' (월세 공제 ' + krw(c.rentCredit.credit) + ' + 주택자금 공제 ' + krw(c.housing.saving) + '). 시기는 나중이라 당장 현금은 아니에요.'),
       basis('low', '조사 자료(예산 조언). 금액은 추정이에요.', [], '견적 확정 후 다시 계산'),
     ];
@@ -2957,11 +2965,12 @@ div.fn-alert { cursor: default; }
         const h = hugPremium(P.c.f);
         return [el('span', '예상 보증료'), el('b', won(h.value)), el('span', { class: 'fn-formula' }, '범위 ' + won(h.low) + ' ~ ' + won(h.high))];
       }),
-      hugLine ? checkbox('가입 예정 — 예산에 보증료 넣기', hugLine.on !== false, (v) => upd((fin) => { const x = fin.budget.lines.find((l) => l.id === 'hug'); if (x) x.on = v; }), { fk: 'p-hug-on' }) : null,
+      hugLine ? checkbox('가입 예정 — 예산에 보증료 넣기', hugLine.on !== false, (v) => upd((fin) => { const x = fin.budget.lines.find((l) => l.id === 'hug'); if (x) { x.on = v; x.edited = true; } }), { fk: 'p-hug-on' }) : null,
       el('ul', { class: 'fn-ul small' },
         el('li', '요건: 수도권 보증금 7억 이하, (보증금 + 선순위채권)이 시세의 90% 이하 — 59㎡ 아파트·보증금 3.2억이면 큰 근저당만 없으면 가능성이 높아요'),
         el('li', '가입하면 HUG가 임대인 C에게 보증금 반환채권 양도를 통지해요. 동의는 필요 없지만, 멀리 사는 C가 놀라지 않게 중개사를 통해 미리 알려 두세요'),
-        el('li', 'HF 전세지킴보증, 서울보증보험(SGI) 상품과 보증료·조건을 비교해 보세요')));
+        el('li', 'HF 전세지킴보증, 서울보증보험 상품과 보증료·조건을 비교해 보세요')),
+      el('a', { class: 'fn-cl-link fn-hug-link', href: HUG_GUIDE }, '📎 별첨: 가입하지 않으면 생길 수 있는 문제 (실제 금액 비교) →'));
   }
 
   function addToChecklist(P, r) {
