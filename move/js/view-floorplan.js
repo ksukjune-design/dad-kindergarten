@@ -1505,6 +1505,8 @@
 .fp-bgbar { display: flex; flex-direction: column; gap: 8px; margin: 0 0 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); font-size: .86rem; }
 .fp-bgrow { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; }
 .fp-bgrow > .fp-bglabel { font-weight: 800; margin-right: 2px; }
+.fp-bgbody { display: flex; flex-direction: column; gap: 8px; padding-top: 8px; border-top: 1px dashed var(--line); }
+.fp-bgmore { gap: 2px; }
 .fp-bgrow .spacer { flex: 1; }
 .fp-range { display: flex; align-items: center; gap: 8px; flex: 1 1 220px; min-width: 0; font-size: .8rem; color: var(--ink-2); font-weight: 700; }
 .fp-range input[type=range] { flex: 1 1 auto; min-width: 90px; height: 36px; accent-color: var(--brand); margin: 0; }
@@ -1542,8 +1544,9 @@
 .fp-del-list li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 4px 0; font-size: .88rem; }
 @media (max-width: 600px) {
   .fp-bgbar { padding: 8px; }
-  .fp-tools { width: 100%; }
-  .fp-tools .btn { flex: 1 1 auto; padding: 0 8px; }
+  .fp-tools { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fp-tools .btn { padding: 0 6px; }
+  .fp-bgscale { display: none; }
   .fp-wizbar { top: calc(var(--topbar-h) + 4px); padding: 8px 10px; }
 }
 `);
@@ -1599,6 +1602,7 @@
     let gest = null;          // 사진 끌기·점 옮기기·방 그리기 중인 손가락/마우스
     let preview = null;       // 방 그리기: 그린 네모 (창이 열려 있는 동안 보여 줌)
     let helpOpen = false;     // '사진으로 도면 고치는 법' 펼침
+    let toolsOpen = null;     // 평면도 사진 도구 펼침 (null = 축척을 안 맞췄으면 펼침)
 
     // ---- 뼈대 ----
     const zoomV = el('span', { class: 'fp-zoomv', 'aria-live': 'polite' }, '100%');
@@ -1832,7 +1836,9 @@
     function drawBgBar(force) {
       const bg = cur.bg;
       const open = prefs().bgPanel;
-      const sg = [open, !!bg, bg ? [bg.show, bg.fade, bg.rot, bg.calibrated, Math.round(bg.cmPerPx * 1e4), bg.natW, bg.natH, bg.src.length] : null, !!wiz];
+      // 사진 도구 펼침: 직접 펼치거나 접기 전까지는 '축척을 아직 안 맞췄으면 펼침'
+      const toolsOn = bg ? (toolsOpen == null ? !bg.calibrated : toolsOpen) : false;
+      const sg = [open, !!bg, bg ? [bg.show, bg.fade, bg.rot, bg.calibrated, Math.round(bg.cmPerPx * 1e4), bg.natW, bg.natH, bg.src.length] : null, !!wiz, toolsOn];
       if (!changed('bgbar', sg) && !force) { syncOpacity(); return; }
       // 맞추는 동안엔 안내 띠가 대신하므로 사진 도구는 접어 둠
       bgBar.hidden = !open || !!wiz;
@@ -1857,21 +1863,28 @@
         MV.store.update((st) => { const b = bgsOf(st)[key]; if (b) b.opacity = v; }, { silent: true });
       });
       const tg = (label, on, onClick, title) => btn(label, onClick, { 'aria-pressed': String(!!on), title });
+      const bodyId = 'fpbgtools-' + key;
       put(bgBar,
         el('div', { class: 'fp-bgrow' },
           el('span', { class: 'fp-bglabel' }, '🖼 평면도 사진'),
           el('span', { class: 'chip ' + (bg.calibrated ? 'good' : 'warn') }, bg.calibrated ? '축척 맞춤 ✓' : '축척을 맞춰 주세요'),
-          bg.calibrated ? el('span', { class: 'tiny muted num' }, '사진 1px ≈ ' + (Math.round(bg.cmPerPx * 100) / 100) + 'cm') : null,
-          el('label', { class: 'fp-range' }, el('span', '진하기'), range, out)),
-        el('div', { class: 'fp-bgrow' },
+          bg.calibrated ? el('span', { class: 'tiny muted num fp-bgscale' }, '1px ≈ ' + (Math.round(bg.cmPerPx * 100) / 100) + 'cm') : null,
+          el('span', { class: 'spacer' }),
           tg('👁 보이기', bg.show, () => setBg({ show: !bg.show }), '사진 보이기/숨기기'),
-          tg('▤ 도면 칸 흐리게', bg.fade, () => setBg({ fade: !bg.fade }), '방 칸을 옅게 해서 사진 선이 보이게'),
-          btn('📏 축척 맞추기', () => startWiz('pts'), { class: 'btn fp-b' + (bg.calibrated ? '' : ' btn-primary'), title: '두 점과 실제 길이로 사진 크기 맞추기 → 위치 맞추기' }),
-          btn('✋ 위치 옮기기', () => startWiz('move'), { title: '사진을 끌어서 도면 선에 맞추기' }),
-          btn('↻ 90°', rotateBg, { 'aria-label': '사진 90도 돌리기', title: '사진 90도 돌리기' }),
-          btn('사진 바꾸기', () => fileIn.click()),
-          btn('🗑 사진 지우기', deleteBg, { class: 'btn fp-b btn-danger' }),
-          helpDetails()));
+          el('button', { type: 'button', class: 'btn fp-b fp-bgmore', 'aria-expanded': String(toolsOn), 'aria-controls': bodyId, 'data-act': 'tools',
+            onclick: () => { toolsOpen = !toolsOn; drawBgBar(true); const b2 = bgBar.querySelector('[data-act="tools"]'); if (b2) b2.focus({ preventScroll: true }); } },
+          '사진 도구 ', el('span', { 'aria-hidden': 'true' }, toolsOn ? '▴' : '▾'))),
+        toolsOn ? el('div', { class: 'fp-bgbody', id: bodyId },
+          el('div', { class: 'fp-bgrow' },
+            el('label', { class: 'fp-range' }, el('span', '진하기'), range, out),
+            tg('▤ 도면 칸 흐리게', bg.fade, () => setBg({ fade: !bg.fade }), '방 칸을 옅게 해서 사진 선이 보이게')),
+          el('div', { class: 'fp-bgrow' },
+            btn('📏 축척 맞추기', () => startWiz('pts'), { class: 'btn fp-b' + (bg.calibrated ? '' : ' btn-primary'), title: '두 점과 실제 길이로 사진 크기 맞추기 → 위치 맞추기' }),
+            btn('✋ 위치 옮기기', () => startWiz('move'), { title: '사진을 끌어서 도면 선에 맞추기' }),
+            btn('↻ 90°', rotateBg, { 'aria-label': '사진 90도 돌리기', title: '사진 90도 돌리기' }),
+            btn('사진 바꾸기', () => fileIn.click()),
+            btn('🗑 사진 지우기', deleteBg, { class: 'btn fp-b btn-danger' }),
+            helpDetails())) : null);
     }
     function syncOpacity() {
       const r = bgBar.querySelector('.fp-opacity');

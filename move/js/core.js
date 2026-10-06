@@ -716,7 +716,7 @@
       onChange && onChange(v);
     };
     input.addEventListener('change', commit);
-    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); input.blur(); } });
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); input.blur(); } });
     const wrap = MV.el('span', { class: 'money-input', style: { display: 'flex', flexDirection: 'column', gap: '2px' } }, input, o.noHint ? null : hint);
     wrap.input = input;
     return wrap;
