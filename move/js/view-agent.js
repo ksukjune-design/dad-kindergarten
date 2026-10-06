@@ -39,7 +39,7 @@
             주의사항(warnings: id·level·href)도 같이 보냄
             줄마다 group(essential/purchase/optional), AI가 고친 줄은 edited=true (자금흐름 기본값 바꿈이 건드리지 않게)
    가족 결정 지시 턴의 [가족 결정](2026-10-06): 큰 가전(냉장고·건조기 이삿짐센터, 2in1 에어컨 삼성전자서비스 이사 전 설치),
-            옷장은 이사 뒤 간이, 붙박이장 비우기, 커튼·소품 그대로, 입주청소 직접, 예비비 없음, HUG 비교(#/guide/hug),
+            옷장은 이사 뒤 간이, 붙박이장 비우기('나' 옷 → 간이옷장, '나' 잡화 → 잡화정리, 이동식 행거는 필요할 때만), 커튼·소품 그대로, 입주청소 직접, 예비비 없음, HUG 비교(#/guide/hug),
             사전 이삿짐 정리 파트 이름은 앱 데이터에서 읽음
    오류     sample 오류 코드마다 한국어 안내, 자동 재시도 없음 (사용자가 '다시 보내기').
    CSS 접두사: ag-
@@ -599,7 +599,7 @@
   }
   /* 예산 묶음 — view-finance.js 의 GROUPS·GROUP_OF 와 같은 규칙 (줄에 group 이 없으면 id 로, 직접 넣은 줄은 '새로 사는 살림') */
   const GROUP_LABEL = { essential: '꼭 드는 이사 비용', purchase: '새로 사는 살림', optional: '선택·나중에' };
-  const GROUP_OF = { mover: 'essential', lg: 'essential', elevator: 'essential', waste: 'essential', internet: 'essential', washer: 'purchase', wardrobe: 'optional', hug: 'optional', deco: 'purchase', clean: 'optional', reserve: 'optional' };
+  const GROUP_OF = { mover: 'essential', lg: 'essential', elevator: 'essential', waste: 'essential', internet: 'essential', washer: 'purchase', 'wardrobe-extra': 'purchase', wardrobe: 'optional', hug: 'optional', deco: 'purchase', clean: 'optional', reserve: 'optional' };
   const groupOf = (l) => (l && GROUP_LABEL[l.group] ? l.group : (l && GROUP_OF[l.id]) || 'purchase');
   function parseGroup(v) {
     const s = str(v, 20).toLowerCase().replace(/\s+/g, '');
@@ -613,6 +613,7 @@
   function guessGroup(label) {
     const s = String(label || '');
     if (/행거\s*박스/.test(s)) return 'essential';                 // 이삿짐센터가 가져오는 행거박스 추가 요금
+    if (/이동식\s*행거|보관\s*용품|제습제|방충제|압축\s*팩/.test(s)) return 'purchase';   // 이사 전 필요할 때만 사는 이동식 행거·보관용품 (자금흐름 'wardrobe-extra' 와 같은 묶음)
     if (/옷장|행거/.test(s)) return 'optional';                     // 옷장은 이사 뒤 간이 옷장 (가족 결정 2026-10-06)
     if (/세탁기|냉장고|건조기|가구|가전|커튼|소품|침대|소파|책상|식탁|매트리스|조명|구매|구입/.test(s)) return 'purchase';
     if (/보증료|보험|나중|선택|HUG/i.test(s)) return 'optional';
@@ -799,8 +800,10 @@
     if (!ps.length) return '';
     const groups = Array.from(new Set(ps.map((p) => p.group).filter(Boolean)));
     const clothes = ps.find((p) => p.id === 'sort-clothes');
+    const goods = ps.find((p) => p.id === 'sort-goods');
     return '- 사전 이삿짐 정리' + (groups.length && groups.indexOf('사전 이삿짐 정리') < 0 ? '(앱 묶음 이름: ' + groups.join('·') + ')' : '') + ' 파트: ' +
-      ps.map((p) => p.name + '(' + p.id + ')').join(' · ') + (clothes ? ' — 붙박이장 비우기·옷 자리 바꾸기는 ' + clothes.name + ' 파트에 있어요.' : '.');
+      ps.map((p) => p.name + '(' + p.id + ')').join(' · ') + (clothes ? ' — 붙박이장 비우기·옷 자리 바꾸기는 ' + clothes.name + ' 파트에 있어요.' : '.') +
+      (goods ? ' 캐비닛장에서 뺀 \'나\' 잡화(\'나-잡화\' 리빙박스)는 ' + goods.name + ' 파트예요.' : '');
   }
   function weekRefs() {
     const today = D.today();
@@ -833,7 +836,7 @@
       '8. 예산·부족을 물으면(예: "' + moveMD() + '에 현금 모자라?") 예산 화면(#/money/budget)과 같은 순서로 답하세요: ① 꼭 드는 이사 비용 기준 ' + D.fmt(move) + ' 전후 현금 여유/부족(머리 숫자 — finance.cashVsEssential, numbers.netEssential) ② 새로 사는 살림까지 ③ 선택·나중에까지 전부. "부족"을 한 숫자로 뭉뚱그리지 마세요. 돈 흐름에 11월 월세가 들어 있으면 계약서대로 후불일 때의 숫자(finance.rentNote)도 같이 말하고, 이사 전에 먼저 나갈 돈(finance.beforeMove)도 알려 주세요. 중개보수·잔금·대출 상환·월세는 예산이 아니라 돈 흐름에 이미 들어 있어요.',
       '9. 지난 답에 "(이 답에서 앱에 이미 반영한 변경: …)"이 붙어 있으면 그 변경은 이미 저장됐어요 — 같은 변경을 다시 하지 마세요.',
       '10. 대화의 마지막 사용자 메시지에만 답하세요. 지난 질문 뒤에 "(사용자가 이 요청을 중지했어요…)", "(…처리하지 못했어요…)", "(…끊겼어요…)" 같은 표시가 있으면 그 요청은 끝난 것이니 실행하거나 이어서 하지 마세요 — 사용자가 마지막 메시지에서 다시 해 달라고 할 때만 하세요.',
-      '11. [가족 결정]을 따르세요. 그와 다른 옛 안내(냉장고·건조기를 LG 서비스로 옮기기, 이사 전 옷장 주문·벽 고정 동의, 입주청소 업체, 예비비, 새 커튼·소품 구매)는 권하지 마세요. 앱 데이터(짐 목록 inventory.bigAppliances·예산)가 결정과 다르면 다르다고 알려 주고 고칠지 물어보세요. 짐의 lg=true 는 "제조사 서비스(LG 베스트케어·삼성전자서비스)로 옮김", brand 는 제조사예요.',
+      '11. [가족 결정]을 따르세요. 그와 다른 옛 안내(냉장고·건조기를 LG 서비스로 옮기기, 이사 전 옷장 주문·벽 고정 동의, 간이옷장 하나 더 사기, \'나\' 잡화를 간이옷장에 넣기, 입주청소 업체, 예비비, 새 커튼·소품 구매)는 권하지 마세요. 앱 데이터(짐 목록 inventory.bigAppliances·예산)가 결정과 다르면 다르다고 알려 주고 고칠지 물어보세요. 짐의 lg=true 는 "제조사 서비스(LG 베스트케어·삼성전자서비스)로 옮김", brand 는 제조사예요.',
     ];
     const est = modelEstimate();
     const mk = makerCostOf(est);
@@ -861,8 +864,8 @@
       '- 큰 가전: LG 870L 4도어 냉장고와 삼성 20kg 건조기는 ' + D.fmt(move) + '에 이삿짐센터가 세워서 옮겨요. 삼성 2in1 에어컨(거실 스탠드 + 안방 벽걸이, 실외기 1대)은 삼성전자서비스(1588-3366) 이전설치로 이사 전에 새 집에 설치해요 — 약 50만원(추정 45만~70만원). 안 되면 예비안: 이사 전에 철거만 하고 ' + D.fmt(move) + ' 오후~다음 날 설치. LG 베스트케어는 기본으로 쓰지 않아요.',
       '- 고장 난 세탁기는 지금 집에서 버려요(폐가전 무상방문수거 1599-0903). 새 통돌이 세탁기 약 50만원은 11/4~11/6 새 집 배송.',
       '- 제조사 서비스 비용: 견적의 makerService(제조사별 byBrand)와 예산 줄 id "lg"는 이름과 달리 제조사 서비스 전체예요' + mkNow + '. "LG 이전"이라고 부르지 말고 그 이름(' + mkLabel + ', 예산 줄은 label)으로 부르세요.',
-      '- 옷장: 이사 전에 사지 않아요. 옷은 박스·행거박스로 옮기고(이삿짐센터에 행거박스를 몇 개 가져오는지 물어 견적에 넣기), 이사 뒤 방을 재서 간이 옷장·행거(이케아 등)를 사요 — 예산 "선택·나중에" 약 20만원(추정), ' + D.fmt(move) + ' 현금에는 안 넣어요. 이사 전 옷장 주문·벽 고정 동의는 필요 없고, 나중에 키 큰 옷장을 고르면 그때 벽 고정을 확인해요.',
-      '- 붙박이장 비우기: 지금 집 붙박이장은 두고 가니 이사 전에 모두 비워요 — 아내 옷 → 가족 3칸 캐비닛장(가져감), 캐비닛장에 있던 나 옷·잡화 → 지금 간이옷장(모자라면 싼 간이옷장 하나 더), 아이 옷 → 간이옷장, 여름옷·얇은 옷 → 박스에 담아 이사 뒤 옷장이 올 때까지 보관.',
+      '- 옷장: 새 옷장은 이사 전에 사지 않아요. 지금 있는 캐비닛장(3칸)·간이옷장을 가져가 쓰고, 걸린 옷은 행거박스·박스로 옮겨요(이삿짐센터에 행거박스를 몇 개 가져오는지 물어 견적에 넣기). 이사 뒤 2주쯤 살아 보고 방을 재서 간이 옷장·행거(이케아 등)를 사요 — 예산 "선택·나중에" 약 20만원(추정), ' + D.fmt(move) + ' 현금에는 안 넣어요. 이사 전 옷장 주문·벽 고정 동의는 필요 없고, 나중에 키 큰 옷장을 고르면 그때 벽 고정을 확인해요.',
+      '- 붙박이장 비우기: 지금 집 붙박이장은 두고 가니 이사 전에 모두 비워요 — 아내 옷 → 가족 캐비닛장(3칸, 가져감) · \'나\' 옷 → 지금 간이옷장 · \'나\' 잡화 → 잡화정리 파트(리빙박스 하나에 담아 \'나-잡화\'라고 적기, 10/13) · 아이 옷 → 등원 옷은 아이 방 서랍, 외투·행사 옷은 간이옷장 · 여름옷·얇은 옷 → 우리 리빙박스에 담아 봄까지 보관. 간이옷장이 모자랄 때만 바퀴 달린 이동식 행거 1개(약 1.5만~3만원)를 사요 — 예산 줄 "이동식 행거·보관용품 (필요하면, 이사 전)"(지금 0원, 산 만큼 이사 뒤 간이 옷장 20만원에서 빼요). 간이옷장을 하나 더 사라고 권하지 마세요.',
       '- 커튼·소품은 지금 것을 그대로 가져가요(새로 안 사요, 0원). 사전방문 때 창 크기만 재서 지금 커튼이 맞는지 확인하고, 안 맞으면 이사 뒤 조정해요.',
       '- 입주청소는 업체 없이 가족이 직접 해요(0원) — 청소용품을 미리 챙기고, ' + D.fmt(move) + ' 열쇠 받은 직후나 다음 날 짐 풀기 전에 해요. 예비비 줄은 없어요.',
       '- HUG 전세보증금반환보증 보증료: 2년 약 68.5만원(추정, 예산 "선택·나중에", 11월 중 가입 때 냄). 가입할 때와 안 할 때 비교는 [HUG 보증 비교](#/guide/hug)로 안내하세요.',
@@ -1524,7 +1527,7 @@
     },
     {
       name: 'add_budget_line', label: '예산 항목 추가하는 중',
-      description: '예산에 새 항목을 추가해요. type: expense(지출, 기본) 또는 refund(들어올 돈). 지출은 group 을 정하세요: essential=이사 날 전후 꼭 드는 이사 비용(입주청소·사다리차·보관이사 등), purchase=새로 사는 살림(가구·가전), optional=선택·나중에. 이미 있는 항목(이사업체, 에어컨 이전설치(id lg), 통돌이, 간이 옷장, HUG 보증료 등)은 update_budget 으로 고치고, 중개보수·잔금·대출 상환·월세는 돈 흐름에 이미 있으니 넣지 마세요.',
+      description: '예산에 새 항목을 추가해요. type: expense(지출, 기본) 또는 refund(들어올 돈). 지출은 group 을 정하세요: essential=이사 날 전후 꼭 드는 이사 비용(입주청소·사다리차·보관이사 등), purchase=새로 사는 살림(가구·가전), optional=선택·나중에. 이미 있는 항목(이사업체, 에어컨 이전설치(id lg), 통돌이, 이동식 행거·보관용품(id wardrobe-extra), 간이 옷장, HUG 보증료 등)은 update_budget 으로 고치고, 중개보수·잔금·대출 상환·월세는 돈 흐름에 이미 있으니 넣지 마세요.',
       inputSchema: {
         type: 'object',
         properties: { label: { type: 'string' }, amount: S_MONEY, type: { type: 'string', enum: ['expense', 'refund'] }, group: S_GROUP, paid: { type: 'boolean' }, date: { type: ['string', 'null'] }, memo: { type: 'string' } },

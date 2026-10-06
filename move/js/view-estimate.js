@@ -260,8 +260,8 @@
     { k: 'ss_ac_2in1', g: 'ss', label: '삼성 에어컨 이전설치: 2in1 (스탠드+벽걸이, 실외기 1대)', unit: '원/세트', v: 404000, lo: 399000, hi: 404000, money: true, conf: 'high', basis: '공식 단가표(2026-05-22 기준 소개) 이전설치 404,000원. 철거 114,000원 + 재설치 285,000원을 따로 예약하면 399,000원 + 운반 따로. 운반 포함 여부는 자료마다 달라요 — 1588-3366 예약 때 확인', src: ['ssAc', 'ssPrice', 'ssSoomgo'] },
     { k: 'ss_ac_stand', g: 'ss', label: '삼성 에어컨 이전설치: 스탠드 (81.8㎡ 이하)', unit: '원/대', v: 313000, money: true, conf: 'high', basis: '같은 단가표 (재설치만 20만·철거만 9.4만원)', src: ['ssAc', 'ssPrice'] },
     { k: 'ss_ac_wall', g: 'ss', label: '삼성 에어컨 이전설치: 벽걸이', unit: '원/대', v: 193000, money: true, conf: 'high', basis: '같은 단가표 (재설치만 13.7만·철거만 5.9만원)', src: ['ssAc', 'ssPrice'] },
-    { k: 'ss_ac_pipe_per_m', g: 'ss', label: '삼성 에어컨 배관 연장 1m당', unit: '원/m', v: 19000, lo: 16000, hi: 27000, money: true, conf: 'mid', basis: '동관 1m당 약 1.6만(벽걸이)~1.9만(스탠드), 굵은 배관은 2.7만원까지 (구글 검색으로 교차 확인, 출처마다 다름)', src: ['ssSoomgo', 'ssPrice'] },
-    { k: 'ss_ac_gas', g: 'ss', label: '삼성 에어컨 냉매(가스) 보충 (세트·대당)', unit: '원', v: 40000, lo: 0, hi: 90000, money: true, conf: 'low', basis: '펌프다운(냉매 회수)을 하면 보통 적게 들어요. 0.1kg당 약 3,000원 ~ 2in1 보충 7만~9만원으로 자료마다 달라 중간값으로 둠 (추정·확인 필요)', src: ['ssSoomgo'] },
+    { k: 'ss_ac_pipe_per_m', g: 'ss', label: '삼성 에어컨 배관 연장 1m당', unit: '원/m', v: 19000, lo: 16000, hi: 27000, money: true, conf: 'mid', basis: '동관 1m당 약 1.9만~2.7만원 (굵은 배관일수록 비싸요). 가는 벽걸이 배관은 약 1.6만원이라는 자료가 있어 범위의 아래쪽만 1.6만원으로 둬요 (구글 검색으로 교차 확인, 출처마다 다름)', src: ['ssSoomgo', 'ssPrice'] },
+    { k: 'ss_ac_gas', g: 'ss', label: '삼성 에어컨 냉매(가스) 보충 (세트·대당)', unit: '원', v: 40000, lo: 0, hi: 90000, money: true, conf: 'low', basis: '필요할 때만, 약 4만~9만원(추정), 계산엔 4만원. 펌프다운(냉매 회수)을 잘 하면 안 들거나 적게 들어(0.1kg당 약 3,000원) 범위의 아래쪽은 0원으로 둬요. 2in1 보충은 7만~9만원이라는 자료도 있어요 (추정·확인 필요)', src: ['ssSoomgo'] },
     { k: 'ss_ac_angle', g: 'ss', label: '삼성 실외기 앵글 (외벽에 달 때만)', unit: '원/대', v: 120000, lo: 110000, hi: 130000, money: true, conf: 'mid', basis: '알루미늄 11만~13만원(스텐 18만원). 실외기실이 있으면 보통 필요 없어 기준가에서 빼고 상한에만 넣어요 — 사전방문 때 확인해 ‘가전 이전 비교’ 탭에서 켜세요', src: ['ssSoomgo', 'ssPrice'] },
     { k: 'ss_ac_wash', g: 'ss', label: '삼성 매립배관 세척 (홈멀티)', unit: '원', v: 100000, money: true, ref: true, conf: 'mid', basis: '배관이 벽 속에 묻힌 집에서만 (구글 검색으로 교차 확인) — 계산에 넣지 않음, 사전방문 때 확인', src: ['ssSoomgo'] },
     { k: 'ss_dryer', g: 'ss', label: '삼성 건조기 이전설치 (14kg 이상)', unit: '원/대', v: 94000, lo: 94000, hi: 128000, money: true, conf: 'low', basis: '삼성케어플러스 1단 94,000원·직렬(2단) 128,000원 — 예전 조사값이고 이번 재검색에서 확인하지 못했어요 (추정·확인 필요, 1588-4190). 운반 포함 여부도 확인', src: ['ssDryer'] },
@@ -592,7 +592,7 @@
   };
   /* 삼성전자서비스가 하는 일 (요금은 계산 기준 ‘삼성전자서비스 이전설치’) */
   const SS_DOES = {
-    ac_wall: '냉매 회수(펌프다운)·철거·재설치. 배관 연장 m당 약 1.6만~2.7만, 실외기 앵글 11만~13만은 따로 · 운반 포함 여부 확인',
+    ac_wall: '냉매 회수(펌프다운)·철거·재설치. 배관 연장 m당 약 1.9만~2.7만, 실외기 앵글 11만~13만은 따로 · 운반 포함 여부 확인',
     ac_stand: '냉매 회수(펌프다운)·철거·재설치. 배관 연장 m당 약 1.9만~2.7만, 실외기 앵글 11만~13만은 따로 · 운반 포함 여부 확인',
     ac_2in1: '실내기 2대+실외기 1대를 한 세트로 냉매 회수·철거·재설치. 배관 연장·냉매 보충·앵글·매립배관 세척(10만)은 따로 · 운반 포함 여부 확인',
     dryer: '삼성케어플러스(1588-4190) 건조기 이전설치 — 요금은 예전 조사값이라 확인 필요 · 운반 포함 여부 확인',
@@ -2636,7 +2636,11 @@
     card.appendChild(acBox);
     card.appendChild(el('div', { class: 'es-fgrid mt-8' },
       fieldWrap('에어컨 배관 추가 길이 (대당, m)', numInput('acPipeM', { decimal: true, step: 0.5, max: 30 }), '리서치 계산은 3m 기준 — 제조사 서비스 요금에도 같이 써요')));
-    card.appendChild(el('div', { class: 'mt-8' }, checkField('acGas', '에어컨 가스(냉매) 충전 포함 (협력 기사 5~8만원, 삼성 약 0~9만원)')));
+    // 삼성 냉매 보충 금액은 계산 기준(ss_ac_gas)에서 바꿀 수 있어 글자도 그 값을 따라감
+    const gasLabel = () => '에어컨 가스(냉매) 충전 포함 (협력 기사 약 5만~8만원 · 삼성은 필요할 때만, 약 4만~9만원(추정), 계산엔 ' + won(coefNow().ss_ac_gas) + ')';
+    const gasField = checkField('acGas', gasLabel());
+    upd(() => { const sp = gasField.querySelector('span'); const t = gasLabel(); if (sp && sp.textContent !== t) sp.textContent = t; }, gasField);
+    card.appendChild(el('div', { class: 'mt-8' }, gasField));
     card.appendChild(el('div', { class: 'mt-8' },
       autoRow('bedCount', '침대 분해조립', (e) => e.counts.autoBeds, '개'),
       autoRow('fridgeCount', '대형 냉장고 (폭 85cm 이상)', (e) => e.counts.autoFridges, '대'),
@@ -3470,6 +3474,8 @@
       el('p', { class: 'small es-muted mt-8 mb-0' }, srcLinks(ss ? ['ssAc', 'ssSvc'] : ['lgCare', 'lgRelease'])));
   }
   function lgInfoCard() {
+    /* 냉매 보충: 견적 계산에 넣은 금액 ('이사 견적' 탭의 가스(냉매) 충전 체크가 꺼져 있으면 0) */
+    const ssGasNow = inpNow().acGas ? num(coefNow().ss_ac_gas, 0) : 0;
     return el('section', { class: 'card', 'aria-label': '제조사 서비스란' },
       sectionHead('🔧', '제조사 서비스란?', 'LG 제품은 LG, 삼성 제품은 삼성 — 다른 회사 제품은 안 받아요'),
       el('div', { class: 'es-lg-cols' },
@@ -3486,7 +3492,9 @@
             el('li', '에어컨 이전설치: 2in1 ' + won(COEF_MAP.ss_ac_2in1.v) + ' · 스탠드 ' + won(COEF_MAP.ss_ac_stand.v) + ' · 벽걸이 ' + won(COEF_MAP.ss_ac_wall.v) + ' (2026-05 공식 단가표, 출장비 포함)'),
             el('li', '철거·재설치를 날짜를 나눠 예약할 수 있어요 (2in1 철거 11.4만 + 재설치 28.5만원)'),
             el('li', el('b', '운반 포함 여부는 자료마다 달라요'), ' — 예약 때 확인'),
-            el('li', '배관 연장(m당 약 1.6만~2.7만)·냉매 보충·앵글(11만~13만)은 따로 · 건조기는 삼성케어플러스 1588-4190')))),
+            el('li', '배관 연장(m당 약 1.9만~2.7만)·실외기 앵글(11만~13만)은 따로'),
+            el('li', '냉매 보충은 따로 — 필요할 때만, 약 4만~9만원(추정), 계산엔 ' + (ssGasNow > 0 ? won(ssGasNow) : '넣지 않았어요')),
+            el('li', '건조기는 삼성케어플러스 1588-4190')))),
       el('ul', { class: 'small es-muted mt-8 mb-0', style: { paddingLeft: '1.15em' } },
         el('li', '가구·박스·다른 짐은 안 옮겨요 — 이삿짐센터는 그대로 필요해요.'),
         el('li', '그 밖의 제조사 제품은 이삿짐센터(협력 기사)나 그 회사 서비스로. 이 앱은 LG·삼성만 계산해요.'),
