@@ -121,17 +121,26 @@
       more || null);
   }
   const moreLink = (label, href) => el('a', { class: 'db-more', href }, label);
-  /* 오류 안내: 화면엔 쉬운 말만, 기술적인 내용은 '자세히'를 펼쳐야 보임 (콘솔에도 남김) */
-  const ERR_MSG = '화면을 그리다 문제가 생겼어요. 새로고침해 보세요. 계속되면 ⋯ 메뉴에서 백업을 받아 두세요.';
-  function errBody(e) {
+  /* 오류 안내: 화면엔 쉬운 말만, 기술적인 내용(오류 원문)은 접힌 '자세히' 안과 콘솔에만.
+     core 의 공용 오류 카드(MV.ui.errorBox)가 있으면 그것으로 — 다른 화면과 같은 모양. o: { full: 화면 전체, retry, cls } */
+  const ERR_TITLE = '화면을 그리다 문제가 생겼어요';
+  const ERR_HINT = '새로고침해 보세요. 계속되면 ⋯ 메뉴에서 백업을 받아 두세요.';
+  function errBox(e, o) {
+    o = o || {};
+    const cls = 'db-err' + (o.cls ? ' ' + o.cls : '');
+    if (MV.ui && typeof MV.ui.errorBox === 'function') {
+      try { return MV.ui.errorBox(ERR_TITLE, e, { small: !o.full, hint: ERR_HINT, retry: o.retry, cls }); } catch (e2) { /* 아래 기본 상자 */ }
+    }
     const tech = String((e && (e.stack || e.message)) || e || '');
-    return [el('p', { class: 'small mb-0' }, ERR_MSG),
-      el('details', { class: 'db-err-more' }, el('summary', '자세히'), el('pre', { class: 'tiny' }, tech))];
+    return el('section', { class: 'card tint-bad ' + cls, role: 'alert' },
+      el('p', { class: 'strong mb-0' }, ERR_TITLE), el('p', { class: 'small mb-0' }, ERR_HINT),
+      o.retry ? el('button', { type: 'button', class: 'btn btn-sm', onclick: o.retry }, '다시 시도') : null,
+      el('details', { class: 'db-err-more' }, el('summary', '자세히'), el('pre', { class: 'tiny' }, tech)));
   }
   function safe(cls, fn) {
     try { return fn(); } catch (e) {
       console.error('[dashboard]', e);
-      return el('section', { class: 'card db-err ' + cls, role: 'alert' }, errBody(e));
+      return errBox(e, { cls });
     }
   }
 
@@ -141,7 +150,6 @@
 .toast.db-toast > span { min-width:0; max-width:calc(100vw - 150px); overflow:hidden; text-overflow:ellipsis; }
 .toast.db-toast > button { flex:none; min-height:36px; }
 .db-sr { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
-.db-err { border-color:color-mix(in srgb, var(--bad) 35%, var(--line)); background:var(--bad-bg); }
 .db-err-more > summary { cursor:pointer; display:inline-flex; align-items:center; min-height:36px; font-size:.84rem; font-weight:700; color:var(--ink-2); }
 .db-err-more pre { margin:4px 0 0; max-height:220px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; color:var(--ink-2); }
 .db-grid { display:grid; gap:14px; grid-template-columns:repeat(12, minmax(0, 1fr)); align-items:stretch; }
@@ -1439,7 +1447,7 @@ button.db-wk-head:hover { background:var(--bg-3); }
   }
 
   // 화면 전체가 그려지지 않을 때 (카드별 오류는 safe() 가 따로 받음)
-  const errCard = (e) => el('section', { class: 'card db-err', role: 'alert' }, errBody(e));
+  const errCard = (e) => errBox(e, { full: true, retry: () => MV.rerender(true) });
   MV.view('dashboard', {
     title: '대시보드', short: '홈', icon: '🏠', order: 10,
     render(root, params, ctx) {

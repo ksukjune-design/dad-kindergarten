@@ -1729,7 +1729,9 @@
 .fp-area-prev { font-size: .9rem; margin-top: 10px; padding: 8px 10px; border-radius: 10px; background: var(--bg-3); }
 .fp-area-prev.is-bad { background: var(--bad-bg); color: var(--ink); border: 1px solid color-mix(in srgb, var(--bad) 35%, var(--line)); }
 .fp-prev-warn { margin-top: 6px; font-size: .84rem; color: var(--ink-2); display: flex; flex-direction: column; gap: 2px; }
-.fp-err { margin: 0 0 8px; min-width: 0; }
+.fp-err { min-width: 0; }
+.fp-err.card { margin: 0 0 8px; box-shadow: none; }
+.fp-side > .fp-err.card, .fp-checks > .fp-err.card, .fp-laundry > .fp-err.card, .fp-info > .fp-err.card { margin: 0; }
 .fp-err-more > summary { cursor: pointer; display: inline-flex; align-items: center; min-height: 36px; font-size: .84rem; font-weight: 700; color: var(--ink-2); }
 .fp-err-more pre { margin: 4px 0 0; max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink-2); }
 @media (max-width: 860px) {
@@ -1876,12 +1878,19 @@
   function emptyCard(msg) {
     return el('div', { class: 'card empty' }, el('span', { class: 'big', 'aria-hidden': 'true' }, '📐'), msg);
   }
-  /** 오류 안내: 화면엔 쉬운 말만, 기술적인 내용은 '자세히'를 펼쳐야 보임 (콘솔에도 남김) */
-  const ERR_MSG = '화면을 그리다 문제가 생겼어요. 새로고침해 보세요. 계속되면 ⋯ 메뉴에서 백업을 받아 두세요.';
-  function errBox(e) {
+  /** 오류 안내: 화면엔 쉬운 말만, 기술적인 내용(오류 원문)은 접힌 '자세히' 안과 콘솔에만.
+      core 의 공용 오류 카드(MV.ui.errorBox)가 있으면 그것으로 — 다른 화면과 같은 모양. o: { full: 화면 전체, retry } */
+  const ERR_TITLE = '화면을 그리다 문제가 생겼어요';
+  const ERR_HINT = '새로고침해 보세요. 계속되면 ⋯ 메뉴에서 백업을 받아 두세요.';
+  function errBox(e, o) {
+    o = o || {};
+    if (MV.ui && typeof MV.ui.errorBox === 'function') {
+      try { return MV.ui.errorBox(ERR_TITLE, e, { small: !o.full, hint: ERR_HINT, retry: o.retry, cls: 'fp-err' }); } catch (e2) { /* 아래 기본 상자 */ }
+    }
     const tech = String((e && (e.stack || e.message)) || e || '');
-    return el('div', { class: 'callout bad fp-err', role: 'alert' },
-      el('p', { class: 'mb-0' }, ERR_MSG),
+    return el('div', { class: 'card tint-bad fp-err', role: 'alert' },
+      el('p', { class: 'strong mb-0' }, ERR_TITLE), el('p', { class: 'small mb-0' }, ERR_HINT),
+      o.retry ? el('button', { type: 'button', class: 'btn btn-sm fp-b mt-8', onclick: o.retry }, '다시 시도') : null,
       el('details', { class: 'fp-err-more' }, el('summary', '자세히'), el('pre', { class: 'tiny' }, tech)));
   }
 
@@ -4129,7 +4138,7 @@
       // 이 화면 어디서 오류가 나도 앱 전체가 멈추지 않게, 쉬운 말로 알림 (기술 내용은 '자세히' 안에)
       try { renderPlan(root, params, ctx); } catch (e) {
         console.error('[plan]', e);
-        root.appendChild(el('div', { class: 'card' }, errBox(e)));
+        root.appendChild(errBox(e, { full: true, retry: () => MV.rerender(true) }));
       }
     },
   });

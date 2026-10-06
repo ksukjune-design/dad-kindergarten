@@ -109,6 +109,7 @@
         'https://www.zigbang.com/home/apt/danjis/4197',
         'https://zippoom.com/%EB%B6%80%EB%8F%99%EC%82%B0/%EC%84%9C%EC%9A%B8-%EA%B0%95%EC%84%9C%EA%B5%AC-%EB%93%B1%EC%B4%8C%EB%8F%99-%EC%9A%B0%EC%84%B1%EC%95%84%ED%8C%8C%ED%8A%B8/zxyfst',
         'https://dapt.kr/apt/AdA084.html',
+        'https://mall.hanssem.com/goods/brand/gds_brand_view.do?gdsNo=1061980',
       ],
       images: [],
       measureFirst: [

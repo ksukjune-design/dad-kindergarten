@@ -1745,14 +1745,23 @@ div.fn-alert { cursor: default; }
     return el('label', { class: 'check fn-chk ' + (o.cls || '') }, cb, el('span', label));
   }
   function chip(text, cls) { return el('span', { class: 'chip ' + (cls || '') }, text); }
-  /* 오류 안내: 화면엔 쉬운 말만, 기술적인 내용은 '자세히'를 펼쳐야 보임 (콘솔에도 남김).
-     inline = 글 줄 안(span·p·li)에 넣을 때 — 블록 상자 대신 글자 크기 그대로 */
-  const ERR_MSG = '화면을 그리다 문제가 생겼어요. 새로고침해 보세요. 계속되면 ⋯ 메뉴에서 백업을 받아 두세요.';
-  function errBox(e, inline) {
+  /* 오류 안내: 화면엔 쉬운 말만, 기술적인 내용(오류 원문)은 접힌 '자세히' 안과 콘솔에만.
+     core 의 공용 오류 카드(MV.ui.errorBox)가 있으면 그것으로 — 다른 화면과 같은 모양.
+     o: { inline: 글 줄(span·p·li) 안 — 상자 대신 글자 크기 그대로, full: 화면 전체, retry } */
+  const ERR_TITLE = '화면을 그리다 문제가 생겼어요';
+  const ERR_HINT = '새로고침해 보세요. 계속되면 ⋯ 메뉴에서 백업을 받아 두세요.';
+  function errBox(e, o) {
+    o = o || {};
     const tech = String((e && (e.stack || e.message)) || e || '');
-    const more = el('details', { class: 'fn-err-more' }, el('summary', '자세히'), el('pre', { class: 'tiny' }, tech));
-    if (inline) return el('span', { class: 'fn-err fn-err-inline', role: 'alert' }, '⚠ ' + ERR_MSG + ' ', more);
-    return el('div', { class: 'callout bad fn-err', role: 'alert' }, el('p', { class: 'mb-0' }, ERR_MSG), more);
+    const more = () => el('details', { class: 'fn-err-more' }, el('summary', '자세히'), el('pre', { class: 'tiny' }, tech));
+    if (o.inline) return el('span', { class: 'fn-err fn-err-inline', role: 'alert' }, '⚠ ' + ERR_TITLE + '. ' + ERR_HINT + ' ', more());
+    if (MV.ui && typeof MV.ui.errorBox === 'function') {
+      try { return MV.ui.errorBox(ERR_TITLE, e, { small: !o.full, hint: ERR_HINT, retry: o.retry, cls: 'fn-err' }); } catch (e2) { /* 아래 기본 상자 */ }
+    }
+    return el('div', { class: 'card tint-bad fn-err', role: 'alert' },
+      el('p', { class: 'strong mb-0' }, ERR_TITLE), el('p', { class: 'small mb-0' }, ERR_HINT),
+      o.retry ? el('button', { type: 'button', class: 'btn btn-sm fn-mini-btn', onclick: o.retry }, '다시 시도') : null,
+      more());
   }
 
   /* ======================= 뷰 ======================= */
@@ -1798,7 +1807,7 @@ div.fn-alert { cursor: default; }
         try { kids = fn(); } catch (e) {
           console.error('[money]', e);
           // 글 줄(span·p·li) 안이면 짧게, 아니면 상자로 — 기술 내용은 '자세히' 안에만
-          kids = errBox(e, /^(span|p|li|b|small)$/i.test(tag));
+          kids = errBox(e, { inline: /^(span|p|li|b|small)$/i.test(tag) });
         }
         node.replaceChildren(...flatKids(kids));
         if (fk) refocus(node, fk);
@@ -1859,7 +1868,7 @@ div.fn-alert { cursor: default; }
       let content;
       try { content = buildTab(P); } catch (e) {
         console.error('[money]', e);
-        content = el('div', { class: 'card' }, errBox(e));
+        content = errBox(e, { full: true, retry: () => { P.c = compute(MV.store.get()); rebuildPanel({ force: true }); } });
       }
       P.panel.replaceChildren(content);
       P.target = P.shell;
@@ -3373,7 +3382,7 @@ div.fn-alert { cursor: default; }
     render(root, params, ctx) {
       try { renderMoney(root, params, ctx); } catch (e) {
         console.error('[money]', e);
-        root.appendChild(el('div', { class: 'fn-page' }, el('div', { class: 'card' }, errBox(e))));
+        root.appendChild(el('div', { class: 'fn-page' }, errBox(e, { full: true, retry: () => MV.rerender(true) })));
       }
     },
   });
