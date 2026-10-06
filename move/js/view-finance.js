@@ -1455,6 +1455,15 @@ div.fn-alert { cursor: default; }
 @container (min-width: 700px) {
   .fn-rf { grid-template-columns: minmax(0, 1.4fr) minmax(170px, 1fr) auto minmax(0, 1fr) 40px; grid-template-areas: "label amount paid memo del"; }
 }
+/* 기본 줄(삭제 버튼 없음): 좁은 칸에서는 항목 이름이 삭제 칸까지 넓게 (긴 이름이 잘리지 않게) — 한 줄 표에서는 머리줄과 맞춤 */
+.fn-bl.fn-bl-nodel > .fn-bl-del { display: none; }
+.fn-bl.fn-bl-nodel { grid-template-areas: "label label" "amount amount" "date paid" "memo memo"; }
+@container (min-width: 560px) {
+  .fn-bl.fn-bl-nodel { grid-template-areas: "label label label" "amount date paid" "memo memo memo"; }
+}
+@container (min-width: 940px) {
+  .fn-bl.fn-bl-nodel { grid-template-areas: "label amount date paid memo del"; }
+}
 .fn-bl-label { grid-area: label; min-width: 0; }
 .fn-bl-amount { grid-area: amount; min-width: 0; }
 .fn-bl-date { grid-area: date; min-width: 0; }
@@ -2693,7 +2702,7 @@ div.fn-alert { cursor: default; }
 
   function budgetRow(P, l) {
     const meta = l.meta;
-    const row = el('div', { class: 'fn-bl', role: 'group', 'aria-label': l.label || '지출 항목' });
+    const row = el('div', { class: 'fn-bl' + (meta ? ' fn-bl-nodel' : ''), role: 'group', 'aria-label': l.label || '지출 항목' });
     const curLine = () => P.c.budget.lines.find((x) => x.id === l.id) || l;
     P.bind(() => {
       const x = curLine();

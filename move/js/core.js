@@ -280,6 +280,41 @@
       layouts: MV.seedLayouts ? MV.clone(MV.seedLayouts) : undefined,
     };
   }
+  // 예전 버전 기록을 새 기본값에 맞추기 (data-seed.js 의 MV.seed.migrations)
+  function migrateSeed(state, seed) {
+    const from = state.seedVersion || 0;
+    let n = 0;
+    (seed.migrations || []).forEach((m) => {
+      if (!(m.to > from && m.to <= seed.version)) return;
+      Object.keys(m.parts || {}).forEach((pid) => {
+        const p = state.parts.find((x) => x.id === pid);
+        const sp = (seed.parts || []).find((x) => x.id === pid);
+        if (!p || !sp) return;
+        const f = m.parts[pid].from || {};
+        const same = Object.keys(f).every((k) => p[k] === f[k]);
+        if (!same) return;
+        ['name', 'emoji', 'group', 'desc', 'guide'].forEach((k) => { if (sp[k] !== undefined) p[k] = sp[k]; });
+        n++;
+      });
+      (m.removeItems || []).forEach((iid) => {
+        const idx = state.items.findIndex((x) => x.id === iid);
+        if (idx < 0) return;
+        const it = state.items[idx];
+        if (!it.seed || it.done || (it.notes && it.notes.length)) return;
+        state.items.splice(idx, 1);
+        state.meta.deletedSeed = state.meta.deletedSeed || [];
+        if (state.meta.deletedSeed.indexOf(iid) < 0) state.meta.deletedSeed.push(iid);
+        n++;
+      });
+      if (m.reorderParts) {
+        (seed.parts || []).forEach((sp, i) => {
+          const p = state.parts.find((x) => x.id === sp.id);
+          if (p && p.order !== i) { p.order = i; n++; }
+        });
+      }
+    });
+    return n;
+  }
   function mergeSeed(state) {
     const seed = MV.seed;
     if (!seed || !seed.version || (state.seedVersion || 0) >= seed.version) return false;
@@ -297,7 +332,9 @@
     (seed.inventory || []).forEach((it) => {
       if (!invIds.has(it.id) && !deleted.has(it.id)) { state.inventory.push(normInv(MV.clone(it), true)); added++; }
     });
+    const migrated = migrateSeed(state, seed);
     state.seedVersion = seed.version;
+    if (migrated) state.activity.unshift({ at: MV.nowISO(), text: '기본 파트·항목을 새 버전에 맞췄습니다 (' + migrated + '곳, 고친 내용·완료·메모는 그대로).' });
     if (added) state.activity.unshift({ at: MV.nowISO(), text: '새 기본 항목 ' + added + '개를 추가했습니다 (기존 메모·완료 표시는 그대로).' });
     return true;
   }
