@@ -16,7 +16,7 @@
             MV.parseMoney('3.78억' | '2억 9,570만' | '120만' | '1,200,000') → 원
    저장소   MV.store.get() → state
             MV.store.update(fn(state), {log, silent}) 변경 + 저장 + 'change' 알림
-            MV.store.on('change', fn) → 해제함수
+            MV.store.on('change', fn) → 해제함수 / MV.store.on('flush', fn) 창을 닫기 직전 (입력 중인 값 반영용)
             MV.store.ensure(key, defaultsFactory) 모듈 전용 하위 상태 확보
             MV.store.log(text) 활동 기록 / exportJSON() / importJSON(text) / reset()
    체크     MV.parts.list() / get(id) / add(p) / update(id, patch) / remove(id) / stats(id)
@@ -328,8 +328,11 @@
     }
   };
   const persistSoon = MV.debounce(() => S.persist(), 250);
-  global.addEventListener('pagehide', () => persistSoon.flush());
-  global.addEventListener('beforeunload', () => persistSoon.flush());
+  // 창을 닫기 직전: 뷰들이 입력 중이던 값을 먼저 반영하도록 'flush' 를 알린 뒤 저장
+  const flushAll = () => { try { bus.emit('flush'); } catch (e) { /* 무시 */ } persistSoon.flush(); };
+  global.addEventListener('pagehide', flushAll);
+  global.addEventListener('beforeunload', flushAll);
+  global.document.addEventListener('visibilitychange', () => { if (global.document.visibilityState === 'hidden') flushAll(); });
 
   S.get = () => S.state || S.load();
   S.update = function update(fn, opts) {
@@ -638,7 +641,10 @@
       el('div', { class: 'modal-body' }, bodyNode),
       foot);
     back.appendChild(box);
-    back.addEventListener('mousedown', (e) => { if (e.target === back) close(); });
+    // 배경을 눌렀다 뗐을 때만 닫기 (열자마자 들어오는 더블클릭의 두 번째 누름·드래그로 닫히지 않게)
+    let downOnBack = false;
+    back.addEventListener('mousedown', (e) => { downOnBack = e.target === back && e.detail < 2; });
+    back.addEventListener('click', (e) => { if (downOnBack && e.target === back) close(); downOnBack = false; });
     document.addEventListener('keydown', onKey);
     document.body.appendChild(back);
     const first = box.querySelector('.modal-body input, .modal-body textarea, .modal-body select') || box.querySelector('.modal-foot .btn-primary');
@@ -665,7 +671,7 @@
       ? MV.el('textarea', { class: 'textarea', placeholder: o.placeholder || '' }, o.value || '')
       : MV.el('input', { class: 'input', value: o.value || '', placeholder: o.placeholder || '' });
     const ok = () => { done = true; resolve(input.value); };
-    if (!o.multiline) input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); m.close(); ok(); } });
+    if (!o.multiline) input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); ok(); m.close(); } });
     const m = U.modal({
       title,
       body: MV.el('label', { class: 'field' }, o.label ? MV.el('span', o.label) : null, input),

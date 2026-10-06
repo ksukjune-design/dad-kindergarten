@@ -506,7 +506,10 @@
       wrap.classList.toggle('ck-open', !!itemId);
       syncDrawer();
       // 목록 스크롤은 3열(스레드 열림)·2열 배치가 정해진 뒤에 되살림 → 줄 높이가 달라져 어긋나지 않게
-      if ((chChanged || how === 'init') && !isPhone()) list.scrollTop = mem.listScroll[effCh() + (effCh() === '~search' ? ':' + cur.q : '')] || 0;
+      if ((chChanged || how === 'init') && !isPhone()) {
+        syncNarrow();   // 좁은 입력창(두 줄)도 먼저 정해야 목록 높이가 맞음 (ResizeObserver 는 늦게 옴)
+        list.scrollTop = mem.listScroll[effCh() + (effCh() === '~search' ? ':' + cur.q : '')] || 0;
+      }
       if (chChanged) hideCompNote();
 
       if (how === 'init') {
@@ -1335,11 +1338,11 @@
     }
     function curItem() { return T.id ? MV.items.get(T.id) : null; }
 
-    function commitTitle() {
+    function commitTitle(soft) {
       const it = curItem(); const f = T.f;
       if (!it || !f.title) return;
       const v = f.title.value.replace(/\s+/g, ' ').trim();
-      if (!v) { f.title.value = it.title; autosize(f.title); return; }
+      if (!v) { if (!soft) { f.title.value = it.title; autosize(f.title); } return; }
       if (v !== it.title) MV.items.update(it.id, { title: v }, '✏️ 제목 변경: ' + v);
     }
     function commitDetail(final) {
@@ -1353,13 +1356,14 @@
     }
     const saveDetailSoon = MV.debounce(() => { if (alive) commitDetail(false); }, 900);
     const saveDueSoon = MV.debounce(() => { if (alive) commitDue(false); }, 1200);
-    function flushThread() {
+    /* soft: 앱 전환(visibilitychange) 때처럼 계속 편집할 수 있는 경우 → 저장만 하고 칸 내용은 되돌리지 않음 */
+    function flushThread(soft) {
       if (!T.id) return;
       saveDetailSoon.flush();
       saveDueSoon.flush();
-      commitTitle();
+      commitTitle(soft);
       commitDetail(true);
-      if (T.f.due && T.f.due._dirty) commitDue(true);
+      if (T.f.due && T.f.due._dirty && !soft) commitDue(true);
       if (T.f.noteInput) mem.noteDrafts[T.id] = T.f.noteInput.value;
     }
 
@@ -1751,12 +1755,12 @@
 
     /* ---------- 창을 닫거나 새로 고칠 때: 스레드에서 쓰던 제목·설명·마감을 저장 ---------- */
     /* (core 는 pagehide 때 저장 대기열만 비움 → 아직 blur·디바운스 전인 칸은 여기서 먼저 반영하고 바로 저장) */
-    const onPageHide = () => {
+    const onPageHide = (soft) => {
       if (!alive) return;
-      try { flushThread(); } catch (e) { console.error(e); }
+      try { flushThread(soft === true); } catch (e) { console.error(e); }
       try { MV.store.persist(); } catch (e) { /* 무시 */ }
     };
-    const onVisibility = () => { if (document.visibilityState === 'hidden') onPageHide(); };
+    const onVisibility = () => { if (document.visibilityState === 'hidden') onPageHide(true); };
     window.addEventListener('pagehide', onPageHide);
     window.addEventListener('beforeunload', onPageHide);
     document.addEventListener('visibilitychange', onVisibility);
@@ -1809,7 +1813,7 @@
 
     /* ---------- 화면 크기 변화 ---------- */
     const mqP = mq(MQ_PHONE); const mqD = mq(MQ_DESK);
-    const syncNarrow = () => { if (!alive) return; const w = main.clientWidth; composer.classList.toggle('ck-narrow', !isPhone() && w > 0 && w < 480); };
+    function syncNarrow() { if (!alive) return; const w = main.clientWidth; composer.classList.toggle('ck-narrow', !isPhone() && w > 0 && w < 480); }
     if (window.ResizeObserver) {
       const ro = new ResizeObserver(() => syncNarrow());
       ro.observe(main);
@@ -2041,7 +2045,7 @@
 .ck-link { display: flex; align-items: center; gap: 6px; min-height: 32px; padding: 2px 4px 2px 10px; border-radius: 8px; background: var(--bg-3); font-size: .86rem; }
 .ck-link a, .ck-link-bad { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .ck-link-bad { color: var(--ink-3); font-weight: 500; }
-.ck-link-hint { color: var(--bad); }
+.field .ck-link-hint { color: var(--bad); font-weight: 700; }
 .ck-x { flex: none; width: 30px; height: 30px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-3); font: inherit; font-size: 1.05rem; line-height: 1; cursor: pointer; }
 .ck-x:hover { background: var(--bad-bg); color: var(--bad); }
 .ck-none { margin: 0; font-size: .82rem; color: var(--ink-3); }
@@ -2219,6 +2223,7 @@ body:has(.ck) .toast button { white-space: nowrap; flex: none; }
   .ck-th-head { position: sticky; top: var(--topbar-h); z-index: 6; margin: -14px -16px 0; padding: 6px 10px 6px 4px; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(10px); }
   .ck-th-close { display: none; }
   .ck-move { max-width: 46vw; min-width: 88px; }
+  .ck-th-part { flex-shrink: 3; }   /* 좁으면 파트 칩이 먼저 줄어 '옮기기' 글자가 보이게 */
   .ck-th-back { padding: 0 6px; }
   .ck-th-body { overflow: visible; padding: 14px 0 16px; }
   .ck-th-title { font-size: 1.25rem; }

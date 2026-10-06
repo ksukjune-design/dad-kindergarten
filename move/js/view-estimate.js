@@ -34,7 +34,9 @@
   /* ======================= 작은 도우미 ======================= */
   const isNum = (n) => typeof n === 'number' && isFinite(n);
   const num = (v, d) => { const n = typeof v === 'number' ? v : parseFloat(v); return isFinite(n) ? n : d; };
-  const qtyOf = (it) => Math.max(0, Math.round(num(it && it.qty, 0)));
+  /* 수량 상한 — 99999999 같은 값이 들어와도 부피·톤수·LG 대수가 터무니없이 커지지 않게 (입력칸도 같은 상한) */
+  const QTY_MAX = 999;
+  const qtyOf = (it) => Math.min(QTY_MAX, Math.max(0, Math.round(num(it && it.qty, 0))));
   const r1 = (n) => Math.round(n * 10) / 10;
   const r2 = (n) => Math.round(n * 100) / 100;
   const sum = (arr, f) => arr.reduce((s, x) => s + (f ? f(x) : x), 0);
@@ -381,7 +383,7 @@
   function calibOf(est) {
     const c = est && est.calib;
     const f = num(c && c.factor, 1);
-    return { factor: f > 0 ? f : 1, at: (c && c.at) || null, median: num(c && c.median, null), n: num(c && c.n, 0), base: num(c && c.base, null), basis: (c && c.basis) || null };
+    return { factor: f > 0 ? f : 1, at: (c && c.at) || null, median: num(c && c.median, null), n: num(c && c.n, 0), base: num(c && c.base, null), basis: (c && c.basis) || null, sig: (c && typeof c.sig === 'string') ? c.sig : null };
   }
   function quotesOf(est) { return (est && Array.isArray(est.quotes)) ? est.quotes.filter((q) => q && typeof q === 'object') : []; }
 
@@ -395,13 +397,17 @@
   const isTv = (it) => it.tag === 'tv' || /(^|[^A-Za-z])TV([^A-Za-z]|$)|티비|텔레비전/i.test(nm(it));
   const isBedFrame = (it) => (it.tag === 'bed' || it.cat === 'bed') && !/매트리스|토퍼|이불|범퍼|패드/.test(nm(it));
   const isPiano = (it) => /피아노/.test(nm(it));
-  const isApplianceLike = (it) => it.cat === 'appliance' || it.cat === 'aircon' || ['fridge', 'washer', 'dryer', 'aircon', 'tv'].includes(it.tag) || isAircon(it);
+  /* 가구 분류(예: 규격 프리셋 ‘거실장 180’은 tag 'tv')는 tag 만으로 가전으로 보지 않아요 */
+  const FURN_CATS = new Set(['bed', 'sofa', 'table', 'shelf', 'storage', 'kids']);
+  const isApplianceLike = (it) => it.cat === 'appliance' || it.cat === 'aircon' || isAircon(it) || (!FURN_CATS.has(it.cat) && ['fridge', 'washer', 'dryer', 'aircon', 'tv'].includes(it.tag));
   function isGoing(it, inp) {
     if (!it || qtyOf(it) <= 0) return false;
     if (it.fate === 'move') return true;
     if (it.fate === 'undecided' || !FATE_IDS.has(it.fate)) return !!inp.includeUndecided;
     return false;
   }
+  /* 실제로 LG가 옮기는 짐: LG 표시 + 가져감(또는 계산에 넣는 미정) + 가전·에어컨 — 견적 계산·목록·내보내기가 모두 같은 규칙 */
+  function lgActive(it, inp) { return !!it && !!it.lg && isGoing(it, inp) && isApplianceLike(it); }
   function rawVol(it) {
     return Math.max(0, num(it.w, 0)) * Math.max(0, num(it.d, 0)) * Math.max(0, num(it.h, 0)) / 1e6 * qtyOf(it);
   }
@@ -420,6 +426,10 @@
     if (LG_WORDS.test(t) || /lge\.co\.kr/.test(t)) return 'lg';
     return '';
   }
+  /* LG 베스트케어 이전설치를 맡길 수 있는 가전: 창문형 에어컨(이전설치가 필요 없음)과 다른 브랜드로 보이는 제품은 빼요 */
+  function lgEligible(it) { return lgKind(it) !== 'ac_window' && brandOf(it) !== 'other'; }
+  /* 가전 이름에 가구가 함께 적힌 짐 (예: 'TV + 거실장') — LG는 가구를 안 옮겨요 */
+  const FURN_WITH = /(거실장|TV장|티비장|수납장|선반|받침대|테이블|협탁|서랍장)/i;
 
   /* ======================= 부대비 계산 ======================= */
   function ladderCost(floor, tons, c) {
@@ -518,6 +528,7 @@
       discount: { low: Math.round(discount.low), typical: Math.round(discount.typical), high: Math.round(discount.high), pct: discount.pct },
       transport: { low: Math.round(transport.low), typical: Math.round(transport.typical), high: Math.round(transport.high) },
       count: sum(rows, (r) => r.q),
+      vatIncluded: true, // LG 요금은 소비자가(부가세 포함)
     };
   }
 
@@ -658,6 +669,10 @@
     const typical = Math.round(total);
     const low = Math.round(total * c.range_low);
     const high = Math.round(total * c.range_high);
+    /* 실제로 낼 돈(부가세 포함) — ‘부가세 더하기’가 꺼져 있어도 여기엔 부가세를 더해요.
+       LG 요금은 소비자가(부가세 포함)라, 이삿짐센터와 LG를 더하거나 비교할 땐 이 값끼리 써요 */
+    const payMul = inp.vat ? 1 : 1 + vatRate;
+    const pay = { low: Math.round(total * c.range_low * payMul), typical: Math.round(total * payMul), high: Math.round(total * c.range_high * payMul) };
     const lineVal = (k) => sum(lines.filter((l) => l.key === k), (l) => l.typical);
     /* 업체 견적에 빠진 항목을 채울 때 쓰는 모델 금액 — partsEx 는 부가세 별도, parts 는 지금 화면 기준 */
     const partsEx = {
@@ -684,6 +699,7 @@
 
     /* 5) LG */
     const lgCost = lgCostOf(lgItems, c, inp);
+    const totalPay = { low: pay.low + (lgCost ? lgCost.low : 0), typical: pay.typical + (lgCost ? lgCost.typical : 0), high: pay.high + (lgCost ? lgCost.high : 0) };
 
     /* 6) 안내 문구 */
     const notes = [];
@@ -697,11 +713,14 @@
     if (next && next.headroom < 1.5) notes.push('짐이 ' + m3(next.headroom) + '(박스 약 ' + next.boxes + '개)만 늘어도 ' + tonsLabel(next.tons) + '으로 올라가 약 ' + won(next.delta) + ' 더 들어요.');
     if (acCnt.unknown) notes.push('종류를 안 적은 에어컨 ' + acCnt.unknown + '대는 스탠드로 계산했어요.');
     if (undecided.length) notes.push('처리 ‘미정’ 짐 ' + undecided.length + '개도 가져가는 것으로 계산했어요.');
+    const lgOther = lgItems.filter((it) => brandOf(it) === 'other');
+    if (lgOther.length) notes.push('LG로 옮긴다고 표시한 ' + lgOther.map(nm).join(', ') + ' — 다른 브랜드로 보여요. LG 이전설치는 LG 제품만 돼요.');
     if (inp.dateMode === 'auto' && di.lunar && !di.sohn) notes.push(D.fmt(di.date) + '은 음력 ' + di.lunar.month + '월 ' + di.lunar.day + '일 — 손없는날이 아니에요.');
 
     return {
       tons, crew, volume: r1(volume), low, typical, high, lines, lgCost, notes,
       typicalRaw, subtotalEx: Math.round(subtotal), vatIncl: !!inp.vat, vatMul: 1 + vatRate, partsEx,
+      pay, totalPay, // pay: 이삿짐센터 부가세 포함 / totalPay: pay + LG(부가세 포함)
       calibFactor: useCalib ? calib.factor : 1, calib,
       truckLabel: truck.label, crewLabel: crewLabel(crew), tonsNeed, tonsMargin,
       volumeParts: { furnRaw, furnEff, boxes, boxM3, miscM3, items: mover.length, units: sum(mover, qtyOf) },
@@ -821,7 +840,10 @@
 .es-isel { width: auto; min-width: 104px; min-height: 36px; padding: 4px 8px; font-size: .86rem; }
 .es-iqty { width: 70px; min-height: 36px; padding: 4px 8px; }
 .es-dim { white-space: nowrap; font-variant-numeric: tabular-nums; font-size: .84rem; color: var(--ink-2); }
-.es-room { font-size: .84rem; color: var(--ink-2); white-space: nowrap; }
+.es-room { font-size: .84rem; color: var(--ink-2); }
+.es-roomwrap { max-width: 150px; line-height: 1.3; }
+.es-roomwrap > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.es-roomwrap > span + span { color: var(--ink-3); }
 .es-memo { font-size: .76rem; color: var(--ink-3); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: -2px; }
 .es-tbl td.es-lgcell { white-space: nowrap; }
 .es-tbl td.es-lgcell > * { vertical-align: middle; }
@@ -894,6 +916,8 @@
 .es-calib .es-calib-top b { color: var(--think); }
 .es-calib .row { margin-top: 8px; }
 .es-calib p { margin: 4px 0 0; }
+.es-calib .es-calib-miss { color: var(--warn); font-weight: 650; line-height: 1.45; }
+.es-calib .es-calib-info { color: var(--ink-2); line-height: 1.45; }
 
 /* 견적: 레이아웃 */
 .es-est-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.08fr); gap: 14px; align-items: start; }
@@ -1232,7 +1256,9 @@
     return el('span', { class: 'es-srcs' }, list.map((s) => el('a', { href: s.url, target: '_blank', rel: 'noopener noreferrer' }, '🔗 ' + s.label)));
   }
   function confChip(conf) { const c = CONF[conf] || CONF.low; return el('span', { class: 'chip ' + c.cls, title: '리서치 신뢰도' }, '신뢰도 ' + c.label); }
-  function fmtCoef(d, v) { return d.money ? F.krw(v) : (Number.isInteger(v) ? v : r2(v)) + (d.unit ? ' ' + d.unit : ''); }
+  /* 계수 표시: 0.085 처럼 소수 셋째 자리까지 있는 리서치 값을 반올림하지 않고 그대로 (최대 넷째 자리) */
+  const fmtDec = (v) => (Number.isInteger(v) ? String(v) : String(parseFloat((+v).toFixed(4))));
+  function fmtCoef(d, v) { return d.money ? F.krw(v) : fmtDec(v) + (d.unit ? ' ' + d.unit : ''); }
   function sectionHead(icon, title, sub, act) {
     return el('h2', { class: 'es-h2' }, el('span', { 'aria-hidden': 'true' }, icon), title,
       sub ? el('span', { class: 'es-h2-sub' }, sub) : null, act ? el('span', { class: 'es-h2-act' }, act) : null);
@@ -1325,7 +1351,7 @@
     const sorts = {
       cat: (a, b) => catIdx(a.cat) - catIdx(b.cat) || byName(a, b),
       room: (a, b) => (a.room ? 0 : 1) - (b.room ? 0 : 1) || String(a.room).localeCompare(String(b.room), 'ko') || catIdx(a.cat) - catIdx(b.cat) || byName(a, b),
-      vol: (a, b) => MV.inv.volume(b) - MV.inv.volume(a) || byName(a, b),
+      vol: (a, b) => rawVol(b) - rawVol(a) || byName(a, b),
       fate: (a, b) => fateIdx(a.fate) - fateIdx(b.fate) || catIdx(a.cat) - catIdx(b.cat) || byName(a, b),
       name: byName,
     };
@@ -1343,10 +1369,10 @@
   function invSummary() {
     const inv = invItems();
     const fc = fateCounts(inv);
-    const moveVol = sum(inv.filter((it) => it.fate === 'move'), (it) => MV.inv.volume(it));
+    const moveVol = sum(inv.filter((it) => it.fate === 'move'), rawVol);
     const assumed = inv.filter((it) => it.assumed).length;
     const inpS = inpNow();
-    const lg = sum(inv.filter((it) => it.lg && isGoing(it, inpS) && isApplianceLike(it)), qtyOf);
+    const lg = sum(inv.filter((it) => lgActive(it, inpS)), qtyOf);
     const fchips = MV.inv.FATES.map((f) => el('button', {
       type: 'button', class: 'es-fchip' + (mem.fates.has(f.id) ? ' is-on' : ''), 'data-tone': f.cls || '',
       'aria-pressed': String(mem.fates.has(f.id)), 'data-fk': 'fate-filter-' + f.id,
@@ -1439,14 +1465,22 @@
     const s = el('select', { class: 'select es-isel', 'aria-label': nm(it) + ' 처리', 'data-fk': 'fate-' + it.id },
       MV.inv.FATES.map((f) => el('option', { value: f.id, selected: f.id === it.fate }, f.label)));
     if (!FATE_IDS.has(it.fate)) s.value = 'undecided';
-    s.addEventListener('change', () => MV.inv.update(it.id, { fate: s.value }, '짐 처리 변경: ' + nm(it) + ' → ' + MV.inv.fate(s.value).label));
+    s.addEventListener('change', () => {
+      const f = s.value;
+      // 버림·판매·새로 구매로 바꾸면 LG가 옮길 일이 없으니 LG 표시도 함께 꺼요
+      const dropLg = !!it.lg && (f === 'discard' || f === 'sell' || f === 'buy');
+      MV.inv.update(it.id, dropLg ? { fate: f, lg: false } : { fate: f }, '짐 처리 변경: ' + nm(it) + ' → ' + MV.inv.fate(f).label + (dropLg ? ' (LG 표시 끔)' : ''));
+      if (dropLg) toast('‘' + clip(nm(it), 20) + '’ — ' + josa(MV.inv.fate(f).label, '으로/로') + ' 바꿔 LG 표시도 껐어요.');
+    });
     return s;
   }
   function qtyInput(it) {
-    const q = el('input', { class: 'input num es-iqty', type: 'number', min: '0', step: '1', inputmode: 'numeric', value: String(qtyOf(it)), 'aria-label': nm(it) + ' 수량', 'data-fk': 'qty-' + it.id });
+    const q = el('input', { class: 'input num es-iqty', type: 'number', min: '0', max: String(QTY_MAX), step: '1', inputmode: 'numeric', value: String(qtyOf(it)), 'aria-label': nm(it) + ' 수량', 'data-fk': 'qty-' + it.id });
     q.addEventListener('change', () => {
-      const v = Math.max(0, Math.round(num(q.value, NaN)));
-      if (!isFinite(v)) { q.value = String(qtyOf(it)); return; }
+      const v0 = Math.max(0, Math.round(num(q.value, NaN)));
+      if (!isFinite(v0)) { q.value = String(qtyOf(it)); return; }
+      const v = Math.min(QTY_MAX, v0);
+      if (v !== v0) { q.value = String(v); toast('수량은 ' + QTY_MAX + '개까지 넣을 수 있어요.'); }
       if (v !== qtyOf(it)) MV.inv.update(it.id, { qty: v }, '짐 수량: ' + nm(it) + ' ' + v + '개');
     });
     q.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); q.blur(); } });
@@ -1479,6 +1513,7 @@
       return el('section', { class: 'card' }, info, el('div', { class: 'empty' }, el('span', { class: 'big', 'aria-hidden': 'true' }, '🔍'), '조건에 맞는 짐이 없어요.'));
     }
     const faded = (it) => it.fate !== 'move' && it.fate !== 'undecided';
+    const inpL = inpNow();
     if (R) R.tableMode = tableMode();
     if (R ? R.tableMode : tableMode()) {
       const tbl = el('table', { class: 'tbl es-tbl' },
@@ -1495,12 +1530,13 @@
           el('td', fateSelect(it)),
           el('td', { class: 'num' }, qtyInput(it)),
           el('td', { class: 'es-dim', title: '가로×깊이×높이' }, dimTxt(it)),
-          el('td', { class: 'num' }, m3(MV.inv.volume(it))),
-          el('td', { class: 'es-room' }, roomTxt(it)),
+          el('td', { class: 'num' }, m3(rawVol(it))),
+          el('td', { class: 'es-room', title: '지금 집: ' + (it.room || '—') + ' → 새 집: ' + (it.roomNew || '—') },
+            el('div', { class: 'es-roomwrap' }, el('span', it.room || '—'), el('span', '→ ' + (it.roomNew || '—')))),
           el('td', { class: 'center es-lgcell' },
-            it.lg ? el('span', { class: 'chip kid', title: 'LG 서비스로 옮김' }, 'LG ✓') : null,
+            lgActive(it, inpL) ? el('span', { class: 'chip kid', title: 'LG 서비스로 옮김' }, 'LG ✓') : null,
             linkEl(it),
-            !it.lg && !safeUrl(it.url) ? el('span', { class: 'es-muted' }, '—') : null)))));
+            !lgActive(it, inpL) && !safeUrl(it.url) ? el('span', { class: 'es-muted' }, '—') : null)))));
       return el('section', { class: 'card' }, info, el('div', { class: 'table-wrap' }, tbl));
     }
     const cards = el('div', { class: 'es-cards' }, list.map((it) => el('article', { class: 'es-icard' + (faded(it) ? ' is-faded' : '') },
@@ -1508,11 +1544,11 @@
       el('div',
         el('div', { class: 'es-icard-top' }, nameBtn(it),
           it.assumed ? el('span', { class: 'chip warn' }, '추정치') : null,
-          it.lg ? el('span', { class: 'chip kid' }, 'LG ✓') : null),
+          lgActive(it, inpL) ? el('span', { class: 'chip kid' }, 'LG ✓') : null),
         el('div', { class: 'es-icard-ctl' }, fateSelect(it), el('label', { class: 'es-qtylab' }, '수량', qtyInput(it))),
         el('div', { class: 'es-icard-meta' },
           el('span', { class: 'es-dim' }, dimTxt(it) + 'cm'),
-          el('span', m3(MV.inv.volume(it))),
+          el('span', m3(rawVol(it))),
           el('span', roomTxt(it)),
           isAircon(it) && it.ac ? el('span', AC_LABEL[it.ac] || it.ac) : null,
           linkEl(it)),
@@ -1543,7 +1579,7 @@
   const CAT_WORDS = [
     ['aircon', /에어컨/], ['appliance', /냉장고|김치|세탁기|통돌이|건조기|식기세척기|식세기|오븐|전자레인지|정수기|스타일러|청소기/],
     ['bed', /침대|매트리스|토퍼/], ['sofa', /소파|쇼파|의자|안락/], ['shelf', /책장|선반|책꽂이|랙/],
-    ['storage', /옷장|장롱|행거|서랍|수납|수납장|붙박이|화장대|신발장/], ['table', /책상|식탁|테이블|좌탁/],
+    ['storage', /옷장|장롱|행거|서랍|수납|수납장|붙박이|화장대|신발장|거실장|TV장|티비장/i], ['table', /책상|식탁|테이블|좌탁/],
     ['electronics', /TV|티비|모니터|컴퓨터|PC|프린터|오디오|스피커/i], ['kids', /아이|키즈|어린이|유아|장난감|놀이|아기/],
   ];
   /* 규격 프리셋 고르기 — 낱말 단위로만 맞춤 (예전: '건조'가 '빨래 건조대'에 부분 일치해 세탁기로 잘못 분류)
@@ -1571,16 +1607,41 @@
     });
     return best;
   }
+  const numsIn = (x) => (String(x || '').match(/\d+/g) || []).map(Number);
+  /* 이름의 분류: 끝 낱말 기준(‘전자레인지 선반’ → 선반), 끝 낱말로 모르면 이름 전체 */
+  function headCat(name) {
+    const toks = tokensOf(name).filter((t) => !/^\d/.test(t));
+    const last = toks.length ? guessCat(toks[toks.length - 1]) : 'misc';
+    return last !== 'misc' ? last : guessCat(name);
+  }
   function matchPreset(name) {
     const cat = MV.catalog || [];
     const toks = tokensOf(name);
     if (!toks.length) return null;
+    const nameCat = headCat(name);
+    const nameNums = new Set(numsIn(name));
     let best = null, bestScore = 0;
     cat.forEach((p) => {
+      if (!p || !p.name) return;
+      const words = presetWords(p);
       let score = 0;
-      presetWords(p).forEach((w) => { score += wordScore(w, toks); });
+      const unmatched = [];
+      words.forEach((w) => { const sc = wordScore(w, toks); score += sc; if (!sc) unmatched.push(w); });
+      if (score <= 0) return;
+      // 다른 분류의 물건을 담는 가구 프리셋(예: ‘전자레인지 수납장’)은 이름에 그 가구 낱말이 없으면 건너뜀 (‘전자레인지’ → 180cm 수납장 방지)
+      if (nameCat !== 'misc' && p.cat !== nameCat && unmatched.some((w) => CAT_WORDS.some(([, re]) => re.test(w)))) return;
+      // ‘매트리스만 (퀸)’ 같은 ‘~만’ 프리셋은 이름에 같은 분류의 다른 물건(예: ‘침대’)이 있으면 건너뜀
+      if (/[가-힣]{2,}만(\s|\(|$)/.test(p.name)) {
+        const own = new Set(words);
+        const catRe = (CAT_WORDS.find(([id]) => id === p.cat) || [])[1];
+        const others = new Set();
+        cat.forEach((o) => { if (o && o !== p && o.cat === p.cat) presetWords(o).forEach((w) => { if (!own.has(w) && catRe && catRe.test(w)) others.add(w); }); });
+        if (Array.from(others).some((w) => wordScore(w, toks) > 0)) return;
+      }
       const kw = TAG_WORDS[p.tag];
-      if (score > 0 && kw && kw.test(name)) score += 1;
+      if (kw && kw.test(name)) score += 1;
+      // 크기 숫자가 같으면 더 가깝게 (예: ‘65인치 TV’ → ‘TV 65형’, ‘책상 120’ → ‘책상 120’)
+      if (numsIn(p.name).some((n) => nameNums.has(n))) score += 3;
       if (score > bestScore) { bestScore = score; best = p; }
     });
     return bestScore >= 2 ? best : null;
@@ -1603,17 +1664,27 @@
   }
   const UNIT_SCALE = { cm: 1, 센티: 1, 센치: 1, mm: 0.1, 미리: 0.1, m: 100, 미터: 100 };
   const DIM_N = '(\\d+(?:\\.\\d+)?)';
-  const DIM_U = '\\s*(cm|mm|m(?![a-z])|센티|센치|미리|미터)?';
-  const DIM_X = '\\s*[x×X*✕]\\s*';
+  const DIM_U = '(?:\\s*(cm|mm|m(?![a-z])|센티|센치|미리|미터))?'; // 단위가 있을 때만 앞 공백을 먹음 (‘160x200 x2’의 띄어쓰기를 구분에 남김)
+  const DIM_X = '(\\s*[x×X*✕]\\s*)';
+  /* 그룹: 1 가로, 2 단위, 3 구분, 4 깊이, 5 단위, 6 구분, 7 높이, 8 단위 */
   const DIM_RE = new RegExp(DIM_N + DIM_U + DIM_X + DIM_N + DIM_U + '(?:' + DIM_X + DIM_N + DIM_U + ')?', 'i');
+  const QX = '[x×X✕*]';
   function parseLine(line) {
     let s = String(line || '').replace(/ /g, ' ').trim();
     if (!s) return null;
     if (isHeaderLine(s)) return null;
     s = s.replace(/^\s*(?:[-•·*▪◦]|\d+[.)])\s+/, '');
     const out = { name: '', qty: 1, w: null, d: null, h: null, url: '', room: '', fate: 'move', note: '' };
-    const um = s.match(/https?:\/\/[^\s,，]+/i);
-    if (um) { out.url = um[0]; s = s.replace(um[0], ' '); }
+    /* 링크: 공백까지 통째로 (쿼리의 쉼표 ‘?id=1,2’ 포함). 단, 쉼표·탭으로 칸을 나눈 줄이면 첫 쉼표까지가 링크 */
+    const um = s.match(/https?:\/\/\S+/i);
+    if (um) {
+      let u = um[0];
+      if (/[,，;\t]/.test(s.slice(0, um.index))) u = u.split(/[,，;]/)[0];
+      u = u.replace(/[.,，;]+$/, '');
+      if (/\)$/.test(u) && !/\(/.test(u)) u = u.slice(0, -1);
+      out.url = u;
+      s = s.slice(0, um.index) + ' ' + s.slice(um.index + u.length);
+    }
     let rm = s.match(/^\[([^\]]{1,12})\]\s*/);
     if (rm) { out.room = rm[1].trim(); s = s.slice(rm[0].length); }
     else {
@@ -1625,20 +1696,26 @@
     }
     const fateWords = [['discard', /[(\[]?\s*(버림|버릴 것|버리기|폐기|처분)\s*[)\]]?/], ['buy', /[(\[]?\s*(새로 ?구매|구매 ?예정|살 것|새로 살 것)\s*[)\]]?/], ['sell', /[(\[]?\s*(판매|나눔)\s*[)\]]?/], ['undecided', /[(\[]?\s*(미정|고민)\s*[)\]]?/]];
     for (const [f, re] of fateWords) { const m = s.match(re); if (m) { out.fate = f; s = s.replace(m[0], ' '); break; } }
-    const qm = s.match(/(\d+)\s*(개|대|EA|ea|세트|set|짝|pcs)(?![가-힣A-Za-z])/);
+    // 수량 ‘2개’·‘×2개’·‘x 2대’ (앞의 x·×도 함께 지움)
+    const qm = s.match(new RegExp('(?:' + QX + '\\s*)?(\\d+)\\s*(개|대|EA|ea|세트|set|짝|pcs)(?![가-힣A-Za-z])'));
     let qtySet = false;
     if (qm) { out.qty = Math.max(0, parseInt(qm[1], 10)); s = s.replace(qm[0], ' '); qtySet = true; }
     let dims = null;
     let units = [];
     const dm = s.match(DIM_RE);
     if (dm) {
-      dims = [dm[1], dm[3], dm[5]].map((x) => (x == null ? null : parseFloat(x)));
-      units = [dm[2], dm[4], dm[6]].map((u) => (u ? u.toLowerCase() : null));
+      dims = [dm[1], dm[4], dm[7]].map((x) => (x == null ? null : parseFloat(x)));
+      units = [dm[2], dm[5], dm[8]].map((u) => (u ? u.toLowerCase() : null));
+      /* ‘160x200 x2’: 앞 두 숫자는 붙여 쓰고 세 번째만 띄운 작은 수(20 이하, 단위 없음)는 높이가 아니라 수량 */
+      if (dm[7] != null && !dm[8] && /^\d{1,2}$/.test(dm[7]) && +dm[7] <= 20 && +dm[1] > 20 && +dm[4] > 20 && /^\s/.test(dm[6] || '') && !/\s/.test(dm[3] || '')) {
+        if (!qtySet) { out.qty = parseInt(dm[7], 10); qtySet = true; }
+        dims[2] = null; units[2] = null;
+      }
       const before = s.slice(0, dm.index);
       let after = s.slice(dm.index + dm[0].length);
-      // 크기 바로 뒤의 맨 숫자(예: '책장 80x30x180 3', '80*30*180, 2')는 수량
+      // 크기 바로 뒤의 맨 숫자·x숫자(예: '책장 80x30x180 3', '80*30*180, 2', '80x30x180cm x3')는 수량
       if (!qtySet) {
-        const tq = after.match(/^\s*[,，;]?\s*(\d{1,3})(?![\d.]|\s*(?:cm|mm|m(?![a-z])|형|인|단|kg|l\b|리터|평|층|%|년|월|일|시))/i);
+        const tq = after.match(new RegExp('^\\s*[,，;]?\\s*(?:' + QX + '\\s*)?(\\d{1,3})(?![\\d.]|\\s*(?:cm|mm|m(?![a-z])|형|인|단|kg|l\\b|리터|평|층|%|년|월|일|시))', 'i'));
         if (tq) { out.qty = parseInt(tq[1], 10); qtySet = true; after = after.slice(tq[0].length); }
       }
       s = before + ' ' + after;
@@ -1647,6 +1724,11 @@
         const te = s.match(/(?:^|\s)(\d{1,3})\s*$/);
         if (te) { out.qty = parseInt(te[1], 10); qtySet = true; s = s.slice(0, te.index); }
       }
+    }
+    // 크기가 없어도 줄 끝의 ‘x2’·‘× 3’은 수량 (예: '1인 소파 x 2')
+    if (!qtySet) {
+      const xm = s.match(new RegExp('(?:^|[\\s,，;])' + QX + '\\s*(\\d{1,3})\\s*$'));
+      if (xm) { out.qty = parseInt(xm[1], 10); qtySet = true; s = s.slice(0, xm.index); }
     }
     if (!dims) {
       const lab = {};
@@ -1672,6 +1754,12 @@
         s = words.join(' ');
       }
     }
+    // 크기 없는 줄 끝의 작은 맨 숫자(10 이하)는 수량 (예: '서랍장 3', '냉장고 2'). ‘책상 120’·‘TV 55’ 같은 큰 수는 규격이라 이름에 둠
+    if (!dims && !qtySet) {
+      const te = s.match(/(?:^|\s)(\d{1,2})\s*$/);
+      if (te && +te[1] <= 10 && /[가-힣A-Za-z]/.test(s.slice(0, te.index))) { out.qty = parseInt(te[1], 10); qtySet = true; s = s.slice(0, te.index); }
+    }
+    out.qty = Math.min(QTY_MAX, out.qty);
     if (dims) {
       // 단위: 숫자마다 붙은 단위 → 없으면 마지막에 적힌 단위(예: '80x30x180cm', '1.6x2.1x0.4m') → 없으면 크기로 짐작
       const lastU = units.filter(Boolean).pop() || null;
@@ -1687,7 +1775,7 @@
     out.name = s.replace(/[()[\]{}]/g, ' ').replace(/\s*[,，;:：]\s*/g, ' ').replace(/\s+/g, ' ').replace(/^[-–·\s]+|[-–·\s]+$/g, '').trim();
     if (!out.name) out.name = '이름 없는 짐';
     const preset = matchPreset(out.name);
-    out.cat = preset ? preset.cat : guessCat(out.name);
+    out.cat = preset ? preset.cat : headCat(out.name);
     out.tag = preset ? (preset.tag || '') : '';
     if (!out.tag) { const t = Object.keys(TAG_WORDS).find((k) => TAG_WORDS[k].test(out.name)); if (t) out.tag = t; }
     out.ac = out.cat === 'aircon' ? (/벽걸이/.test(out.name) ? 'wall' : /2\s?in\s?1|투인원/i.test(out.name) ? '2in1' : /창문/.test(out.name) ? 'window' : /스탠드/.test(out.name) ? 'stand' : (preset && preset.ac) || null) : null;
@@ -1726,16 +1814,16 @@
         /* 칸을 비우거나 0을 넣으면(규격) 앞의 값을 그대로 두고, 칸을 떠날 때 그 값으로 되돌림.
            추정치 표시는 비어 있던 규격을 모두 직접 넣었을 때만 사라짐 */
         const numI = (k, lab) => {
-          const x = el('input', { class: 'input num', type: 'number', min: k === 'qty' ? '0' : '1', step: '1', inputmode: 'numeric', value: String(r[k]), 'aria-label': (i + 1) + '번 ' + lab });
+          const x = el('input', { class: 'input num', type: 'number', min: k === 'qty' ? '0' : '1', max: k === 'qty' ? String(QTY_MAX) : null, step: '1', inputmode: 'numeric', value: String(r[k]), 'aria-label': (i + 1) + '번 ' + lab });
           x.addEventListener('input', () => {
             const raw = x.value.trim();
             if (raw === '') return;
             const v = Math.round(num(raw, NaN));
             if (!isFinite(v) || v < 0) return;
-            if (k === 'qty') { r.qty = v; return; }
+            if (k === 'qty') { r.qty = Math.min(QTY_MAX, v); return; }
             if (v > 0) { r[k] = v; r.missing = (r.missing || []).filter((m) => m !== k); r.assumed = r.missing.length > 0; syncChip(); }
           });
-          x.addEventListener('change', () => { const v = num(x.value, NaN); if (x.value.trim() === '' || !isFinite(v) || v < 0 || (k !== 'qty' && v <= 0)) x.value = String(r[k]); });
+          x.addEventListener('change', () => { const v = num(x.value, NaN); if (x.value.trim() === '' || !isFinite(v) || v < 0 || (k !== 'qty' && v <= 0) || (k === 'qty' && v > QTY_MAX)) x.value = String(r[k]); });
           return el('label', { class: 'es-pv-num' }, el('span', { class: 'es-pv-lab' }, lab), x);
         };
         const urlI = el('input', { class: 'input', type: 'url', value: r.url, placeholder: '제품 링크 (선택)', 'aria-label': (i + 1) + '번 링크' });
@@ -1772,7 +1860,7 @@
         { label: '추가', kind: 'primary', onClick: () => {
           if (!rows.length) { toast('먼저 ‘읽어 오기’를 눌러 주세요.'); return false; }
           const items = rows.map((r) => ({
-            id: MV.uid('inv'), name: String(r.name || '').trim() || '이름 없는 짐', cat: r.cat, fate: r.fate, qty: Math.max(0, Math.round(num(r.qty, 1))),
+            id: MV.uid('inv'), name: String(r.name || '').trim() || '이름 없는 짐', cat: r.cat, fate: r.fate, qty: Math.min(QTY_MAX, Math.max(0, Math.round(num(r.qty, 1)))),
             w: Math.max(0, num(r.w, 0)), d: Math.max(0, num(r.d, 0)), h: Math.max(0, num(r.h, 0)),
             url: r.url || '', room: r.room || '', roomNew: '', lg: false, ac: r.cat === 'aircon' ? (r.ac || null) : null,
             tag: r.tag || '', note: '', assumed: !!r.assumed, seed: false,
@@ -1813,7 +1901,7 @@
     const line = (it) => {
       const parts = ['- ' + nm(it), qtyOf(it) + '개', '(' + dimTxt(it) + 'cm' + (it.assumed ? ', 규격 추정' : '') + ')'];
       if (isAircon(it) && it.ac) parts.push('[' + (AC_LABEL[it.ac] || it.ac) + ']');
-      if (it.lg) parts.push('※ LG 서비스로 별도 이동 — 견적 제외');
+      if (lgActive(it, inp)) parts.push('※ LG 서비스로 별도 이동 — 견적 제외');
       if (it.roomNew && it.roomNew !== it.room) parts.push('→ 새 집 ' + it.roomNew);
       const vn = vendorNote(it);
       if (vn) parts.push('· ' + vn);
@@ -1824,7 +1912,7 @@
     out.push('출발: ' + placeName(plans.old, '지금 집') + ' ' + inp.fromFloor + '층 (' + (METHODS[inp.fromMethod] || '') + ') → 도착: ' + placeName(plans.new, '새 집') + ' ' + inp.toFloor + '층 (' + (METHODS[inp.toMethod] || '') + ')');
     out.push('이사 형태: ' + (PACK_TYPES.find((p) => p.id === inp.packType) || PACK_TYPES[0]).label + ' · 예상 박스 약 ' + est.volumeParts.boxes + '개' + (inp.boxAuto && inp.builtinBoxes ? ' (붙박이장 옷 포함)' : ''));
     if (est.counts.acN) out.push('에어컨 이전 요청: ' + AC_T.filter((t) => est.counts.acUnits[t]).map((t) => AC_LABEL[t] + ' ' + est.counts.acUnits[t] + '대').join(', '));
-    const lgList = inv.filter((it) => it.lg && isGoing(it, inp) && isApplianceLike(it));
+    const lgList = inv.filter((it) => lgActive(it, inp));
     if (lgList.length) out.push('LG 서비스로 따로 옮길 가전 (견적 제외): ' + lgList.map((it) => nm(it)).join(', '));
     out.push('');
     const moving = inv.filter((it) => it.fate === 'move' && qtyOf(it) > 0);
@@ -1852,7 +1940,7 @@
     out.push('');
     out.push('요청: 부가세 포함 총액(결제수단 무관)으로, ‘가전 포함’과 ‘LG 가전 제외’ 금액을 함께 문자나 PDF로 부탁드립니다.');
     const csvRows = [['처리', '분류', '이름', '수량', '가로cm', '깊이cm', '높이cm', '부피㎥', '지금 위치', '새 집 위치', 'LG 서비스', '규격 추정', '링크', '메모']];
-    inv.forEach((it) => csvRows.push([MV.inv.fate(it.fate).label, MV.inv.cat(it.cat).label, nm(it), qtyOf(it), num(it.w, 0), num(it.d, 0), num(it.h, 0), r2(MV.inv.volume(it)), it.room || '', it.roomNew || '', it.lg ? 'O' : '', it.assumed ? 'O' : '', it.url || '', vendorNote(it)]));
+    inv.forEach((it) => csvRows.push([MV.inv.fate(it.fate).label, MV.inv.cat(it.cat).label, nm(it), qtyOf(it), num(it.w, 0), num(it.d, 0), num(it.h, 0), r2(rawVol(it)), it.room || '', it.roomNew || '', lgActive(it, inp) ? 'O' : '', it.assumed ? 'O' : '', it.url || '', vendorNote(it)]));
     const csv = csvRows.map((r) => r.map((v) => { const s = String(v == null ? '' : v); return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }).join(',')).join('\r\n');
     return { text: out.join('\n'), csv };
   }
@@ -1893,11 +1981,35 @@
     const med = median(nq.map((n) => n.amount));
     return { nq, ns: nq.map((n) => n.amount), med, medEx, f: medEx && raw.subtotalEx ? medEx / raw.subtotalEx : null };
   }
+  /* 보정에 쓴 견적의 ‘서명’ — 견적 자체(금액·부가세·포함 항목)가 바뀌었는지만 봐요.
+     짐·조건이 바뀌면 같은 견적이라도 ‘같은 조건 환산’ 금액이 달라지므로, 그걸로 ‘견적이 바뀌었다’고 하면 안 돼요 */
+  function quoteSig(est) {
+    return quotesOf(est).filter((q) => num(q.amount, 0) > 0)
+      .map((q) => [q.id, Math.round(num(q.amount, 0)), q.vatIncluded === false ? 0 : 1, q.ladder ? 1 : 0, q.aircon ? 1 : 0, q.waste ? 1 : 0, q.arrange ? 1 : 0].join(':'))
+      .sort().join('|');
+  }
+  /* 업체 견적에 ‘포함’ 체크가 안 돼 모델 금액을 더한 항목 (보정 비율이 크게 흔들리는 원인) */
+  function missingAdds(raw, est) {
+    const qs = quotesOf(est).filter((q) => num(q.amount, 0) > 0);
+    const pe = raw.partsEx || {};
+    const vm = raw.vatIncl ? raw.vatMul : 1;
+    return [['ladder', '사다리차'], ['aircon', '에어컨 이전'], ['waste', '폐기물'], ['arrange', '정리 인력']]
+      .filter(([k]) => pe[k] > 0)
+      .map(([k, label]) => ({ k, label, n: qs.filter((q) => !q[k]).length, v: pe[k] * vm }))
+      .filter((x) => x.n > 0);
+  }
+  function missingNote(raw, est) {
+    const ms = missingAdds(raw, est);
+    if (!ms.length) return null;
+    return el('p', { class: 'small es-calib-miss' }, '⚠ ' + ms.map((m) => '견적 ' + m.n + '곳에 ‘' + m.label + '’ 포함이 체크되지 않아 모델 금액 약 ' + won(m.v) + '을 더해 비교했어요').join(' · ') +
+      '. 견적에 들어 있다면 ‘업체 견적 비교’에서 체크하세요 — 보정 비율이 크게 달라져요.');
+  }
   function calibBox(compact) {
     const raw = rawEst();
-    const t = calibTarget(raw, estSt());
+    const est0 = estSt();
+    const t = calibTarget(raw, est0);
     const ns = t.ns;
-    const cal = calibOf(estSt());
+    const cal = calibOf(est0);
     const applied = Math.abs(cal.factor - 1) > 1e-6;
     const med = t.med;
     const f = t.f;
@@ -1909,9 +2021,17 @@
       const shownMed = isNum(cal.median) ? cal.median * (raw.vatIncl ? raw.vatMul : 1) : null;
       box.appendChild(el('p', (cal.at ? MV.date.time(cal.at) + ' · ' : '') + '방문견적 ' + cal.n + '곳 중앙값' + (shownMed ? ' ' + won(shownMed) + '(' + bl + ' 기준)' : '') + '에 맞춰 모델 금액을 ×' + cal.factor.toFixed(2) + ' 했어요. 짐이나 조건을 바꾸면 같은 비율로 따라가고, ‘부가세 더하기’를 켜고 꺼도 비율은 그대로예요.'));
       if (!ns.length) box.appendChild(el('p', { class: 'small', style: { color: 'var(--bad)', fontWeight: '700' } }, '⚠ 보정에 쓴 견적이 지금은 하나도 없어요. 보정을 해제하는 게 좋아요.'));
-      const changed = ns.length && f && Math.abs(f - cal.factor) / cal.factor > 0.01;
+      // 견적 자체가 바뀌었을 때만 ‘다시 맞추기’를 권해요 (예전 보정은 서명이 없어 견적 수로만 판단)
+      const quotesChanged = ns.length > 0 && (cal.sig != null ? quoteSig(est0) !== cal.sig : cal.n !== ns.length);
+      const condChanged = !quotesChanged && ns.length > 0 && isNum(cal.base) && cal.base > 0 && raw.subtotalEx > 0 && Math.abs(raw.subtotalEx - cal.base) / cal.base > 0.005;
+      if (quotesChanged && f) box.appendChild(missingNote(raw, est0));
+      if (condChanged) {
+        const vm = raw.vatIncl ? raw.vatMul : 1;
+        box.appendChild(el('p', { class: 'small es-calib-info' }, 'ℹ️ 보정한 뒤 짐·조건이 바뀌었어요 (보정 전 모델 ' + won(cal.base * vm) + ' → ' + won(raw.subtotalEx * vm) + '). 비율 ×' + cal.factor.toFixed(2) +
+          '는 그대로 따라가요. 업체가 바뀐 짐으로 견적을 다시 주면 그 금액을 고친 뒤 다시 맞추세요.'));
+      }
       box.appendChild(el('div', { class: 'row' },
-        changed ? el('button', { type: 'button', class: 'btn btn-sm btn-primary', onclick: applyCalibration }, '견적이 바뀌었어요 — 다시 맞추기 (×' + MV.clamp(f, 0.5, 2).toFixed(2) + ')') : null,
+        quotesChanged && f ? el('button', { type: 'button', class: 'btn btn-sm btn-primary', onclick: applyCalibration }, '견적이 바뀌었어요 — 다시 맞추기 (×' + MV.clamp(f, 0.5, 2).toFixed(2) + ')') : null,
         el('button', { type: 'button', class: 'btn btn-sm' + (!ns.length ? ' btn-primary' : ''), onclick: clearCalibration }, '보정 해제')));
     } else if (!ns.length) {
       box.appendChild(el('p', '방문견적을 1곳 이상 ‘업체 견적 비교’에 넣으면, 모델의 기준가를 실제 견적 중앙값에 맞출 수 있어요. 언제든 해제할 수 있어요.'));
@@ -1920,6 +2040,7 @@
       const diff = f - 1;
       box.appendChild(el('p', '견적 ' + ns.length + '곳(같은 조건·' + bl + ' 환산) 중앙값 ', el('b', won(med)), (Math.abs(diff) < 0.005 ? ' — 지금 모델 기준가 ' + josa(won(raw.typical), '과/와') + ' 거의 같아요.' : ' — 지금 모델 기준가 ' + won(raw.typical) + '보다 ' + Math.abs(Math.round(diff * 100)) + '%' + (diff > 0 ? ' 높아요.' : ' 낮아요.')) +
         (ns.length < 3 ? ' 견적이 3곳 모이면 더 믿을 만해요.' : '')));
+      box.appendChild(missingNote(raw, est0));
       if (f < 0.5 || f > 2) box.appendChild(el('p', { class: 'small', style: { color: 'var(--bad)' } }, '차이가 너무 커요(×' + f.toFixed(2) + '). 금액·포함 항목을 다시 확인하세요. 보정은 ×0.5~×2 사이로만 해요.'));
       box.appendChild(el('div', { class: 'row' }, el('button', { type: 'button', class: 'btn btn-sm btn-primary', onclick: applyCalibration }, '모델을 견적에 맞추기 (×' + MV.clamp(f, 0.5, 2).toFixed(2) + ')')));
     }
@@ -1932,7 +2053,8 @@
     if (!t.medEx || !raw.subtotalEx) { toast('금액이 들어간 견적이 없어요.'); return; }
     const factor = Math.round(MV.clamp(t.f, 0.5, 2) * 1000) / 1000;
     const prev = MV.clone(calibOf(st.estimate));
-    MV.store.update((s) => { ensureEst(s).calib = { factor, at: MV.nowISO(), median: Math.round(t.medEx), n: t.nq.length, base: raw.subtotalEx, basis: 'ex' }; },
+    const sig = quoteSig(st.estimate);
+    MV.store.update((s) => { ensureEst(s).calib = { factor, at: MV.nowISO(), median: Math.round(t.medEx), n: t.nq.length, base: raw.subtotalEx, basis: 'ex', sig }; },
       { log: '이사 견적 모델을 방문견적 ' + t.nq.length + '곳 중앙값(' + won(t.med) + ', ' + basisLabel(raw.vatIncl) + ')에 맞춤 ×' + factor.toFixed(2) });
     toast('견적에 맞췄어요 ×' + factor.toFixed(2), { action: { label: '되돌리기', onClick: () => MV.store.update((s) => { ensureEst(s).calib = prev; }, { log: '견적 보정 되돌림' }) } });
   }
@@ -1962,7 +2084,7 @@
             el('span', { class: 'chip', title: est.vatIncl ? '부가세 10%를 더한 금액이에요' : '리서치 시세는 부가세 별도예요. ‘이사 견적’에서 ‘부가세 10% 더하기’를 켜면 포함 금액으로 봐요' }, '🧾 ' + basisLabel(est.vatIncl)))),
         el('div', { class: 'es-hero-side' },
           lg && lg.typical > 0 ? el('div', { class: 'es-lgsum' }, '🔌 LG로 옮기는 가전 ' + lg.count + '대 별도 ', el('b', '약 ' + won(lg.typical)),
-            el('span', '→ 이사 전체 약 ' + won(est.typical + lg.typical))) : null,
+            el('span', '→ 이사 전체 약 ' + won(est.totalPay.typical) + ' (부가세 포함' + (est.vatIncl ? '' : ' — 이삿짐센터 ' + won(est.pay.typical) + ' + LG') + ')')) : null,
           disclaimer(true),
           calibBox(true))));
   }
@@ -2213,7 +2335,7 @@
         el('tfoot', el('tr', el('td', '합계'), el('td', { class: 'num es-l-lohi' }, won(est.low)),
           el('td', { class: 'num es-l-typ' }, won(est.typical), el('span', { class: 'es-l-rng' }, won(est.low) + '~' + won(est.high))),
           el('td', { class: 'num es-l-lohi' }, won(est.high)))))),
-      est.lgCost && est.lgCost.typical > 0 ? el('p', { class: 'small es-muted mt-8 mb-0' }, '🔌 LG 서비스로 옮길 가전 ' + est.lgCost.count + '대(약 ' + won(est.lgCost.typical) + ')는 위 금액에 없어요 — LG에 따로 내요.') : null);
+      est.lgCost && est.lgCost.typical > 0 ? el('p', { class: 'small es-muted mt-8 mb-0' }, '🔌 LG 서비스로 옮길 가전 ' + est.lgCost.count + '대(약 ' + won(est.lgCost.typical) + ', 부가세 포함 소비자가)는 위 금액에 없어요 — LG에 따로 내요. 둘을 더한 이사 전체는 부가세 포함 약 ' + won(est.totalPay.typical) + '이에요.') : null);
   }
   function whyCard() {
     const est = R.est;
@@ -2634,10 +2756,13 @@
       ids, inv, st,
       cur: R.est,
       allMover: compute(st, { inventory: withLg(() => false) }),
-      allLg: compute(st, { inventory: withLg((it) => lgKind(it) !== 'ac_window') }),
+      allLg: compute(st, { inventory: withLg((it) => lgEligible(it)) }),
     };
   }
-  const tot = (e, k) => e[k] + (e.lgCost ? e.lgCost[k] : 0);
+  /* LG 비교는 언제나 ‘실제로 낼 돈(부가세 포함)’ 기준 — 이삿짐센터 시세(부가세 별도일 수 있음)에 부가세를 맞춰 LG 소비자가와 더해요 */
+  const payK = (e, k) => (e.pay ? e.pay[k] : e[k]);
+  const toPay = (e, v) => (e.vatIncl ? v : v * e.vatMul);
+  const tot = (e, k) => payK(e, k) + (e.lgCost ? e.lgCost[k] : 0);
   function lgInfoCard() {
     return el('section', { class: 'card', 'aria-label': 'LG 이전설치가 하는 일' },
       sectionHead('🔌', 'LG 베스트케어 이전설치란?', '1544-7777 · LG전자 홈페이지 · ThinQ 앱'),
@@ -2665,7 +2790,7 @@
     return el('div', { class: 'es-scen-c' + (isCur ? ' is-cur' : '') },
       el('div', { class: 'es-scen-t' }, title, isCur ? el('span', { class: 'chip brand' }, '지금 선택') : null),
       el('div', { class: 'es-scen-big' }, '약 ' + won(tot(e, 'typical'))),
-      el('div', { class: 'es-scen-l' }, el('span', '🚚 이삿짐센터'), el('span', won(e.typical))),
+      el('div', { class: 'es-scen-l' }, el('span', '🚚 이삿짐센터'), el('span', won(payK(e, 'typical')))),
       el('div', { class: 'es-scen-l' }, el('span', '🔌 LG 서비스'), el('span', lgc ? won(lgc) : '0원')),
       el('div', { class: 'es-scen-r' }, '범위 ' + won(tot(e, 'low')) + ' ~ ' + won(tot(e, 'high')) + ' · ' + tonsLabel(e.tons) + ' · ' + e.crewLabel),
       sub ? el('div', { class: 'es-scen-r' }, sub) : null);
@@ -2682,15 +2807,17 @@
     const cur = s.cur;
     const nLg = items.filter((it) => it.lg).length;
     const isAllMover = nLg === 0;
-    const isAllLg = items.every((it) => it.lg || lgKind(it) === 'ac_window');
+    const isAllLg = items.every((it) => it.lg || !lgEligible(it));
     const diff = tot(cur, 'typical') - tot(s.allMover, 'typical');
-    const saveMover = s.allMover.typical - cur.typical;
+    const saveMover = payK(s.allMover, 'typical') - payK(cur, 'typical');
+    const nOther = items.filter((it) => brandOf(it) === 'other').length;
     return el('section', { class: 'card', 'aria-label': '세 가지 방법 합계' },
-      sectionHead('⚖️', '세 가지 방법 비교', '이삿짐센터 + LG 합계 (기준가)'),
+      sectionHead('⚖️', '세 가지 방법 비교', '이삿짐센터 + LG 합계 (기준가 · 부가세 포함)'),
       el('div', { class: 'es-scen' },
         scenCard('🚚 전부 이삿짐센터', s.allMover, isAllMover, '가전도 이삿짐센터가 옮김 (에어컨은 협력 기사)'),
         isAllMover || isAllLg ? scenCard('🔀 지금 선택 (혼합)', cur, false, '아래에서 품목마다 고르면 바뀌어요') : scenCard('🔀 지금 선택 (혼합)', cur, true, 'LG ' + nLg + '개 · 이삿짐센터 ' + (items.length - nLg) + '개'),
-        scenCard('🔌 LG 가능한 가전 전부 LG', s.allLg, isAllLg && !isAllMover, '이삿짐센터는 가구·박스만')),
+        scenCard('🔌 LG 가능한 가전 전부 LG', s.allLg, isAllLg && !isAllMover, nOther ? '다른 브랜드 ' + nOther + '개와 가구·박스는 이삿짐센터' : '이삿짐센터는 가구·박스만')),
+      el('p', { class: 'small es-muted mt-8 mb-0' }, '🧾 모두 부가세 포함(실제로 낼 돈) 기준이에요. ' + (cur.vatIncl ? '' : '이삿짐센터 시세는 부가세 별도라 ' + r1(cur.coef.vat_pct) + '%를 더했고, ') + 'LG 요금은 소비자가(부가세 포함)예요.'),
       el('p', { class: 'small mt-12 mb-0' }, nLg
         ? '지금 선택하면 이삿짐센터 비용이 약 ' + won(Math.max(0, saveMover)) + ' 줄고 LG에 약 ' + josa(won(cur.lgCost ? cur.lgCost.typical : 0), '이/가') + ' 들어, 전부 이삿짐센터보다 합계가 ' + (diff >= 0 ? '약 ' + won(diff) + ' 더 들어요.' : '약 ' + won(-diff) + ' 덜 들어요.')
         : '지금은 가전도 모두 이삿짐센터가 옮기는 것으로 계산 중이에요. 아래에서 품목마다 ‘LG 서비스’를 고르면 합계가 바뀌어요.'));

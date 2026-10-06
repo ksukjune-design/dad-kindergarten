@@ -39,11 +39,15 @@
   };
   const pos = (v) => (isNum(v) && v > 0 ? v : null);
   const nn = (v) => Math.max(0, num(v)); /* 음수가 될 수 없는 금액 */
+  /* 전각 숫자·기호(일부 한글 자판이 만드는 '１２０만', '１．３')를 보통 숫자로 */
+  const halfwidth = (s) => String(s == null ? '' : s).replace(/[０-９．，－％]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0));
+  /* 나눠 보내는 횟수 — 한도를 잘못 넣어 수억 번이 나오면 숫자 대신 '100번 넘게' */
+  const timesTxt = (n) => (n > 99 ? '100번 넘게' : n + '번');
   /* 금액 입력 검사 — core parseMoney 는 '1억abc'·'-100만'도 읽어 버려서, 저장 전에 모양을 엄격히 확인 */
   const MONEY_RE = /^(?:\d+(?:\.\d+)?억)?(?:\d+(?:\.\d+)?천만)?(?:\d+(?:\.\d+)?만)?(?:\d+(?:\.\d+)?)?$/;
   function moneyCheck(raw, o) {
     o = o || {};
-    const s = String(raw == null ? '' : raw).replace(/[\s,원₩]/g, '');
+    const s = halfwidth(raw).replace(/[\s,원₩]/g, '');
     if (!s) return { ok: true, v: 0, empty: true };
     if (/^[-−]/.test(s)) return { ok: false, msg: '0원보다 작은 금액은 넣을 수 없어요' };
     if (/\d천$/.test(s)) return { ok: false, msg: '천만 단위는 "5천만"처럼, 천 원 단위는 "5,000"처럼 써 주세요' };
@@ -58,6 +62,8 @@
   const krw = (n) => F.krw(n);
   const eok = (n) => F.eok(n);
   const signedKrw = (n) => (n > 0 ? '+' : n < 0 ? '−' : '') + F.krw(Math.abs(n));
+  const signedEok = (n) => (n > 0 ? '+' : n < 0 ? '−' : '') + F.eok(Math.abs(n));
+  const signedWon = (n) => (n > 0 ? '+' : n < 0 ? '−' : '') + F.won(Math.abs(n));
   const pctTxt = (x, d) => {
     if (!isNum(x)) return '-';
     let s = x.toFixed(d == null ? 2 : d);
@@ -104,6 +110,37 @@
       t.focus({ preventScroll: true });
       if (selectAll && t.select) t.select();
     } catch (e) { /* 무시 */ }
+  }
+
+  /* 마지막 Tab 키 (Shift 여부) — 다시 그리기로 포커스를 잃었을 때 어디로 보낼지 */
+  let navKey = null;
+  let lastFocus = null;
+  const FOCUSABLE = 'input:not([type=hidden]):not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
+  const focusables = (scope) => Array.from((scope || document.body).querySelectorAll(FOCUSABLE)).filter((n) => n.tabIndex >= 0 && n.getClientRects().length > 0);
+  /* (다시 그리기 전 화면에서) from 다음/앞 칸 */
+  function nextFocusable(from, back) {
+    if (!from || !from.isConnected) return null;
+    const all = focusables(from.closest('.fn-page') || document.body);
+    const i = all.indexOf(from);
+    if (i < 0) return null;
+    return all[back ? i - 1 : i + 1] || null;
+  }
+  function rescueFocus(node, intentFk) {
+    if (!navKey || Date.now() - navKey.t > 1500) return; // 마우스·터치로 떠난 경우는 그대로
+    const back = navKey.shift;
+    // 대신 갈 칸은 지금(다시 그린 직후) 정해 두고, 탭 전체가 다시 그려져도 data-fk 로 다시 찾음
+    const scope = node.closest('.fn-page') || document.body;
+    const all = focusables(scope);
+    const side = all.filter((n) => !node.contains(n) && (node.compareDocumentPosition(n) & (back ? Node.DOCUMENT_POSITION_PRECEDING : Node.DOCUMENT_POSITION_FOLLOWING)));
+    const fb = back ? side[side.length - 1] : side[0];
+    const fbFk = fb ? fb.getAttribute('data-fk') : null;
+    const find = (fk) => (fk ? document.querySelector('.fn-page [data-fk="' + cssEsc(fk) + '"]') : null);
+    setTimeout(() => {
+      const ae = document.activeElement;
+      if (ae && ae !== document.body && ae.isConnected) return; // 브라우저나 다른 코드가 이미 옮김
+      const t = find(intentFk) || (fb && fb.isConnected ? fb : find(fbFk));
+      if (t) { try { t.focus({ preventScroll: false }); } catch (e) { /* 무시 */ } }
+    }, 0);
   }
 
   /* ======================= 근거·출처 ======================= */
@@ -240,7 +277,7 @@
   }
   function defaults() {
     return {
-      v: 1,
+      v: 2,
       old: { deposit: 420000000, early: 42000000, receive: 378000000 },
       loan: { original: 100000000, prepaid: 22000000, payoff: 78130000, lien: 'unknown' },
       newHome: {
@@ -282,11 +319,41 @@
   function ensureState() {
     MV.store.ensure('finance', defaults);
     const st = MV.store.get();
+    const stored = st.finance && typeof st.finance === 'object' ? st.finance : null;
+    const wasV = stored ? num(stored.v) : 2;
     const filled = withDefaults(st.finance);
-    if (JSON.stringify(filled) !== JSON.stringify(st.finance)) {
+    if (wasV < 2) {
+      /* v1 → v2: 예전엔 '신고 상태'만 바꾸고 연결된 체크리스트 항목은 그대로 두는 버그가 있었음.
+         그때 고른 상태(신고돼 있음/지금 신고함)를 체크리스트 항목에도 한 번만 맞춰 줌 */
+      filled.v = 2;
+      MV.store.update((s) => {
+        s.finance = filled;
+        if (['done', 'late'].indexOf(filled.protect.rentReport) < 0) return;
+        const items = Array.isArray(s.items) ? s.items : [];
+        const row = protectRows(moveDateOf(s), filled, D.today()).find((r) => r.key === 'report');
+        [[row, 'prot-report'], [REPORT_FOLLOW, 'prot-reportNow']].forEach(([def, key]) => {
+          const it = def ? findLinked(def, items, filled.links, 'prot-').item : null;
+          if (!it) return;
+          filled.links[key] = it.id;
+          setItemDone(s, it.id, true);
+        });
+      }, { silent: true, source: SRC });
+    } else if (JSON.stringify(filled) !== JSON.stringify(st.finance)) {
       MV.store.update((s) => { s.finance = filled; }, { silent: true, source: SRC });
     }
     return MV.store.get().finance;
+  }
+  /* 체크리스트 항목 완료 표시 (MV.store.update 안에서 — core MV.items.toggle 과 같은 필드) */
+  function setItemDone(st, id, done) {
+    const it = st && Array.isArray(st.items) ? st.items.find((x) => x && x.id === id) : null;
+    if (!it) return false;
+    if (!!it.done !== !!done) {
+      const now = MV.nowISO();
+      it.done = !!done;
+      it.doneAt = done ? now : null;
+      it.updatedAt = now;
+    }
+    return true;
   }
 
   /* ======================= 계산 (순수) ======================= */
@@ -306,6 +373,7 @@
   function splitSummary(sp) {
     if (!sp || sp.n <= 1) return '';
     if (sp.chunks) return sp.chunks.map((a) => eok(a)).join(' + ');
+    if (sp.n > 99) return eok(sp.size) + '씩 ' + timesTxt(sp.n) + ' — 창구 이체를 권해요';
     return eok(sp.size) + ' × ' + (sp.n - 1) + '번' + (sp.last !== sp.size ? ' + 마지막 ' + eok(sp.last) : ' + 1번 더');
   }
 
@@ -345,8 +413,8 @@
         s.chunks = s.split.chunks;
         if (bal < 0) s.warnings.push({ level: 'bad', text: '이 단계에서 잔액이 ' + won(-bal) + ' 모자라요 — 보내기 전에 입금부터 확인하세요.' });
         if (perTx && s.amount > perTx) {
-          s.warnings.push({ level: 'bad', split: true, text: '한 번에 못 보내요: 1회 한도(' + krw(perTx) + ')보다 ' + won(s.amount - perTx) + ' 많아요 → ' + s.splitN + '번 나눠 보내세요 (매번 ' + krw(perTx) + ' 이하).' });
-          if (s.splitN > SPLIT_LIST) s.warnings.push({ level: 'warn', split: true, text: s.splitN + '번이나 나눠 보내면 실수·지연 위험이 커요 → 1회 한도를 1억(OTP 보안1등급)으로 올리거나 창구(평일 09~16시)에서 한 번에 보내세요.' });
+          s.warnings.push({ level: 'bad', split: true, text: '한 번에 못 보내요: 1회 한도(' + krw(perTx) + ')보다 ' + won(s.amount - perTx) + ' 많아요 → ' + timesTxt(s.splitN) + ' 나눠 보내세요 (매번 ' + krw(perTx) + ' 이하).' });
+          if (s.splitN > SPLIT_LIST) s.warnings.push({ level: 'warn', split: true, text: (s.splitN > 99 ? '100번 넘게' : s.splitN + '번이나') + ' 나눠 보내면 실수·지연 위험이 커요 → 1회 한도를 1억(OTP 보안1등급)으로 올리거나 창구(평일 09~16시)에서 한 번에 보내세요.' });
         } else if (!perTx && s.amount > txLimit) s.warnings.push({ level: 'info', text: '1회 한도를 아직 몰라서 1억 기준으로 나눴어요 (OTP 보안1등급 기준).' });
         if (daily && outSum > daily && outSum - s.amount <= daily) s.warnings.push({ level: 'bad', text: '여기서 1일 이체한도(' + krw(daily) + ')를 넘어요 — 한도를 올리거나 창구에서 이체하세요.' });
       }
@@ -490,6 +558,11 @@
     const start = D.valid(g.startDate) ? D.str(D.parse(g.startDate)) : null;
     const startFuture = !!(start && D.diff(start, today) < 0);
     const years = start && !startFuture ? Math.max(0, D.diff(start, today) / 365.25) : 0;
+    /* 기간을 안 정한 대출은 1년 단위로 매년 새로 빌린 것으로 봄 → 1년분 이익이 각 1년 단위가 시작될 때 통째로 계산돼요.
+       그래서 '경과 연수 × 이익'이 아니라 '시작된 1년 단위 수 × 이익' */
+    let periods = 0;
+    if (start && !startFuture) { while (periods < 60 && D.diff(addMonths(start, 12 * periods), today) >= 0) periods++; }
+    const nextPeriod = start && !startFuture ? addMonths(start, 12 * periods) : null;
     const deduction = Math.max(0, 50000000 - Math.max(0, num(g.priorGifts)));
     const base = Math.max(0, P - deduction);
     const tax = giftTax(base);
@@ -503,8 +576,9 @@
       minMonthly: minRate != null ? monthly(minRate) : 0,
       rec: [1.3, 1.5].map((r) => ({ r, m: monthly(r) })),
       planMonthly, planAnnual: Math.round(P * plan / 100), wh: withholding(planMonthly),
-      start, startFuture, years, deduction, cumulative: taxable ? Math.round(benefit * years) : 0,
+      start, startFuture, years, periods, nextPeriod, deduction, cumulative: taxable ? benefit * periods : 0,
       yearsToExhaust: taxable && benefit > 0 ? deduction / benefit : null,
+      coveredPeriods: taxable && benefit > 0 ? Math.floor(deduction / benefit) : 0,
       base, tax, deadline, lateDays, noReport, lateFee, worst: tax + noReport + lateFee,
     };
   }
@@ -650,12 +724,50 @@
       let done = link.item ? !!link.item.done : !!(f.protect.checks && f.protect.checks[r.key]);
       const others = r.anyDone ? items.filter((it) => it && r.re.some((re) => re.test(String(it.title || '')))) : [];
       if (r.anyDone && !done) done = others.some((it) => it.done);
-      if (r.key === 'report' && f.protect.rentReport !== 'unknown') done = true;
-      return Object.assign(r, { linked: link.item, linkedCount: link.count, alts: others, done });
+      const extra = {};
+      if (r.key === 'report') {
+        /* 신고 상태(select)와 줄·체크리스트 항목은 한 몸: 연결된 항목이 있으면 그 항목이 기준,
+           없으면 이 화면의 체크·신고 상태가 기준. 보이는 신고 상태는 늘 줄의 완료 여부와 맞춤 */
+        const st = ['done', 'late'].indexOf(f.protect.rentReport) >= 0 ? f.protect.rentReport : 'unknown';
+        if (!link.item && st !== 'unknown') done = true;
+        extra.reportState = done ? (st === 'unknown' ? 'done' : st) : 'unknown';
+        const follow = findLinked(REPORT_FOLLOW, items, f.links, 'prot-');
+        extra.follow = follow.item;
+        const cd = D.valid(f.newHome.contractDate) ? f.newHome.contractDate : '2026-07-13';
+        extra.deadline = D.add(cd, 30);
+        extra.contractDate = cd;
+        extra.overDays = D.diff(extra.deadline, D.today());
+      }
+      return Object.assign(r, { linked: link.item, linkedCount: link.count, alts: others, done }, extra);
     });
     const byKey = {};
     rows.forEach((r) => { byKey[r.key] = r; });
     return { rows, byKey, doneCount: rows.filter((r) => r.done).length };
+  }
+  /* '[신고 안 됐으면] 바로 임대차 신고하기' 같은 후속 항목 — 신고 상태를 정하면 같이 정리 */
+  const REPORT_FOLLOW = { key: 'reportNow', part: 'admin', re: [/신고\s*안\s*(됐|되었)\s*으면|바로\s*임대차\s*신고/] };
+
+  /* 11/3 단계 ↔ 보증금 지키기 줄 ↔ 체크리스트 항목: 같은 일은 한 곳에서 체크하면 모두 바뀜 */
+  const STEP_PROT = { keys: 'keys', registry: 'registry', movein: 'movein' };
+  const PROT_STEP = { keys: 'keys', registry: 'registry', movein: 'movein' };
+  const STEP_ITEM = {
+    broker: { key: 'broker', part: 'money', re: [/중개\s*보수\s*(보내|송금|이체|지급)/] },
+    bank: { key: 'bank', part: 'money', re: [/완제\s*하기/, /대출.*상환\s*하기/] },
+  };
+  STEP_ITEM.bankA = STEP_ITEM.bank;
+  function linkSteps(c, state) {
+    const items = state && Array.isArray(state.items) ? state.items : [];
+    c.flow.steps.forEach((s) => {
+      s.link = null;
+      const pk = STEP_PROT[s.id];
+      const pr = pk && c.protect.byKey[pk];
+      if (pr) { s.done = !!pr.done; s.link = { kind: 'prot', key: pk, item: pr.linked || null }; return; }
+      const def = STEP_ITEM[s.id];
+      if (!def) return;
+      const l = findLinked(def, items, c.f.links, 'step-');
+      if (l.item) { s.done = !!l.item.done; s.link = { kind: 'item', key: def.key, item: l.item }; }
+    });
+    c.flow.doneCount = c.flow.steps.filter((s) => s.done).length;
   }
 
   function computeAlerts(c, today) {
@@ -680,7 +792,7 @@
     const splitSteps = c.flow.steps.filter((s) => s.warnings.some((w) => w.split));
     if (splitSteps.length) {
       A.push({ id: 'flowSplit', level: 'warn', tab: 'flow', anchor: 'fn-step-' + splitSteps[0].id,
-        text: '1회 이체한도(' + krw(c.flow.perTx) + ')보다 큰 이체가 있어요: ' + splitSteps.map((s) => stepWho(s.id).replace('나 → ', '') + ' ' + s.splitN + '번').join(', ') + ' 나눠 보내야 해요.' });
+        text: '1회 이체한도(' + krw(c.flow.perTx) + ')보다 큰 이체가 있어요: ' + splitSteps.map((s) => stepWho(s.id).replace('나 → ', '') + ' ' + timesTxt(s.splitN)).join(', ') + ' 나눠 보내야 해요.' });
     }
     if (f.loan.lien === 'unknown') {
       A.push({ id: 'lien', level: 'warn', tab: 'flow', anchor: 'fn-lien', text: '우리은행에 질권·채권양도 여부와 11/3 기준 완제금액을 확인하세요 (상환 순서가 달라져요).' });
@@ -734,6 +846,7 @@
     c.housing = computeHousing(f);
     c.recon = computeRecon(f, flow);
     c.protect = computeProtect(f, state, move);
+    linkSteps(c, state);
     c.alerts = computeAlerts(c, today);
     return c;
   }
@@ -946,6 +1059,7 @@ div.fn-alert { cursor: default; }
 .fn-amt.is-in { color: var(--good); }
 .fn-amt.is-out { color: var(--brand); }
 .fn-amt.is-ext { color: var(--think); }
+.fn-amt.is-neg { color: var(--bad); }
 .fn-total { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; padding: 8px 12px; border-radius: var(--radius-sm); background: var(--bg-3); }
 .fn-total > span { font-size: .85rem; font-weight: 700; color: var(--ink-2); }
 .fn-chunks { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
@@ -959,6 +1073,8 @@ div.fn-alert { cursor: default; }
 .fn-rentbox { margin: 0; }
 .fn-rentbox .row { margin-top: 6px; }
 .fn-rentbox .money-input { max-width: 180px; }
+.fn-inline-money { display: inline-flex; align-items: flex-start; gap: 8px; min-width: 0; }
+.fn-inline-money > span:first-child { line-height: 40px; white-space: nowrap; }
 .fn-result { background: var(--bg-2); }
 .fn-result-k { font-size: .85rem; font-weight: 700; color: var(--ink-3); }
 .fn-result-v { font-size: 1.9rem; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; line-height: 1.2; color: var(--good); }
@@ -1090,7 +1206,7 @@ div.fn-alert { cursor: default; }
 .fn-range .fn-why[open] { flex-basis: 100%; }
 .fn-bad-hint { color: var(--bad) !important; font-weight: 700; }
 .fn-page .input[aria-invalid="true"] { border-color: var(--bad); box-shadow: 0 0 0 2px color-mix(in srgb, var(--bad) 22%, transparent); }
-.fn-bad-hint:empty { display: none; }
+.fn-bad-hint:empty, .fn-num-msg:empty { display: none; }
 .fn-memo-total { max-width: 240px; margin: 0; }
 .fn-memo-row { align-items: flex-end; }
 
@@ -1117,7 +1233,9 @@ div.fn-alert { cursor: default; }
 .fn-prot-body .fn-kv, .fn-prot-body .fn-total { max-width: 560px; }
 .fn-prot-body .field { max-width: 380px; }
 .fn-prot-body .fn-fields { max-width: 560px; }
-.fn-prot-link { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: .82rem; }
+.fn-prot-link { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; font-size: .82rem; }
+.fn-prot-chips { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.fn-step-link { gap: 2px 10px; }
 
 /* --- 당일 시트 --- */
 .fn-sheet h3 { margin: 14px 0 6px; }
@@ -1141,10 +1259,12 @@ div.fn-alert { cursor: default; }
   .fn-sheet-contacts { grid-template-columns: 1fr; }
 }
 @media print {
-  body.fn-print-mode {
+  /* html 까지 밝은 색으로 (어두운 화면에서 인쇄해도 아래쪽이 검게 나오지 않게). :root[data-theme] 보다 우선하도록 html:root */
+  html:root.fn-print-mode, body.fn-print-mode {
     --bg: #ffffff; --bg-2: #ffffff; --bg-3: #f1efea; --ink: #111111; --ink-2: #333333; --ink-3: #555555;
     --line: #bbbbbb; --line-2: #888888; --good: #15803d; --good-bg: #ffffff; --brand: #9a3412; --bad: #b91c1c; --warn: #854d0e;
-    background: #ffffff;
+    --brand-bg: #ffffff; --warn-bg: #ffffff; --bad-bg: #ffffff; --kid-bg: #ffffff; --think-bg: #ffffff;
+    background: #ffffff !important; color: #111111; color-scheme: light;
   }
   body.fn-print-mode .app, body.fn-print-mode .toast-wrap { display: none !important; }
   body.fn-print-mode .modal-back { position: static !important; inset: auto !important; display: block !important; padding: 0 !important; background: none !important; animation: none !important; }
@@ -1176,6 +1296,9 @@ div.fn-alert { cursor: default; }
     if (errHint) mi.appendChild(errHint);
     mi.addEventListener('change', (e) => {
       if (e.target !== mi.input) return;
+      // 전각 숫자('１２０만')는 core 가 읽기 전에 보통 숫자로 바꿔 둠
+      const hw = halfwidth(mi.input.value);
+      if (hw !== mi.input.value) mi.input.value = hw;
       const r = moneyCheck(mi.input.value, { max: o.max });
       const hint = errHint || mi.querySelector('.hint');
       if (!r.ok) {
@@ -1201,20 +1324,34 @@ div.fn-alert { cursor: default; }
   function numField(label, value, onChange, o) {
     o = o || {};
     const input = el('input', { class: 'input num', type: 'text', inputmode: 'decimal', value: isNum(value) ? String(value) : '', placeholder: o.placeholder || '', 'data-fk': o.fk || null, autocomplete: 'off' });
+    /* 이 칸들(이자율 %, 기간 년)은 천 단위 숫자가 없어서 '1,3'은 소수점(1.3)으로 읽고, 못 읽으면 이유를 적어 줌 */
+    const msg = el('small', { class: 'hint fn-num-msg', role: 'alert' });
+    const unit = (o.suffix || '').replace(/\s*\/.*$/, '');
+    const fail = (t) => { input.setAttribute('aria-invalid', 'true'); msg.classList.add('fn-bad-hint'); msg.textContent = '⚠ ' + t + ' — 저장하지 않았어요'; };
     const commit = () => {
-      const raw = String(input.value).replace(/[,%\s년]/g, '');
-      if (raw === '' && o.allowEmpty) { input.removeAttribute('aria-invalid'); onChange(null); return; }
+      let raw = halfwidth(input.value).replace(/[\s%년]/g, '');
+      if (/^\d+,\d{1,2}$/.test(raw)) raw = raw.replace(',', '.');
+      if (raw === '') {
+        if (o.allowEmpty) { input.removeAttribute('aria-invalid'); msg.textContent = ''; onChange(null); return; }
+        fail('비워 둘 수 없어요. 없으면 0을 넣으세요');
+        return;
+      }
+      if (/^[-−]/.test(raw)) { fail('0보다 작은 값은 넣을 수 없어요'); return; }
+      if (!/^\d+(\.\d+)?$|^\.\d+$/.test(raw)) { fail('숫자로 읽을 수 없어요 (예: ' + (o.example || '1.3') + ')'); return; }
       let v = parseFloat(raw);
-      if (!isFinite(v)) { input.setAttribute('aria-invalid', 'true'); return; }
+      if (!isFinite(v)) { fail('숫자로 읽을 수 없어요 (예: ' + (o.example || '1.3') + ')'); return; }
+      let note = '';
+      if (o.min != null && v < o.min) { v = o.min; note = o.min + unit + ' 이상만 넣을 수 있어서 ' + o.min + '(으)로 바꿨어요'; }
+      if (o.max != null && v > o.max) { v = o.max; note = o.max + unit + ' 이하만 넣을 수 있어서 ' + o.max + '(으)로 바꿨어요'; }
       input.removeAttribute('aria-invalid');
-      if (o.min != null) v = Math.max(o.min, v);
-      if (o.max != null) v = Math.min(o.max, v);
+      msg.classList.remove('fn-bad-hint');
+      msg.textContent = note ? 'ℹ ' + note : '';
       input.value = String(v);
       onChange(v);
     };
     input.addEventListener('change', commit);
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); input.blur(); } });
-    return el('label', { class: 'field' }, el('span', label), el('span', { class: 'fn-suffix' }, input, o.suffix ? el('em', o.suffix) : null), o.hint ? el('small', { class: 'hint' }, o.hint) : null);
+    return el('label', { class: 'field' }, el('span', label), el('span', { class: 'fn-suffix' }, input, o.suffix ? el('em', o.suffix) : null), msg, o.hint ? el('small', { class: 'hint' }, o.hint) : null);
   }
   function textField(label, value, onInput, o) {
     o = o || {};
@@ -1279,7 +1416,13 @@ div.fn-alert { cursor: default; }
       const node = el(tag, { class: cls || null });
       const run = () => {
         const ae = document.activeElement;
-        const fk = ae && ae !== document.body && node.contains(ae) ? ae.getAttribute('data-fk') : null;
+        const inNode = !!(ae && ae !== document.body && node.contains(ae));
+        // Tab 을 누르면 브라우저가 포커스를 먼저 빼고(body) change 를 보내요 → 직전에 포커스가 있던 칸으로 판단
+        const lost = !inNode && (!ae || ae === document.body) && !!lastFocus && node.contains(lastFocus);
+        const had = inNode || lost;
+        const fk = inNode ? ae.getAttribute('data-fk') : null;
+        const intent = lost && navKey && Date.now() - navKey.t < 1500 ? nextFocusable(lastFocus, navKey.shift) : null;
+        const intentFk = intent && node.contains(intent) ? intent.getAttribute('data-fk') : null;
         let kids;
         try { kids = fn(); } catch (e) {
           console.error('[money]', e);
@@ -1287,6 +1430,8 @@ div.fn-alert { cursor: default; }
         }
         node.replaceChildren(...flatKids(kids));
         if (fk) refocus(node, fk);
+        // 포커스가 있던 칸이 사라졌으면(예: 차이가 0이 돼 안내 상자가 닫힘) Tab 으로 가던 다음 칸으로
+        if (had && !node.contains(document.activeElement)) rescueFocus(node, intentFk);
       };
       run();
       P.target.push(run);
@@ -1320,12 +1465,17 @@ div.fn-alert { cursor: default; }
         // 입력 중인 칸은 지우지 않음: 포커스가 떠난 뒤 다시 그림
         if (!P.deferred) {
           P.deferred = true;
-          ae.addEventListener('blur', () => setTimeout(() => {
+          const arm = (target) => target.addEventListener('blur', () => setTimeout(() => {
             if (!root.isConnected || !P.deferred) return;
+            // 아직 이 탭의 다른 입력 칸(또는 다시 그려진 같은 칸)에 있으면 계속 기다림 —
+            // 여기서 다시 그리면 그 칸이 또 바뀌고 blur 가 또 와서 끝없이 다시 그리게 돼요
+            const now = document.activeElement;
+            if (now && now !== target && now.isConnected && P.panel.contains(now) && isTextEntry(now)) { arm(now); return; }
             P.deferred = false;
             P.c = compute(MV.store.get());
             rebuildPanel();
           }, 0), { once: true });
+          arm(ae);
         }
         P.panelBinds.forEach((run) => run());
         return;
@@ -1378,10 +1528,26 @@ div.fn-alert { cursor: default; }
         const y = window.scrollY + P.panel.getBoundingClientRect().top - topbarH - P.tabbar.offsetHeight - 8;
         window.scrollTo(0, Math.max(0, y));
       }
-      const btn = P.tabbar.querySelector('button[data-tab="' + id + '"]');
-      if (btn && btn.scrollIntoView) { try { btn.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (e) { /* 무시 */ } }
+      revealTab(id);
     }
     P.switchTab = switchTab;
+    /* 고른 탭이 탭 줄 양 끝의 '더 있어요' 그림자(40px)에 가리지 않게 가로 스크롤 */
+    function revealTab(id) {
+      const tabs = P.tabbar && P.tabbar.querySelector('.tabs');
+      const btn = tabs && tabs.querySelector('button[data-tab="' + id + '"]');
+      if (!btn) return;
+      const max = tabs.scrollWidth - tabs.clientWidth;
+      if (max <= 0) return;
+      const pad = 48;
+      const left = btn.getBoundingClientRect().left - tabs.getBoundingClientRect().left + tabs.scrollLeft;
+      const right = left + btn.offsetWidth;
+      let x = tabs.scrollLeft;
+      if (btn.offsetWidth + pad * 2 > tabs.clientWidth || left - pad < x) x = left - pad;
+      else if (right + pad > x + tabs.clientWidth) x = right + pad - tabs.clientWidth;
+      x = Math.max(0, Math.min(max, Math.round(x)));
+      if (x !== tabs.scrollLeft) tabs.scrollLeft = x;
+      if (P.moreHint) P.moreHint();
+    }
 
     /* ---- 셸: 머리글 · 요약 · 확인할 것 · 탭 ---- */
     const dd = D.dday(P.c.move);
@@ -1426,8 +1592,18 @@ div.fn-alert { cursor: default; }
       tabsEl.addEventListener('scroll', moreHint, { passive: true });
       window.addEventListener('resize', moreHint);
       ctx.onCleanup(() => window.removeEventListener('resize', moreHint));
-      requestAnimationFrame(moreHint);
+      requestAnimationFrame(() => { revealTab(P.tab); moreHint(); });
     }
+    // 키보드 Tab 으로 칸을 옮기다 그 칸이 다시 그려져 사라지면 다음 칸으로 (rescueFocus)
+    const onNavKey = (e) => { if (e.key === 'Tab') navKey = { shift: !!e.shiftKey, t: Date.now() }; };
+    const onFocusIn = (e) => { lastFocus = e.target; };
+    document.addEventListener('keydown', onNavKey, true);
+    document.addEventListener('focusin', onFocusIn, true);
+    ctx.onCleanup(() => {
+      document.removeEventListener('keydown', onNavKey, true);
+      document.removeEventListener('focusin', onFocusIn, true);
+      lastFocus = null;
+    });
     if (!(params && params[0]) || params[0] !== P.tab) {
       // 탭이 없거나 모르는 탭(#/money/xyz)이면 주소를 실제로 보이는 탭으로 고침
       try { history.replaceState(history.state, '', '#/money/' + P.tab); } catch (e) { /* 무시 */ }
@@ -1442,7 +1618,7 @@ div.fn-alert { cursor: default; }
     });
     ctx.onCleanup(() => {
       if (P.sheet) { try { P.sheet.close(); } catch (e) { /* 무시 */ } }
-      document.body.classList.remove('fn-print-mode');
+      printMode(false);
     });
   }
 
@@ -1541,15 +1717,18 @@ div.fn-alert { cursor: default; }
         const out = [el('div', { class: 'fn-kv' },
           el('span', { class: 'k' }, '11/3 내 통장에서 나갈 돈'), el('span', { class: 'v' }, won(fl.outflow)),
           el('span', { class: 'k' }, '가장 큰 1건'), el('span', { class: 'v' }, won(fl.maxOut)))];
+        if (fl.perTx && fl.perTx < 1000000) {
+          out.push(el('div', { class: 'fn-warn is-bad' }, '1회 한도를 ' + won(fl.perTx) + '으로 넣었어요 — 맞나요? 보통 1천만원(보안2등급)이나 1억원(OTP)이에요. 이렇게 낮으면 앱으로는 못 보내니 창구(평일 09~16시)를 이용하세요.'));
+        }
         if (!fl.perTx || !fl.daily) {
           out.push(el('div', { class: 'fn-warn' }, '한도를 아직 모르면: OTP를 발급받고 한도를 1회 1억·1일 5억(보안1등급)으로 올리세요. 보안카드·모바일 간편인증은 보통 훨씬 낮아요(1회 1천만·1일 5천만원 수준).'));
         } else if (fl.daily < fl.outflow) {
           out.push(el('div', { class: 'fn-warn is-bad' }, '1일 한도(' + krw(fl.daily) + ')가 나갈 돈보다 적어요 — 한도를 올리거나 일부는 창구(평일 09~16시)에서 보내세요.'));
         } else {
           const n = fl.steps.filter((s) => s.kind === 'out' && s.splitN > 1);
-          out.push(el('div', { class: 'fn-warn is-good' }, '1일 한도 안이에요.' + (n.length ? ' 1회 한도 때문에 ' + n.map((s) => stepWho(s.id).replace('나 → ', '') + ' ' + s.splitN + '번').join(', ') + ' 나눠 보내요.' : '')));
+          out.push(el('div', { class: 'fn-warn is-good' }, '1일 한도 안이에요.' + (n.length ? ' 1회 한도 때문에 ' + n.map((s) => stepWho(s.id).replace('나 → ', '') + ' ' + timesTxt(s.splitN)).join(', ') + ' 나눠 보내요.' : '')));
           const many = n.filter((s) => s.splitN > SPLIT_LIST);
-          if (many.length) out.push(el('div', { class: 'fn-warn is-bad' }, '이체 횟수가 너무 많아요(' + many.map((s) => s.splitN + '번').join(', ') + ') — OTP로 1회 한도를 1억까지 올리거나 창구에서 보내세요.'));
+          if (many.length) out.push(el('div', { class: 'fn-warn is-bad' }, '이체 횟수가 너무 많아요(' + many.map((s) => timesTxt(s.splitN)).join(', ') + ') — OTP로 1회 한도를 1억까지 올리거나 창구에서 보내세요.'));
         }
         return out;
       }),
@@ -1582,10 +1761,19 @@ div.fn-alert { cursor: default; }
     const time = el('input', { type: 'time', class: 'input fn-time', value: s0.time || '', 'aria-label': (i + 1) + '단계 시각', 'data-fk': 'time-' + id });
     time.addEventListener('change', () => upd((fin) => { fin.flow.times[id] = time.value || ''; }));
     const title = stepTitle(id, P.c);
-    const doneBox = checkbox('완료', s0.done, (v) => upd((fin) => { fin.flow.done[id] = v; }, { log: (v ? '✅ ' : '↩︎ ') + D.fmt(P.c.move) + ' ' + title }), { fk: 'done-' + id, cls: 'fn-done' });
+    const doneBox = checkbox('완료', s0.done, (v) => setStepDone(P, id, v), { fk: 'done-' + id, cls: 'fn-done' });
+    const doneCb = doneBox.querySelector('input');
+    P.bind(() => { const d = !!cur().done; if (doneCb.checked !== d) doneCb.checked = d; });
     const body = el('div', { class: 'fn-step-body' });
     amountBlock(P, id, body);
     body.appendChild(el('ul', { class: 'fn-notes' }, stepNotes(id, P.c).map((t) => el('li', t))));
+    const lk = s0.link;
+    if (lk) {
+      body.appendChild(el('div', { class: 'fn-prot-link fn-step-link' },
+        el('span', { class: 'muted' }, '완료를 체크하면 같이 바뀌어요:'),
+        lk.kind === 'prot' ? el('a', { class: 'fn-cl-link', href: '#/money/protect', onclick: P.tabLink('protect', 'fn-p-' + lk.key) }, '🛡 보증금 지키기') : null,
+        lk.item ? el('a', { class: 'fn-cl-link', href: itemHref(lk.item), title: '체크리스트: ' + lk.item.title, 'aria-label': '체크리스트 항목 보기: ' + lk.item.title }, '📋 체크리스트') : null));
+    }
     if (kind !== 'task') body.appendChild(P.live('div', 'fn-step-body', () => stepLive(P, id)));
     if (MEMO_LABEL[id]) {
       body.appendChild(el('div', { class: 'fn-memo-input' }, textField(MEMO_LABEL[id], (f.flow.memo || {})[id], (v) => updSilent((fin) => { fin.flow.memo[id] = v; }),
@@ -1610,7 +1798,7 @@ div.fn-alert { cursor: default; }
           moneyField('A가 줄 돈 전체', f.old.receive, (v) => upd((fin) => { fin.old.receive = v; }), { fk: 'amt-receive' }),
           P.live('div', 'fn-total', () => {
             const fl = P.c.flow;
-            return [el('span', '내 통장에 들어올 돈'), el('b', { class: 'fn-amt is-in' }, '+' + eok(fl.inflow)),
+            return [el('span', '내 통장에 들어올 돈'), el('b', { class: 'fn-amt ' + (fl.inflow < 0 ? 'is-neg' : 'is-in') }, signedEok(fl.inflow)),
               el('span', { class: 'fn-formula' }, eok(fl.receive) + ' − 은행 직접 상환 ' + eok(fl.payoff))];
           })));
       } else {
@@ -1636,7 +1824,8 @@ div.fn-alert { cursor: default; }
         P.live('p', null, () => [el('b', '📌 월세 지급일 확인 — '), '계약서상 후불이면 첫 월세는 ' + D.fmt(addMonths(P.c.move, 1)) + '. ' + D.fmt(P.c.move) + '에 ' + krw(nn(P.c.f.newHome.rent)) + '을 함께 줄지 중개사·임대인과 확인하고, 주면 영수증/문자로 남기기']),
         el('div', { class: 'row' },
           checkbox(D.fmt(P.c.move) + '에 첫 월세 함께 지급', f.newHome.rentOnMoveDay, (v) => upd((fin) => { fin.newHome.rentOnMoveDay = v; }, { log: '자금흐름: 11/3 첫 월세 ' + (v ? '함께 지급' : '지급 안 함 (12/3부터)') }), { fk: 'rent-on' }),
-          moneyField('월세', f.newHome.rent, (v) => upd((fin) => { fin.newHome.rent = v; }), { fk: 'amt-rent', bare: true, noHint: true })),
+          el('label', { class: 'fn-inline-money' }, el('span', { class: 'small strong' }, '월세'),
+            moneyField('월세', f.newHome.rent, (v) => upd((fin) => { fin.newHome.rent = v; }), { fk: 'amt-rent', bare: true, noHint: true }))),
         checkbox('중개사·C와 확인 완료 (몇 월분인지, 다음 지급일, 마지막 달 처리 — 문자로 남김)', f.newHome.rentConfirmed, (v) => upd((fin) => { fin.newHome.rentConfirmed = v; }), { fk: 'rent-ok' }));
       P.bind(() => {
         const ok = !!P.c.f.newHome.rentConfirmed;
@@ -1679,18 +1868,19 @@ div.fn-alert { cursor: default; }
     const out = [];
     if (s.kind === 'out' && s.split && s.splitN > 1) {
       out.push(s.chunks
-        ? el('div', { class: 'fn-chunks' }, el('span', { class: 'small strong' }, s.splitN + '번 나눠 보내기:'),
+        ? el('div', { class: 'fn-chunks' }, el('span', { class: 'small strong' }, timesTxt(s.splitN) + ' 나눠 보내기:'),
           s.chunks.map((a, k) => chip((k + 1) + '회 ' + eok(a), 'brand')))
-        : el('div', { class: 'fn-chunks' }, el('span', { class: 'small strong' }, s.splitN + '번 나눠 보내기:'),
-          chip(eok(s.split.size) + ' × ' + (s.split.last !== s.split.size ? s.splitN - 1 : s.splitN) + '번', 'brand'),
+        : el('div', { class: 'fn-chunks' }, el('span', { class: 'small strong' }, timesTxt(s.splitN) + ' 나눠 보내기:'),
+          chip(eok(s.split.size) + ' × ' + timesTxt(s.split.last !== s.split.size ? s.splitN - 1 : s.splitN), 'brand'),
           s.split.last !== s.split.size ? chip('마지막 1번 ' + eok(s.split.last), 'brand') : null));
     }
     s.warnings.forEach((w) => out.push(el('div', { class: 'fn-warn is-' + w.level, role: w.level === 'bad' ? 'alert' : null }, w.text)));
     if (s.kind === 'ext') {
       out.push(el('div', { class: 'fn-bal' }, el('span', '내 통장은 그대로 (A → 은행 직접)'), el('b', eok(s.balance))));
     } else {
+      const delta = s.kind === 'in' ? s.amount : -s.amount;
       out.push(el('div', { class: 'fn-bal' + (s.balance < 0 ? ' is-neg' : '') },
-        el('span', (s.kind === 'in' ? '+' : '−') + won(Math.abs(s.amount)) + ' → 이 단계 뒤 내 통장'),
+        el('span', signedWon(delta) + ' → 이 단계 뒤 내 통장'),
         el('b', { title: won(s.balance) }, eok(s.balance))));
     }
     return out;
@@ -1763,6 +1953,87 @@ div.fn-alert { cursor: default; }
     if (cur[key] === itemId) return;
     updSilent((fin) => { if (!fin.links || typeof fin.links !== 'object') fin.links = {}; fin.links[key] = itemId; });
   }
+
+  /* 자금흐름 상태와 체크리스트 항목을 한 번에 바꿈 (저장·다시 그리기 한 번) */
+  function updAll(fn, opts) {
+    MV.store.update((st) => {
+      if (!st.finance) st.finance = withDefaults(null);
+      const fin = st.finance;
+      if (!fin.links || typeof fin.links !== 'object' || Array.isArray(fin.links)) fin.links = {};
+      if (!fin.flow || typeof fin.flow !== 'object') fin.flow = withDefaults(null).flow;
+      if (!fin.flow.done || typeof fin.flow.done !== 'object') fin.flow.done = {};
+      if (!fin.protect || typeof fin.protect !== 'object') fin.protect = withDefaults(null).protect;
+      if (!fin.protect.checks || typeof fin.protect.checks !== 'object') fin.protect.checks = {};
+      fn(fin, st);
+    }, Object.assign({ source: SRC }, opts || {}));
+  }
+  const doneLog = (v, title) => (v ? '✅ 완료: ' : '↩︎ 다시 열기: ') + title;
+  const liveItem = (it) => (it && MV.items.get(it.id) ? MV.items.get(it.id) : null);
+
+  /* 보증금 지키기 한 줄 체크 → 연결된 체크리스트 항목(없으면 이 화면)과 같은 일을 하는 11/3 단계까지 */
+  function setProtDone(P, r, v, o) {
+    o = o || {};
+    if (!r) return;
+    if (r.key === 'report') {
+      const cur = P.c.f.protect.rentReport;
+      const known = cur === 'done' || cur === 'late';
+      setReportState(P, v ? (known ? cur : 'done') : 'unknown', Object.assign({ assumed: v && !known }, o));
+      return;
+    }
+    const linked = liveItem(r.linked);
+    if (o.struct) structNext = true;
+    updAll((fin, st) => {
+      if (PROT_STEP[r.key]) fin.flow.done[PROT_STEP[r.key]] = v;
+      if (linked) {
+        fin.links['prot-' + r.key] = linked.id;
+        // '둘 중 하나만 해도 됨' 줄을 끄면 같은 일을 하는 다른 항목(대안)도 함께 미완료로
+        if (!v && r.anyDone) (r.alts || []).forEach((it) => { if (it.id !== linked.id) setItemDone(st, it.id, false); });
+        setItemDone(st, linked.id, v);
+      } else {
+        fin.protect.checks[r.key] = v;
+      }
+    }, { log: linked ? doneLog(v, linked.title) : (v ? '✅ ' : '↩︎ ') + '자금흐름: ' + r.title });
+  }
+
+  /* 임대차 신고 상태 ↔ 줄 체크 ↔ 체크리스트 '[긴급] … 신고됐는지 확인'·'[신고 안 됐으면] 바로 신고' 항목 */
+  const REPORT_LABEL = { unknown: '모름 — 확인 필요', done: '신고돼 있음', late: '지금 신고함' };
+  function setReportState(P, state, o) {
+    o = o || {};
+    if (!REPORT_LABEL[state]) state = 'unknown';
+    const row = P.c.protect.byKey.report;
+    const main = row ? liveItem(row.linked) : null;
+    const follow = row ? liveItem(row.follow) : null;
+    const done = state !== 'unknown';
+    const changed = [];
+    if (main && !!main.done !== done) changed.push(main.title);
+    if (follow && !!follow.done !== done) changed.push(follow.title);
+    structNext = true;
+    updAll((fin, st) => {
+      fin.protect.rentReport = state;
+      if (main) { fin.links['prot-report'] = main.id; setItemDone(st, main.id, done); } else fin.protect.checks.report = done;
+      if (follow) { fin.links['prot-reportNow'] = follow.id; setItemDone(st, follow.id, done); }
+    }, { log: '자금흐름: 임대차 신고 상태 → ' + REPORT_LABEL[state] + (changed.length ? ' (체크리스트 ' + changed.length + '개 ' + (done ? '완료' : '다시 열기') + ')' : '') });
+    if (o.assumed && done) {
+      MV.ui.toast('신고 상태를 "신고돼 있음"으로 표시했어요 — 안 돼 있어서 지금 신고했다면 "지금 신고함"으로 바꿔 주세요');
+    } else if (changed.length && !o.quiet) {
+      MV.ui.toast('체크리스트도 ' + (done ? '완료로' : '미완료로') + ' 바꿨어요: ' + changed.map((t) => '“' + t + '”').join(', '));
+    }
+  }
+
+  /* 11/3 단계 완료 → 연결된 보증금 지키기 줄·체크리스트 항목까지 */
+  function setStepDone(P, id, v) {
+    const s = P.c.flow.steps.find((x) => x.id === id);
+    const title = stepTitle(id, P.c);
+    if (s && s.link && s.link.kind === 'prot') {
+      setProtDone(P, P.c.protect.byKey[s.link.key], v);
+      return;
+    }
+    const it = s && s.link && s.link.kind === 'item' ? liveItem(s.link.item) : null;
+    updAll((fin, st) => {
+      fin.flow.done[id] = v;
+      if (it) { fin.links['step-' + s.link.key] = it.id; setItemDone(st, it.id, v); }
+    }, { log: it ? doneLog(v, it.title) : (v ? '✅ ' : '↩︎ ') + D.fmt(P.c.move) + ' ' + title });
+  }
   function guideLink(anchor, label) {
     return el('a', { class: 'fn-guide', href: '#/guide/money' + (anchor ? '/' + anchor : '') }, '📖 ' + (label || '가이드') + ' →');
   }
@@ -1815,7 +2086,7 @@ div.fn-alert { cursor: default; }
           moneyField('계약금 중 아내 주식 자금', f.newHome.contractFromWife, set('newHome.contractFromWife'), { fk: 's-new-wife' }),
           moneyField('잔금 (11/3)', f.newHome.balance, set('newHome.balance'), { fk: 's-new-bal' }),
           moneyField('월세', f.newHome.rent, set('newHome.rent'), { fk: 's-new-rent' }),
-          dateField('계약일', f.newHome.contractDate, (v) => updStruct((fin) => { fin.newHome.contractDate = D.valid(v) ? v : '2026-07-13'; }), { fk: 's-new-date', hint: '임대차 신고기한(30일) 계산에 써요' }),
+          dateField('계약일', f.newHome.contractDate, (v) => upd((fin) => { fin.newHome.contractDate = D.valid(v) ? v : '2026-07-13'; }), { fk: 's-new-date', hint: '임대차 신고기한(30일) 계산에 써요' }),
           moneyField('처음 메모한 C 송금 합계', f.newHome.memoTotal, (v) => upd((fin) => { fin.newHome.memoTotal = v; fin.newHome.memoAck = false; fin.newHome.memoAckDiff = null; }), { fk: 's-new-memo', hint: '계산값과 다르면 11/3 돈 흐름에서 알려 줘요 (비우면 비교 안 함)' })]),
         group('👨‍👦 아버지 차용금 (2024)', [
           moneyField('빌린 원금', f.father.principal, set('father.principal'), { fk: 's-father' })])));
@@ -2041,8 +2312,16 @@ div.fn-alert { cursor: default; }
       el('div', { class: 'fn-bl-paid' }, checkbox('받음', r.got, (v) => setR((x) => { x.got = v; }), { fk: 'rf-got-' + r.id })),
       el('div', { class: 'fn-bl-memo' }, textField('메모', r.memo, (v) => updSilent((fin) => { const x = fin.budget.refunds.find((y) => y.id === r.id); if (x) x.memo = v; }), { fk: 'rf-memo-' + r.id, bare: true, placeholder: '메모' })),
       el('div', { class: 'fn-bl-del' }, !meta ? el('button', {
-        class: 'btn btn-ghost btn-icon', type: 'button', 'aria-label': (r.label || '항목') + ' 삭제', 'data-fk': 'rf-del-' + r.id,
-        onclick: () => updStruct((fin) => { fin.budget.refunds = fin.budget.refunds.filter((y) => y.id !== r.id); }),
+        class: 'btn btn-ghost btn-icon', type: 'button', 'aria-label': (r.label || '항목') + ' 삭제', title: '삭제', 'data-fk': 'rf-del-' + r.id,
+        onclick: () => {
+          const list = MV.store.get().finance.budget.refunds;
+          const idx = list.findIndex((y) => y.id === r.id);
+          const snapshot = idx >= 0 ? MV.clone(list[idx]) : null;
+          updStruct((fin) => { fin.budget.refunds = fin.budget.refunds.filter((y) => y.id !== r.id); });
+          MV.ui.toast('“' + (snapshot && snapshot.label || '들어올 돈') + '” 삭제했어요', { action: { label: '되돌리기', onClick: () => {
+            if (snapshot) updStruct((fin) => { if (!fin.budget.refunds.some((y) => y.id === snapshot.id)) fin.budget.refunds.splice(Math.max(0, idx), 0, snapshot); });
+          } } });
+        },
       }, '✕') : null));
     return row;
   }
@@ -2149,10 +2428,30 @@ div.fn-alert { cursor: default; }
       out.push(el('div', { class: 'fn-warn' }, '빌린 날(2024년 이체 날짜)을 넣으면 지금까지 쌓인 금액과 신고기한을 계산해요.'));
     } else if (g.startFuture) {
       out.push(el('div', { class: 'fn-warn is-bad' }, '빌린 날(' + D.fmtLong(g.start) + ')이 오늘보다 뒤예요 — 2024년 실제 이체 날짜로 고쳐 주세요.'));
-    } else if (g.taxable && g.actual === 0) {
-      out.push(el('div', { class: 'fn-warn' }, '무이자로 약 ' + g.years.toFixed(1) + '년 지났다면 의제 증여 누적 약 ' + krw(g.cumulative) + '. 성년 자녀 공제 ' + krw(g.deduction) + '으로 약 ' + (g.yearsToExhaust != null ? g.yearsToExhaust.toFixed(1) : '-') + '년분까지 흡수돼요(신고는 필요할 수 있음). 진짜 위험은 아래 "원금 전체가 증여로 판정"되는 경우예요.'));
+    } else if (g.taxable && g.periods > 0) {
+      out.push(deemedGiftNote(g));
     }
     return out;
+  }
+  /* 1년 단위 의제 증여 누적과 공제 (상증법 제41조의4: 기간 미정이면 1년마다 새로 빌린 것으로 봄) */
+  function deemedGiftNote(g) {
+    const how = g.actual === 0 ? '무이자면' : '지금 이자율(' + pctTxt(g.actual) + ')이면';
+    const starts = [];
+    const ymd = (x) => { const d = D.parse(x); return d ? d.getFullYear() + '.' + (d.getMonth() + 1) + '.' + d.getDate() : ''; };
+    for (let i = 0; i < Math.min(g.periods, 3); i++) starts.push(ymd(addMonths(g.start, 12 * i)));
+    const startTxt = g.periods <= 3 ? ' (' + starts.join(', ') + ' 시작분)' : '';
+    const head = how + ' 빌린 날부터 1년 단위마다 차액 ' + krw(g.benefit) + '이 통째로 증여로 계산돼요. 지금까지 ' + g.periods + '번' + startTxt + ' → 누적 ' + krw(g.cumulative) + '. ';
+    const excess = Math.max(0, g.cumulative - g.deduction);
+    let mid;
+    if (g.deduction <= 0) {
+      mid = '10년 안에 받은 다른 증여로 성년 자녀 공제 5,000만원을 이미 다 써서, 이 금액이 모두 과세 대상이 될 수 있어요 (세율 10%면 약 ' + krw(giftTax(g.cumulative)) + ' + 가산세). ';
+    } else if (excess > 0) {
+      mid = '남은 성년 자녀 공제 ' + krw(g.deduction) + '을 넘은 ' + krw(excess) + '이 과세 대상이 될 수 있어요 (세율 10%면 약 ' + krw(giftTax(excess)) + ' + 가산세). ';
+    } else {
+      mid = '남은 성년 자녀 공제 ' + krw(g.deduction) + ' 안이라 아직 낼 세금은 없지만 신고는 필요할 수 있어요. 공제로 ' + (g.coveredPeriods > 0 ? g.coveredPeriods + '번째 1년분까지(약 ' + g.yearsToExhaust.toFixed(1) + '년분)' : '1년분도 다') + ' 흡수돼요. ';
+    }
+    const next = g.nextPeriod ? '다음 1년분은 ' + D.fmtLong(g.nextPeriod).replace(/ \(.\)$/, '') + ' 무렵부터 계산돼요 — 그 전에 연 ' + pctTxt(g.minRate || 0) + ' 이상으로 이자를 약정하고 실제로 주세요. ' : '';
+    return el('div', { class: 'fn-warn' + (g.deduction <= 0 || excess > 0 ? ' is-bad' : '') }, head + mid + next + '진짜 위험은 아래 "원금 전체가 증여로 판정"되는 경우예요.');
   }
 
   function planOut(P) {
@@ -2341,64 +2640,65 @@ div.fn-alert { cursor: default; }
   }
 
   function protectRow(P, r) {
-    const f = P.c.f;
+    const cur = () => (P.c.protect.byKey && P.c.protect.byKey[r.key]) || r;
     const box = el('div', { class: 'fn-prot fn-anchor' + (r.done ? ' is-done' : ''), id: 'fn-p-' + r.key });
     const cbId = 'fn-pcb-' + r.key;
     const cb = el('input', { type: 'checkbox', id: cbId, checked: !!r.done, 'data-fk': 'prot-' + r.key });
-    cb.addEventListener('change', () => {
-      const v = cb.checked;
-      if (r.linked && MV.items.get(r.linked.id)) {
-        // 이 줄은 늘 같은 체크리스트 항목 하나만 바꿈 (id 고정 저장)
-        rememberLink('prot-' + r.key, r.linked.id);
-        if (!v && r.key === 'report' && P.c.f.protect.rentReport !== 'unknown') updSilent((fin) => { fin.protect.rentReport = 'unknown'; });
-        if (!v && r.anyDone) {
-          // '둘 중 하나만 해도 됨' 줄을 끄면, 같은 일을 하는 다른 항목(대안)도 함께 미완료로
-          (r.alts || []).forEach((it) => { if (it.id !== r.linked.id && MV.items.get(it.id) && MV.items.get(it.id).done) MV.items.toggle(it.id); });
-        }
-        if (!!MV.items.get(r.linked.id).done !== v) MV.items.toggle(r.linked.id);
-        else updStruct(() => {}); // 항목은 이미 그 상태 — 화면만 다시 그림
-      } else {
-        updStruct((fin) => {
-          fin.protect.checks[r.key] = v;
-          if (!v && r.key === 'report') fin.protect.rentReport = 'unknown';
-        });
-      }
+    // 이 줄은 늘 같은 체크리스트 항목 하나만 바꿈 (id 고정 저장) — 같은 일을 하는 11/3 단계도 함께
+    cb.addEventListener('change', () => setProtDone(P, cur(), cb.checked, { struct: true }));
+    P.bind(() => {
+      const d = !!cur().done;
+      box.classList.toggle('is-done', d);
+      if (cb.checked !== d) cb.checked = d;
     });
-    const due = r.due;
-    const body = el('div', { class: 'fn-prot-body' }, el('p', { class: 'mb-0' }, r.detail));
-    if (r.key === 'report') body.appendChild(reportExtra(P));
+    const body = el('div', { class: 'fn-prot-body' }, P.live('p', 'mb-0', () => cur().detail));
+    if (r.key === 'report') body.appendChild(reportExtra(P, cur));
     if (r.key === 'hug') body.appendChild(hugExtra(P));
     if (r.key === 'tax') {
       const dd = D.dday(P.c.move);
       body.appendChild(el('div', { class: 'fn-warn' + (dd.n != null && dd.n <= 7 ? ' is-bad' : '') }, '임차인 단독 열람 마감: ' + D.fmtLong(P.c.move) + (dd.n != null ? ' (' + dd.label + ')' : '') + ' — 10월 안에 끝내는 게 안전해요.'));
     }
+    const itemLink = (it, more) => el('a', { href: itemHref(it) }, '📋 체크리스트: ' + it.title + (more > 1 ? ' 외 ' + (more - 1) + '개' : '') + ' →');
     body.appendChild(el('div', { class: 'fn-prot-link' },
-      r.linked
-        ? el('a', { href: '#/checklist/' + encodeURIComponent(r.linked.partId || '_') + '/' + encodeURIComponent(r.linked.id) }, '📋 체크리스트: ' + r.linked.title + (r.linkedCount > 1 ? ' 외 ' + (r.linkedCount - 1) + '개' : '') + ' →')
-        : el('button', { class: 'btn btn-sm fn-mini-btn', type: 'button', 'data-fk': 'prot-add-' + r.key, onclick: () => addToChecklist(P, r) }, '+ 체크리스트에 추가')));
+      r.linked ? itemLink(r.linked, r.linkedCount) : el('button', { class: 'btn btn-sm fn-mini-btn', type: 'button', 'data-fk': 'prot-add-' + r.key, onclick: () => addToChecklist(P, r) }, '+ 체크리스트에 추가'),
+      r.key === 'report' && r.follow ? itemLink(r.follow, 1) : null,
+      PROT_STEP[r.key] ? el('a', { href: '#/money/flow', onclick: P.tabLink('flow', 'fn-step-' + PROT_STEP[r.key]) }, '🗓 11/3 돈 흐름 단계 →') : null));
     body.appendChild(basis(r.conf, r.key === 'report' ? '부동산거래신고법 제6조의2·제6조의5, 과태료는 2025-06-01 이후 기준(구간표 원문 미확인).' : r.key === 'hug' ? 'HUG 요건(2023-05 개편): 수도권 보증금 7억 이하, (보증금+선순위채권) ≤ 주택가격의 90%.' : r.key === 'tax' ? '국세징수법 제109조(2023-04-01), 주임법 제3조의7(2023-04-18).' : '리서치 검증본.', r.links,
       r.key === 'hug' ? 'HUG에 확인' : r.key === 'tax' || r.key === 'report' ? '주민센터·세무서에 확인' : '주민센터·관리사무소에 확인'));
     box.append(el('label', { class: 'fn-prot-cb', title: r.title }, cb),
-      el('div', { class: 'fn-prot-title' }, el('label', { for: cbId }, r.title), MV.ui.dueChip(due, r.done), r.urgent && !r.done ? chip('긴급', 'bad') : null),
+      el('div', { class: 'fn-prot-title' }, el('label', { for: cbId }, r.title),
+        P.live('span', 'fn-prot-chips', () => {
+          const x = cur();
+          // 신고기한이 이미 지났으면 'D-1' 같은 할 일 기한 대신 '기한 지남 · 바로 확인'
+          if (x.key === 'report' && !x.done && x.overDays > 0) return chip('신고기한 ' + D.fmt(x.deadline) + ' 지남 · 바로 확인', 'bad');
+          return [MV.ui.dueChip(x.due, x.done), x.urgent && !x.done ? chip('긴급', 'bad') : null];
+        })),
       body);
     return box;
   }
 
-  function reportExtra(P) {
+  function reportExtra(P, cur) {
     const f = P.c.f;
-    const cd = D.valid(f.newHome.contractDate) ? f.newHome.contractDate : '2026-07-13';
-    const dl = D.add(cd, 30);
-    const over = D.diff(dl, P.c.today);
+    const state = el('label', { class: 'field' }, el('span', '신고 상태'));
+    const sel = el('select', { class: 'select', 'data-fk': 'p-report-state' },
+      [['unknown', '모름 — 확인 필요'], ['done', '신고돼 있음 (신고필증 확인)'], ['late', '안 돼 있었음 → 지금 신고함']].map(([v, l]) => el('option', { value: v, selected: v === cur().reportState }, l)));
+    sel.addEventListener('change', () => setReportState(P, sel.value));
+    state.append(sel, el('small', { class: 'hint' }, '고르면 체크리스트의 신고 확인 항목도 같이 바뀌어요'));
+    P.bind(() => { const want = cur().reportState || 'unknown'; if (sel.value !== want && document.activeElement !== sel) sel.value = want; });
     return el('div', { class: 'fn-step-body' },
-      el('div', { class: 'fn-kv' },
-        el('span', { class: 'k' }, '계약일 → 법정 신고기한'), el('span', { class: 'v' }, D.fmt(cd) + ' → ' + D.fmt(dl)),
-        el('span', { class: 'k' }, '오늘 기준'), el('span', { class: 'v ' + (over > 0 ? 'is-bad' : '') }, over > 0 ? over + '일 지남' : 'D-' + (-over)),
-        el('span', { class: 'k' }, '과태료 (지연신고)'), el('span', { class: 'v' }, '약 2만~30만원'),
-        el('span', { class: 'k' }, '거짓신고'), el('span', { class: 'v' }, '100만원')),
+      P.live('div', 'fn-kv', () => {
+        const x = cur();
+        const over = x.overDays;
+        return [
+          el('span', { class: 'k' }, '계약일 → 법정 신고기한'), el('span', { class: 'v' }, D.fmt(x.contractDate) + ' → ' + D.fmt(x.deadline)),
+          el('span', { class: 'k' }, '오늘 기준'), el('span', { class: 'v ' + (over > 0 && !x.done ? 'is-bad' : '') }, over > 0 ? over + '일 지남' : over === 0 ? '오늘까지' : 'D-' + (-over)),
+          el('span', { class: 'k' }, '과태료 (지연신고)'), el('span', { class: 'v' }, '약 2만~30만원'),
+          el('span', { class: 'k' }, '거짓신고'), el('span', { class: 'v' }, '100만원'),
+        ];
+      }),
       el('div', { class: 'fn-fields' },
-        dateField('새 집 계약일', f.newHome.contractDate, (v) => updStruct((fin) => { fin.newHome.contractDate = D.valid(v) ? v : '2026-07-13'; }), { fk: 'p-contract-date', hint: '계약서의 계약일 — 신고기한(30일)이 여기서 계산돼요' }),
-        selectField('신고 상태', f.protect.rentReport, [['unknown', '모름 — 확인 필요'], ['done', '신고돼 있음 (신고필증 확인)'], ['late', '안 돼 있었음 → 지금 신고함']],
-          (v) => updStruct((fin) => { fin.protect.rentReport = v; }, { log: '자금흐름: 임대차 신고 상태 → ' + ({ unknown: '모름', done: '신고돼 있음', late: '지금 신고함' }[v] || v) }), { fk: 'p-report-state' })),
+        dateField('새 집 계약일', f.newHome.contractDate, (v) => upd((fin) => { fin.newHome.contractDate = D.valid(v) ? v : '2026-07-13'; }), { fk: 'p-contract-date', hint: '계약서의 계약일 — 신고기한(30일)이 여기서 계산돼요' }),
+        state),
       el('ul', { class: 'fn-ul small' },
         el('li', '확인: 중개사와 C에게 신고필증 사본을 요청 (신고됐다면 확정일자 부여일도)'),
         el('li', '안 됐으면: 주민센터나 부동산거래관리시스템(rtms)에서 양쪽 서명 계약서를 첨부해 바로 신고 — 지연기간이 짧을수록 과태료가 낮아요'),
@@ -2447,10 +2747,14 @@ div.fn-alert { cursor: default; }
     });
   }
 
+  function printMode(on) {
+    document.body.classList.toggle('fn-print-mode', !!on);
+    document.documentElement.classList.toggle('fn-print-mode', !!on);
+  }
   function openSheet(P) {
     if (P.sheet) { try { P.sheet.close(); } catch (e) { /* 무시 */ } }
     P.c = compute(MV.store.get()); // 조용히 저장된 메모·연락처까지 반영
-    document.body.classList.add('fn-print-mode');
+    printMode(true);
     const body = el('div', { class: 'fn-sheet' }, sheetContent(P));
     P.sheet = MV.ui.modal({
       title: D.fmtLong(P.c.move) + ' 당일 시트',
@@ -2459,7 +2763,7 @@ div.fn-alert { cursor: default; }
         { label: '닫기', kind: 'ghost' },
         { label: '🖨 인쇄하기', kind: 'primary', onClick: () => { try { window.print(); } catch (e) { /* 무시 */ } return false; } },
       ],
-      onClose: () => { document.body.classList.remove('fn-print-mode'); P.sheet = null; },
+      onClose: () => { printMode(false); P.sheet = null; },
     });
   }
 
@@ -2468,9 +2772,9 @@ div.fn-alert { cursor: default; }
     const memo = f.flow.memo || {};
     const rows = fl.steps.map((s) => {
       const cb = el('input', { type: 'checkbox', checked: !!s.done, 'aria-label': stepTitle(s.id, c) + ' 완료' });
-      cb.addEventListener('change', () => upd((fin) => { fin.flow.done[s.id] = cb.checked; }, { log: (cb.checked ? '✅ ' : '↩︎ ') + D.fmt(c.move) + ' ' + stepTitle(s.id, c) }));
+      cb.addEventListener('change', () => setStepDone(P, s.id, cb.checked));
       const extra = [];
-      if (s.splitN > 1) extra.push(s.splitN + '번 나눠: ' + splitSummary(s.split));
+      if (s.splitN > 1) extra.push(timesTxt(s.splitN) + ' 나눠: ' + splitSummary(s.split));
       if (memo[s.id]) extra.push('계좌: ' + memo[s.id]);
       if (s.id === 'recv') extra.push('잔액으로 확인한 뒤에만 열쇠 인계');
       if (s.id === 'toC') extra.push('계약서 특약의 C 본인 계좌만 · 잔금/월세 나눈 영수증');
@@ -2482,7 +2786,7 @@ div.fn-alert { cursor: default; }
         el('span', { class: 'fn-sheet-time' }, s.time || '—'),
         el('span', { class: 'fn-sheet-what' }, el('b', stepWho(s.id) + ' · ' + stepTitle(s.id, c)), extra.map((t) => el('small', t))),
         s.amount != null
-          ? el('span', { class: 'fn-sheet-amt' }, (s.kind === 'in' ? '+' : s.kind === 'out' ? '−' : '') + won(Math.abs(s.amount)), s.kind !== 'ext' ? el('small', '잔액 ' + won(s.balance)) : el('small', '내 통장 변화 없음'))
+          ? el('span', { class: 'fn-sheet-amt' }, s.kind === 'in' ? signedWon(s.amount) : s.kind === 'out' ? signedWon(-s.amount) : won(Math.abs(s.amount)), s.kind !== 'ext' ? el('small', '잔액 ' + won(s.balance)) : el('small', '내 통장 변화 없음'))
           : el('span', { class: 'fn-sheet-amt' }, ''));
     });
     const ct = f.contacts || {};
