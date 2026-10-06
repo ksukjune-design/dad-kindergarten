@@ -351,7 +351,7 @@
     { name: '자전거', cat: 'misc', tag: 'bike', w: 170, d: 60, h: 100 },
     { name: '피아노 (업라이트)', cat: 'misc', tag: 'piano', w: 150, d: 60, h: 125 },
     { name: '런닝머신', cat: 'misc', tag: 'treadmill', w: 75, d: 165, h: 130 },
-    { name: '리빙박스 70L', cat: 'misc', tag: 'box', w: 60, d: 44, h: 35 },
+    { name: '리빙박스 70리터', cat: 'misc', tag: 'box', w: 60, d: 44, h: 35 },
   ];
 
   /* ---------------- 두 집 차이 요약 (도면 추정값 기준) ---------------- */

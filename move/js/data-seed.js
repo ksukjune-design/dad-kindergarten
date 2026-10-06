@@ -698,6 +698,7 @@
         'buy': { from: { name: '가구구매' } },
       },
       removeItems: ['sort-clothes-05', 'sort-clothes-08', 'buy-03', 'buy-04', 'buy-08'],
+      renameGroups: { '짐정리': '사전 이삿짐 정리' },
       reorderParts: true,
     },
   ];

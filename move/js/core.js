@@ -322,6 +322,10 @@
         if (state.meta.deletedSeed.indexOf(iid) < 0) state.meta.deletedSeed.push(iid);
         n++;
       });
+      // 묶음 이름이 바뀐 경우: 사용자가 만들거나 이름을 고친 파트도 같은 새 묶음으로 옮겨요
+      Object.keys(m.renameGroups || {}).forEach((og) => {
+        state.parts.forEach((p) => { if (p.group === og) { p.group = m.renameGroups[og]; n++; } });
+      });
       if (m.reorderParts) {
         (seed.parts || []).forEach((sp, i) => {
           const p = state.parts.find((x) => x.id === sp.id);
