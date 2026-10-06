@@ -287,6 +287,19 @@
   function migrateSeed(state, seed) {
     const from = state.seedVersion || 0;
     let n = 0;
+    // 손대지 않은 기본 항목(완료·메모 없음, 한 번도 고치지 않음)은 새 기본 내용으로 바꿔요
+    const seedItems = new Map((seed.items || []).map((x) => [x.id, x]));
+    state.items.forEach((it) => {
+      const sp = seedItems.get(it.id);
+      if (!sp || !it.seed || it.done || (it.notes && it.notes.length) || it.updatedAt !== it.createdAt) return;
+      const keys = ['partId', 'title', 'detail', 'due', 'priority', 'owner', 'guide'];
+      const changed = keys.some((k) => (sp[k] === undefined ? (k === 'due' ? null : '') : sp[k]) !== it[k])
+        || JSON.stringify(sp.links || []) !== JSON.stringify(it.links || []);
+      if (!changed) return;
+      keys.forEach((k) => { it[k] = sp[k] === undefined ? (k === 'due' ? null : '') : MV.clone(sp[k]); });
+      it.links = MV.clone(sp.links || []);
+      n++;
+    });
     (seed.migrations || []).forEach((m) => {
       if (!(m.to > from && m.to <= seed.version)) return;
       Object.keys(m.parts || {}).forEach((pid) => {
