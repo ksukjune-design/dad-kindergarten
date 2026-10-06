@@ -80,8 +80,8 @@
   const isDesk = () => mq(MQ_DESK).matches;
   const isTouch = () => mq(MQ_TOUCH).matches;
   /* 메모 입력 안내: 화면 키보드에는 쉬프트가 없어 터치 화면에서는 엔터 = 줄바꿈, 저장은 '보내기' */
-  const NOTE_PH_TOUCH = '메모 남기기… (보내기 버튼으로 저장)';
-  const NOTE_PH_KEYS = '메모 남기기… (엔터: 저장 · 쉬프트+엔터: 줄바꿈)';
+  const NOTE_PH_TOUCH = '메모 남기기… (보내기로 저장)';   // 폰 한 줄에 들어가게 짧게
+  const NOTE_PH_KEYS = '메모 남기기… (엔터: 저장 · 쉬프트⁠+⁠엔터: 줄바꿈)';   // ⁠: '쉬프트+엔터' 가운데서 줄이 갈리지 않게
   /* 할 일 입력창 예시: 칸 너비에 맞는 것 중 가장 긴 것 (잘린 예시는 오히려 헷갈림) */
   const COMP_PH = ['할 일 추가… 예) 우리은행 방문 ~10/15 !중요 @아내', '할 일 추가… 예) 은행 ~10/15', '할 일 추가…'];
   const MOVE_PH = '📁 파트 옮기기';
@@ -257,8 +257,8 @@
       const t = terms.find((x) => low.includes(x));
       if (!t) continue;
       const i = low.indexOf(t);
-      const from = Math.max(0, i - 24);
-      const cut = (from ? '…' : '') + s.slice(from, i + t.length + 40).replace(/\s+/g, ' ') + (i + t.length + 40 < s.length ? '…' : '');
+      const from = Math.max(0, i - 10);   // 앞 글은 조금만: 폰 한 줄에서도 찾은 말이 잘리지 않게
+      const cut = (from ? '…' : '') + s.slice(from, i + t.length + 50).replace(/\s+/g, ' ') + (i + t.length + 50 < s.length ? '…' : '');
       return { icon, text: cut };
     }
     return null;
@@ -2196,7 +2196,7 @@
 .ck-th-back { flex: none; white-space: nowrap; padding: 0 8px; }
 .ck-th-part { flex: 0 1 auto; min-width: 0; max-width: 52%; min-height: 30px; font-size: .8rem; }
 .ck-th-part-t { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ck-move { flex: 0 1 160px; width: auto; min-width: 96px; max-width: 170px; min-height: 36px; padding: 4px 8px; font-size: .8rem; }
+.ck-move { flex: 0 1 132px; width: auto; min-width: 96px; max-width: 150px; min-height: 36px; padding: 4px 8px; font-size: .8rem; }   /* '📁 파트 옮기기' 가 다 보이는 너비 → 남는 자리는 파트 칩에 */
 .ck-th-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 14px 16px 20px; }
 .ck-th-top { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .ck-th-done { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 14px 0 8px; border: 1px solid var(--line-2); border-radius: 999px; background: var(--bg-2); color: var(--ink); font: inherit; font-size: .88rem; font-weight: 700; cursor: pointer; }
@@ -2404,7 +2404,7 @@ body:has(.ck) .toast button { white-space: nowrap; flex: none; }
 
   .ck-th-head { position: sticky; top: var(--topbar-h); z-index: 6; margin: -14px -16px 0; padding: 6px 10px 6px 4px; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(10px); }
   .ck-th-close { display: none; }
-  .ck-move { max-width: 46vw; min-width: 88px; }
+  .ck-move { max-width: 46vw; min-width: 124px; }   /* 옮기기 글자가 잘리지 않게: 좁으면 파트 칩이 먼저 줄어듦 */
   .ck-th-part { flex-shrink: 3; }   /* 좁으면 파트 칩이 먼저 줄어 '옮기기' 글자가 보이게 */
   .ck-th-back { padding: 0 6px; }
   .ck-th-body { overflow: visible; padding: 14px 0 16px; }

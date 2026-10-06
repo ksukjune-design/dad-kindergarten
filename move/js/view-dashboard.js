@@ -217,14 +217,30 @@
 .db-total.is-bad { background:var(--bad-bg); color:var(--bad); }
 .db-total span { font-weight:750; font-size:.88rem; }
 .db-total b { font-size:1.25rem; font-weight:900; font-variant-numeric:tabular-nums; letter-spacing:-.02em; }
+.db-alts { list-style:none; margin:6px 0 0; padding:0 2px; display:flex; flex-direction:column; gap:2px; }
+.db-alt { display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:0 10px; padding:3px 0; font-size:.82rem; color:var(--ink-2); }
+.db-alt-k { min-width:0; font-weight:650; }
+.db-alt-k small { font-size:.72rem; font-weight:500; color:var(--ink-3); }
+.db-alt b { margin-left:auto; font-weight:800; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.db-alt b.is-bad { color:var(--bad); }
+.db-alt b.is-good { color:var(--good); }
+.db-hug { display:inline-flex; align-items:center; min-height:36px; margin-top:2px; padding:0 2px; font-size:.8rem; font-weight:700; text-decoration:none; }
+.db-hug:hover { text-decoration:underline; }
 .db-basis { margin-top:8px; font-size:.74rem; color:var(--ink-3); }
 .db-warns { margin-top:8px; display:flex; flex-direction:column; gap:6px; }
 .db-warns .callout { margin:0; padding:7px 10px; font-size:.8rem; line-height:1.45; }
 
 /* 견적 */
 .db-est-label { font-size:.8rem; font-weight:700; color:var(--ink-3); }
+.db-est-head { display:flex; align-items:center; flex-wrap:wrap; gap:4px 8px; }
 .db-est-big { font-size:1.75rem; font-weight:900; letter-spacing:-.03em; line-height:1.15; font-variant-numeric:tabular-nums; }
+.db-vat { display:inline-flex; align-items:center; padding:1px 8px; border-radius:999px; background:var(--good-bg); color:var(--good); font-size:.72rem; font-weight:800; white-space:nowrap; }
+.db-vat.is-ex { background:var(--warn-bg); color:var(--warn); }
 .db-est-range { font-size:.85rem; color:var(--ink-2); font-variant-numeric:tabular-nums; }
+.db-est-lg { display:flex; align-items:flex-start; gap:6px; margin-top:8px; padding:7px 10px; border-radius:10px; background:var(--bg-3); font-size:.82rem; line-height:1.45; color:var(--ink-2); font-variant-numeric:tabular-nums; }
+.db-est-lg b { color:var(--ink); }
+.db-est-tot { font-weight:750; color:var(--ink); }
+.db-notes .db-note-tip { color:var(--ink-2); }
 .db-range { position:relative; height:8px; border-radius:999px; margin:10px 0 4px; background:linear-gradient(90deg, var(--good-bg), var(--warn-bg), var(--bad-bg)); border:1px solid var(--line); }
 .db-range i { position:absolute; top:50%; width:14px; height:14px; margin:-7px 0 0 -7px; border-radius:50%; background:var(--brand); border:2px solid var(--bg-2); box-shadow:var(--shadow); }
 .db-range-ends { display:flex; justify-content:space-between; font-size:.7rem; color:var(--ink-3); font-variant-numeric:tabular-nums; }
@@ -568,6 +584,9 @@ button.db-wk-head:hover { background:var(--bg-3); }
   /* ======================= 섹션: 11/3 돈 흐름 ======================= */
   const signed = (n, sign) => (sign > 0 ? '+' : '−') + MV.fmt.krw(Math.abs(n));
   const minus = (n) => (n < 0 ? '−' + MV.fmt.krw(-n) : MV.fmt.krw(n));   // 음수는 '−'(U+2212) 로 통일
+  // 결과는 '여유 X' / '부족 X' (부족이면 금액은 절댓값 — 이중 부정 X)
+  const verdict = (n) => (n < 0 ? '부족 ' : '여유 ') + MV.fmt.krw(Math.abs(n));
+  const HUG_HREF = '#/guide/hug';             // 별첨: HUG 보증, 가입할 때와 안 할 때 (실제 금액 비교)
   function ledgerRow(label, sub, amtText, cls, bal, title) {
     return el('div', { class: 'db-lr' + (cls === 'sum' ? ' is-sum' : '') },
       el('div', { class: 'db-lr-label' }, label, sub ? el('span', { class: 'db-lr-sub' }, sub) : null),
@@ -579,32 +598,94 @@ button.db-wk-head:hover { background:var(--bg-3); }
     if (typeof w === 'string') return w;
     return w.text || w.msg || w.message || w.title || '';
   }
+  /* 계획값 — 자금흐름 화면(MV.calc.financeSummary)이 없을 때만 씁니다.
+     가족 결정(2026-10-06) 반영: 옷장은 이사 뒤 간이 옷장(약 20만원, 선택·나중에) · 통돌이 약 50만원(이사 후 배송)
+     · 커튼·소품은 지금 것을 가져감(0원) · 입주청소는 직접(0원) · 예비비 없음.
+     11월 월세 70만원은 계약서상 후불이라 11/3에 낼 때만 — 낸다면 잔금(1억 + 1억 + 9,500만)과 따로 이체. */
+  const PLAN_FLOW = [
+    { label: '집주인 A에게 받을 돈', sub: '보증금 4.2억 − 먼저 받은 0.42억', amt: 378000000, sign: 1 },
+    { label: '우리은행 전세대출 상환', sub: '남은 대출 0.78억 (일할이자가 조금 붙을 수 있어요)', amt: 78000000, sign: -1 },
+    { label: '집주인 C 잔금', sub: '1억 + 1억 + 9,500만으로 나눠 이체', amt: 295000000, sign: -1 },
+    { label: '11월 월세 (11/3에 낸다면)', sub: '계약서상 후불 — 낸다면 잔금과 따로 이체하고 영수증도 따로 받기', amt: 700000, sign: -1 },
+    { label: '중개보수 (상한)', sub: '법정 상한 117만원 · 부가세 별도', amt: 1170000, sign: -1 },
+  ];
+  function planCosts() {
+    let est = null;
+    try { est = MV.calc && typeof MV.calc.moveEstimate === 'function' ? MV.calc.moveEstimate(MV.store.get()) : null; } catch (e) { est = null; }
+    const pay = est && est.pay && isNum(est.pay.typical) ? est.pay.typical : null;
+    const lg = est && est.lgCost && isNum(est.lgCost.typical) ? est.lgCost.typical : null;
+    const essential = (pay != null ? pay : 2167000)       // 이사업체 (부가세 포함, 모델 중간값)
+      + (lg != null ? lg : 565000)                         // LG 가전 이전설치
+      + 50000 + 100000 + 20000;                            // 대형폐기물 · 엘리베이터(두 단지) · 인터넷 이전
+    return { essential, purchase: 500000, optional: 200000 + 780800, fromEst: pay != null };
+  }
+  /* 결과: 머리 숫자는 '꼭 필요한 현금 기준'(11/3 남는 돈 − 꼭 드는 이사 비용), 아래 작은 줄에 살림 구입까지 / 전부 포함 */
+  function cashResult(r) {
+    const box = el('div', { class: 'db-result' });
+    const bad = r.netEssential < 0;
+    box.appendChild(el('div', { class: 'db-total' + (bad ? ' is-bad' : '') },
+      el('span', '꼭 필요한 현금 기준'),
+      el('b', { title: MV.fmt.won(r.netEssential) }, (bad ? '⚠ ' : '') + verdict(r.netEssential))));
+    const alts = [];
+    if (isNum(r.netWithPurchases)) {
+      alts.push(el('li', { class: 'db-alt' },
+        el('span', { class: 'db-alt-k' }, '살림 구입까지 포함하면',
+          isNum(r.purchase) && r.purchase > 0 ? el('small', ' (통돌이 세탁기 등 +' + MV.fmt.krw(r.purchase) + ')') : null),
+        el('b', { class: r.netWithPurchases < 0 ? 'is-bad' : 'is-good', title: MV.fmt.won(r.netWithPurchases) }, verdict(r.netWithPurchases))));
+    }
+    if (isNum(r.net)) {
+      alts.push(el('li', { class: 'db-alt' },
+        el('span', { class: 'db-alt-k' }, '전부 포함하면',
+          isNum(r.optional) && r.optional > 0 ? el('small', ' (간이 옷장·HUG 보증료 등 +' + MV.fmt.krw(r.optional) + ', 이사 뒤)') : null),
+        el('b', { class: r.net < 0 ? 'is-bad' : 'is-good', title: MV.fmt.won(r.net) }, verdict(r.net))));
+    }
+    if (alts.length) box.appendChild(el('ul', { class: 'db-alts' }, alts));
+    box.appendChild(el('a', { class: 'db-hug', href: HUG_HREF }, '🛡 HUG 보증료는 선택 — 가입할 때와 안 할 때 비교 →'));
+    return box;
+  }
   function moneyCard() {
     let fs = null;
     try {
       if (MV.calc && typeof MV.calc.financeSummary === 'function') fs = MV.calc.financeSummary(MV.store.get());
     } catch (e) { console.warn('[dashboard] financeSummary 실패', e); fs = null; }
-    const ok = fs && typeof fs === 'object' && ['inflow', 'outflow', 'leftover', 'net'].some((k) => isNum(fs[k]));
+    const ok = fs && typeof fs === 'object' && ['inflow', 'outflow', 'leftover', 'net', 'netEssential'].some((k) => isNum(fs[k]));
     const body = el('div');
     if (ok) {
       const inflow = isNum(fs.inflow) ? fs.inflow : null;
       const outflow = isNum(fs.outflow) ? fs.outflow : null;
       const leftover = isNum(fs.leftover) ? fs.leftover : (inflow != null && outflow != null ? inflow - outflow : null);
       const exp = isNum(fs.expensesTotal) ? fs.expensesTotal : null;
-      // 최종 여유: net 이 오거나 이사 비용을 뺄 수 있을 때만. 둘 다 없으면 '남는 돈'을 마지막 줄(합계 상자)로 한 번만 보여 줍니다.
-      const net = isNum(fs.net) ? fs.net : (leftover != null && exp != null ? leftover - exp : null);
+      const rent = isNum(fs.rentPart) && fs.rentPart > 0 ? fs.rentPart : 0;
       const led = el('div', { class: 'db-ledger' });
       if (inflow != null) led.appendChild(ledgerRow('받을 돈', '11/3 오전 보증금 잔액 등', signed(inflow, 1), 'in', null, MV.fmt.won(inflow)));
-      if (outflow != null) led.appendChild(ledgerRow('나갈 돈', '대출 상환 · 잔금 · 월세 · 중개보수', signed(outflow, -1), '', null, MV.fmt.won(outflow)));
-      if (leftover != null && net != null) led.appendChild(ledgerRow('남는 돈', null, minus(leftover), 'sum', null, MV.fmt.won(leftover)));
-      if (exp != null) led.appendChild(ledgerRow('이사 비용', '이사업체 · 가전 이전 · 구매 등', signed(exp, -1), '', null, MV.fmt.won(exp)));
-      body.appendChild(led);
-      const fin = net != null ? net : leftover;
-      if (fin != null) {
-        // 라벨이 '부족'이면 금액은 절댓값으로 (이중 부정 X)
-        const label = net != null ? (fin < 0 ? '⚠ 최종 부족' : '최종 여유') : (fin < 0 ? '⚠ 부족' : '남는 돈');
-        body.appendChild(el('div', { class: 'db-total' + (fin < 0 ? ' is-bad' : '') },
-          el('span', label), el('b', { title: MV.fmt.won(fin) }, MV.fmt.krw(Math.abs(fin)))));
+      if (outflow != null) {
+        led.appendChild(ledgerRow('나갈 돈', '대출 상환 · 잔금 · 중개보수' + (rent ? ' · 11월 월세 ' + MV.fmt.krw(rent) + '(잔금과 따로 이체)' : ''),
+          signed(outflow, -1), '', null, MV.fmt.won(outflow)));
+      }
+      if (isNum(fs.netEssential)) {
+        // 새 요약: 묶음별 (꼭 드는 이사 비용 / 새로 사는 살림 / 선택·나중에)
+        const left = leftover != null ? leftover : null;
+        const essential = isNum(fs.essentialUnpaid) ? fs.essentialUnpaid : (left != null ? left - fs.netEssential : null);
+        const nwp = isNum(fs.netWithPurchases) ? fs.netWithPurchases : null;
+        const net = isNum(fs.net) ? fs.net : null;
+        const purchase = isNum(fs.purchaseUnpaid) ? fs.purchaseUnpaid : (nwp != null ? fs.netEssential - nwp : null);
+        const optional = isNum(fs.optionalUnpaid) ? fs.optionalUnpaid : (nwp != null && net != null ? nwp - net : null);
+        if (left != null) led.appendChild(ledgerRow('남는 돈', null, minus(left), 'sum', null, MV.fmt.won(left)));
+        if (essential != null) led.appendChild(ledgerRow('꼭 드는 이사 비용', '이사업체 · LG 가전 이전 · 엘리베이터 등 (아직 안 낸 돈)', signed(essential, -1), '', null, MV.fmt.won(essential)));
+        body.appendChild(led);
+        body.appendChild(cashResult({ netEssential: fs.netEssential, netWithPurchases: nwp, net, purchase, optional }));
+      } else {
+        // 예전 요약 (묶음 없음): 최종 여유 = 남는 돈 − 아직 낼 이사 비용 전부
+        const net = isNum(fs.net) ? fs.net : (leftover != null && exp != null ? leftover - exp : null);
+        if (leftover != null && net != null) led.appendChild(ledgerRow('남는 돈', null, minus(leftover), 'sum', null, MV.fmt.won(leftover)));
+        if (exp != null) led.appendChild(ledgerRow('이사 비용', '이사업체 · 가전 이전 · 살림 구입 등', signed(exp, -1), '', null, MV.fmt.won(exp)));
+        body.appendChild(led);
+        const fin = net != null ? net : leftover;
+        if (fin != null) {
+          const label = net != null ? '이사 비용까지 모두 내면' : '남는 돈';
+          body.appendChild(el('div', { class: 'db-total' + (fin < 0 ? ' is-bad' : '') },
+            el('span', label), el('b', { title: MV.fmt.won(fin) }, (fin < 0 ? '⚠ ' : '') + verdict(fin))));
+        }
       }
       const warns = (Array.isArray(fs.warnings) ? fs.warnings : []).map(warnText).filter(Boolean);
       if (warns.length) {
@@ -613,25 +694,22 @@ button.db-wk-head:hover { background:var(--bg-3); }
         if (warns.length > 3) box.appendChild(el('a', { class: 'db-more db-more-rest', href: '#/money' }, '주의사항 ' + (warns.length - 3) + '개 더 →'));
         body.appendChild(box);
       }
-      body.appendChild(el('div', { class: 'db-basis' }, '자금흐름 화면에 입력한 값 기준'));
+      body.appendChild(el('div', { class: 'db-basis' }, '자금흐름 화면에 입력한 값 기준 · 꼭 필요한 현금 = 남는 돈 − 꼭 드는 이사 비용'));
     } else {
-      // 계획값 (사용자가 정리한 11/3 흐름)
-      const steps = [
-        { label: '집주인 A에게 받을 돈', sub: '보증금 4.2억 − 먼저 받은 0.42억', amt: 378000000, sign: 1 },
-        { label: '우리은행 전세대출 상환', sub: '남은 대출 0.78억', amt: 78000000, sign: -1 },
-        { label: '집주인 C 잔금 + 11월 월세', sub: '2억 9,500만 + 70만 (월세는 계약서상 후불 — 확인)', amt: 295700000, sign: -1 },
-        { label: '중개보수 (상한)', sub: '법정 상한 117만원 · 부가세 별도', amt: 1170000, sign: -1 },
-      ];
+      // 계획값 (자금흐름 화면이 없을 때): 11/3 흐름 → 남는 돈 → 가족이 정한 이사 비용 묶음
       let bal = 0;
       const led = el('div', { class: 'db-ledger' });
-      steps.forEach((s) => {
+      PLAN_FLOW.forEach((s) => {
         bal += s.sign * s.amt;
         led.appendChild(ledgerRow(s.label, s.sub, signed(s.amt, s.sign), s.sign > 0 ? 'in' : '', bal, MV.fmt.won(s.amt)));
       });
+      const pc = planCosts();
+      led.appendChild(ledgerRow('꼭 드는 이사 비용 (약)', (pc.fromEst ? '이사업체(견적 계산값)' : '이사업체') + ' · LG 가전 이전 · 엘리베이터 · 폐기물 · 인터넷',
+        signed(pc.essential, -1), '', null, MV.fmt.won(pc.essential)));
       body.appendChild(led);
-      body.appendChild(el('div', { class: 'db-total' + (bal < 0 ? ' is-bad' : '') },
-        el('span', bal < 0 ? '⚠ 부족 (약)' : '남는 돈 (약)'), el('b', { title: MV.fmt.won(bal) }, MV.fmt.krw(Math.abs(bal)))));
-      body.appendChild(el('div', { class: 'db-basis' }, '계획값 기준 · 이사비·가전 이전비는 아직 빠져 있어요. 자금흐름 화면에서 실제 금액을 넣으면 자동으로 바뀝니다.'));
+      const nE = bal - pc.essential;
+      body.appendChild(cashResult({ netEssential: nE, netWithPurchases: nE - pc.purchase, net: nE - pc.purchase - pc.optional, purchase: pc.purchase, optional: pc.optional }));
+      body.appendChild(el('div', { class: 'db-basis' }, '계획값 기준 (약) · 옷장은 이사 뒤 간이 옷장(선택·나중에), 커튼·소품은 지금 것, 입주청소는 직접, 예비비는 없어요. 11월 월세는 11/3에 낼 때만 넣었어요. 자금흐름 화면에서 실제 금액을 넣으면 자동으로 바뀝니다.'));
     }
     return el('section', { class: 'card db-money', 'aria-label': '11월 3일 돈 흐름' },
       head('💸', (moveDay() ? md(moveDay()) : '이사일') + ' 돈 흐름', null, moreLink('자금흐름 자세히 →', '#/money')),
@@ -653,28 +731,47 @@ button.db-wk-head:hover { background:var(--bg-3); }
     const body = el('div');
     const ok = est && typeof est === 'object' && isNum(est.typical);
     if (ok) {
-      const low = isNum(est.low) ? est.low : est.typical;
-      const high = isNum(est.high) ? est.high : est.typical;
-      body.appendChild(el('div', { class: 'db-est-label' }, '예상 이사비'));
-      body.appendChild(el('div', { class: 'db-est-big', title: MV.fmt.won(est.typical) }, '약 ' + MV.fmt.krw(est.typical)));
+      // 머리 숫자는 자금 화면·LG 비교와 같은 '실제로 낼 돈'(부가세 포함, est.pay). 없으면 기준가를 쓰고 부가세 기준을 밝혀 둠
+      const pay = est.pay && typeof est.pay === 'object' && isNum(est.pay.typical) ? est.pay : null;
+      const typ = pay ? pay.typical : est.typical;
+      const low = pay ? (isNum(pay.low) ? pay.low : typ) : (isNum(est.low) ? est.low : typ);
+      const high = pay ? (isNum(pay.high) ? pay.high : typ) : (isNum(est.high) ? est.high : typ);
+      const vatIn = pay ? true : !!est.vatIncl;
+      const vatTxt = vatIn ? '부가세 포함' : '부가세 별도';
+      // 부가세 별도 금액은 보조 숫자로 (견적서가 부가세 별도로 올 때 비교용)
+      const exTyp = pay ? (est.ex && isNum(est.ex.typical) ? est.ex.typical : (!est.vatIncl ? est.typical : null)) : null;
+      body.appendChild(el('div', { class: 'db-est-label' }, '예상 이사비 · 이삿짐센터'));
+      body.appendChild(el('div', { class: 'db-est-head' },
+        el('span', { class: 'db-est-big', title: MV.fmt.won(typ) + ' (' + vatTxt + ')' }, '약 ' + MV.fmt.krw(typ)),
+        el('span', { class: 'db-vat' + (vatIn ? '' : ' is-ex') }, vatTxt)));
       body.appendChild(el('div', { class: 'db-est-range' }, '범위 ' + MV.fmt.krw(low) + ' ~ ' + MV.fmt.krw(high) +
-        (isNum(est.tons) ? ' · 짐량 약 ' + (Math.round(est.tons * 10) / 10) + '톤' : '')));
+        (exTyp != null && Math.abs(exTyp - typ) >= 1 ? ' · 부가세 별도 약 ' + MV.fmt.krw(exTyp) : '')));
       if (high > low) {
-        const pos = MV.clamp((est.typical - low) / (high - low), 0, 1);
+        const pos = MV.clamp((typ - low) / (high - low), 0, 1);
         body.appendChild(el('div', { class: 'db-range', 'aria-hidden': 'true' }, el('i', { style: { left: Math.round(pos * 100) + '%' } })));
         body.appendChild(el('div', { class: 'db-range-ends', 'aria-hidden': 'true' }, el('span', MV.fmt.krw(low)), el('span', MV.fmt.krw(high))));
       }
       const facts = el('div', { class: 'db-facts' });
-      if (isNum(est.tons)) facts.appendChild(el('span', { class: 'chip' }, '📦 약 ' + (Math.round(est.tons * 10) / 10) + '톤'));
+      if (isNum(est.tons)) facts.appendChild(el('span', { class: 'chip' }, '📦 짐량 약 ' + (Math.round(est.tons * 10) / 10) + '톤'));
       if (isNum(est.crew)) facts.appendChild(el('span', { class: 'chip' }, '👷 ' + est.crew + '명'));
-      const lgc = est.lgCost;
-      if (lgc && isNum(lgc.typical) && lgc.typical > 0) {
-        facts.appendChild(el('span', { class: 'chip kid', title: isNum(lgc.low) && isNum(lgc.high) ? MV.fmt.krw(lgc.low) + ' ~ ' + MV.fmt.krw(lgc.high) : null }, '🔌 LG 이전 약 ' + MV.fmt.krw(lgc.typical)));
-      }
       facts.appendChild(el('span', { class: 'chip' }, '짐 ' + inv.count + '개'));
       body.appendChild(facts);
+      // LG 이전설치는 LG에 따로 내는 돈 (소비자가, 부가세 포함) — 이삿짐센터 금액에 섞지 않고 따로 보여 줌
+      const lgc = est.lgCost;
+      if (lgc && isNum(lgc.typical) && lgc.typical > 0) {
+        const tot = est.totalPay && isNum(est.totalPay.typical) ? est.totalPay.typical : (pay ? typ + lgc.typical : null);
+        body.appendChild(el('div', { class: 'db-est-lg', title: isNum(lgc.low) && isNum(lgc.high) ? 'LG 이전 ' + MV.fmt.krw(lgc.low) + ' ~ ' + MV.fmt.krw(lgc.high) + ' (부가세 포함)' : null },
+          el('span', { 'aria-hidden': 'true' }, '🔌'),
+          el('span', 'LG 이전설치는 따로 약 ', el('b', MV.fmt.krw(lgc.typical)), ' (부가세 포함)',
+            tot != null ? el('span', { class: 'db-est-tot' }, ' → 이사 전체 약 ' + MV.fmt.krw(tot)) : null)));
+      }
       const notes = (Array.isArray(est.notes) ? est.notes : []).map(warnText).filter(Boolean);
-      if (notes.length) body.appendChild(el('ul', { class: 'db-notes' }, notes.slice(0, 3).map((t) => el('li', t))));
+      const list = notes.slice(0, 3).map((t) => el('li', t));
+      // 가족 결정 (10/6): 옷장은 이사 뒤에 사니, 옷은 박스·행거박스로 — 견적 받을 때 행거박스 수를 꼭 물어보기
+      if (!notes.some((t) => t.indexOf('행거박스') >= 0)) {
+        list.push(el('li', { class: 'db-note-tip' }, '👕 옷장은 이사 뒤에 사요 — 업체가 행거박스를 몇 개 가져오는지 묻고 견적에 넣으세요.'));
+      }
+      if (list.length) body.appendChild(el('ul', { class: 'db-notes' }, list));
     } else {
       body.appendChild(el('p', { class: 'small mb-0' }, inv.count
         ? '짐 목록 ' + inv.count + '개가 있어요. 냉장고·에어컨·가구 규격을 채우면 예상 이사비와 짐량(톤)이 자동으로 계산돼요.'
@@ -812,10 +909,27 @@ button.db-wk-head:hover { background:var(--bg-3); }
   }
   // 칸 하나를 새로 그려 바꿔 끼우기 (칸 안 세로 스크롤·포커스 유지)
   // 칸 높이를 넘는 데스크톱 칸: 아래에 더 있으면 끝을 흐리게 (칸 안에서 스크롤된다는 신호)
-  function fade(b) {
-    if (b && b.classList) b.classList.toggle('has-more', b.scrollHeight - b.scrollTop - b.clientHeight > 4);
+  /* 성능: 칸마다 '읽기(scrollHeight) → 쓰기(클래스)'를 번갈아 하면 칸 수만큼 레이아웃을 다시 계산해요 (가로 화면에서 체크가 느렸던 원인).
+     그래서 먼저 모든 칸을 한꺼번에 읽고, 그다음 바뀐 칸의 클래스만 한꺼번에 바꿉니다. */
+  function fade(bodies) {
+    const list = Array.isArray(bodies) ? bodies : [bodies];
+    const more = list.map((b) => (b && b.classList ? b.scrollHeight - b.scrollTop - b.clientHeight > 4 : null));
+    list.forEach((b, k) => { if (more[k] != null && b.classList.contains('has-more') !== more[k]) b.classList.toggle('has-more', more[k]); });
   }
-  function fadeAll(root) { root.querySelectorAll('.db-road.is-cols .db-wk-body').forEach(fade); }
+  function fadeAll(root) { fade(Array.from(root.querySelectorAll('.db-road.is-cols .db-wk-body'))); }
+  // 칸 안 세로 스크롤: 스크롤 이벤트마다 바로 읽지 않고 다음 프레임에 모아서 한 번에
+  const fadeQ = new Set();
+  let fadeRaf = 0;
+  function fadeSoon(b) {
+    fadeQ.add(b);
+    if (fadeRaf) return;
+    fadeRaf = requestAnimationFrame(() => {
+      fadeRaf = 0;
+      const list = Array.from(fadeQ).filter((x) => x.isConnected);
+      fadeQ.clear();
+      fade(list);
+    });
+  }
   function swapCol(col, make, focusSel) {
     const ob = col.querySelector('.db-wk-body');
     const st = ob ? ob.scrollTop : 0;
@@ -823,9 +937,9 @@ button.db-wk-head:hover { background:var(--bg-3); }
     col.replaceWith(nc);
     const nb = nc.querySelector('.db-wk-body');
     if (nb && st) nb.scrollTop = st;
-    if (nb && nc.closest('.db-road.is-cols')) fade(nb);
     const f = focusSel ? nc.querySelector(focusSel) : null;
     if (f) f.focus({ preventScroll: true });
+    if (nb && nc.closest('.db-road.is-cols')) fade(nb);     // 쓰기(스크롤·포커스)를 마친 뒤 마지막에 한 번 읽기
     return nc;
   }
   function dayStrip(w, m, items) {
@@ -1107,7 +1221,7 @@ button.db-wk-head:hover { background:var(--bg-3); }
         const t = e.target;
         if (!t || !t.classList) return;
         if (t.classList.contains('db-road-scroll')) saveSoon();
-        else if (t.classList.contains('db-wk-body')) fade(t);
+        else if (t.classList.contains('db-wk-body')) fadeSoon(t);
       }, { capture: true, passive: true });
       const onResize = MV.debounce(() => { if (alive) fadeAll(root); }, 150);
       window.addEventListener('resize', onResize, { passive: true });
@@ -1128,7 +1242,7 @@ button.db-wk-head:hover { background:var(--bg-3); }
         const ae = document.activeElement;
         const focusId = ae && root.contains(ae) && ae.dataset ? ae.dataset.id : null;
         root.replaceChildren(build(isAcc()));
-        fadeAll(root);
+        // 쓰기(가로 스크롤·포커스) → 읽기(세로 스크롤·칸 흐림) 순서로 모아서, 다시 그릴 때 레이아웃 계산이 한 번만 일어나게
         const nsc = root.querySelector('.db-road-scroll');
         if (nsc && ui.roadScroll) nsc.scrollLeft = ui.roadScroll;
         if (focusId) {
@@ -1136,6 +1250,7 @@ button.db-wk-head:hover { background:var(--bg-3); }
           if (f) f.focus({ preventScroll: true });
         }
         if (Math.abs(window.scrollY - y) > 1) window.scrollTo(0, y);
+        fadeAll(root);
       };
       let pending = false;
       const schedule = (e) => {
@@ -1152,9 +1267,9 @@ button.db-wk-head:hover { background:var(--bg-3); }
       }
       ctx.onCleanup(() => { alive = false; });
       root.appendChild(build(isAcc()));
-      fadeAll(root);
       const sc0 = root.querySelector('.db-road-scroll');
       if (sc0 && ui.roadScroll && !isAcc()) sc0.scrollLeft = ui.roadScroll;
+      fadeAll(root);
       if (restore && isNum(restore.y) && restore.y > 0) {
         // MV.rerender 가 화면을 바꾸면서 맨 위로 올린 다음에 제자리로
         const y = restore.y;

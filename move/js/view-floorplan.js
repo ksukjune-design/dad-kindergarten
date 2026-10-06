@@ -23,8 +23,12 @@
             ui.plan   = { grid, snap, zoom:{new,old}, filter, infoOpen, laundryRoom, bgPanel }
    조작     끌기(마우스·터치·펜, 도면 밖으로는 못 나감 · 가장자리에서 자동 스크롤) · 두 손가락 확대/축소(도면만)
             키보드 단축키는 도면에 초점이 있거나 마우스가 도면 위에 있을 때만 (방향키·R·Delete·Esc)
-            ✏️ 치수 수정 도구: 방 고치기(누르기) · 방 그리기(끌기) · 문 추가(벽 누르기) · 문 삭제(문 누르기) · 전체 크기
+            ✏️ 치수 수정 도구: 방 고치기(누르기) · 방 그리기(끌기 또는 🔢 숫자로) · 문 추가(벽 누르기) · 문 삭제(문 누르기, 손가락 칸 44px) · 전체 크기
+              폰·태블릿 폭에선 도구 줄이 화면 위로 밀려 나가면 아래 메뉴 위에 '따라다니는 도구 줄'이 뜸
+              방을 옮기거나 크기를 바꾸면 그 방에 단 문(doorsAdded.room)도 같은 벽을 따라 옮김 · 지운 방 쪽으로 열리던 문은 남은 방 쪽으로 뒤집어 그림
             🖼 평면도 사진: 고르기 → 📏 축척 맞추기(두 점 + 실제 길이 → 왼쪽 위 모서리) · ✋ 위치 옮기기 · 돌리기 · 진하기
+              ⬇ 이미지 저장 때 사진이 보이면 사진도 넣을지 물어봄
+            이 화면에서 연 창(방·크기·확인)은 화면을 떠나면(뒤로 가기 포함) 함께 닫힘
    제공     MV.calc.planSummary() → { new:{placed,needed,bad,warn}, old:{...}, closet:{...} }
    ============================================================ */
 (function () {
@@ -1711,6 +1715,8 @@
   .fp-editbar > .fp-sizebtn { order: 2; }
   .fp-editbar > .fp-ebtn { order: 3; }
   .fp-editbar > .fp-done { margin-left: auto; }
+  .fp-editbar { padding: 10px; gap: 8px 4px; }
+  .fp-editbar > .fp-sizebtn, .fp-editbar > .fp-ebtn { padding: 0 7px; }
   .fp-dock .btn { min-width: 54px; padding: 3px 4px; }
   .fp-bgscale { display: none; }
   .fp-wizbar { top: calc(var(--topbar-h) + 4px); padding: 8px 10px; }
@@ -1990,12 +1996,13 @@
       placeDock();
       if (fd) { const b2 = dock.querySelector('[data-dock="' + fd + '"]'); if (b2 && !dock.hidden) b2.focus({ preventScroll: true }); }
     }
-    /** 위 도구 줄이 위 막대 뒤로 사라졌고 도면 카드는 아직 보이면 띄움 */
+    /** 위 도구 단추 줄이 위 막대 뒤로 사라졌고 도면 카드는 아직 보이면 띄움 (폰·태블릿 폭에서만) */
     function placeDock() {
       let on = false, pc = null;
       if (editMode && !wiz && root.isConnected && mm('(max-width: 860px)')) {
         const top = pxv('--topbar-h', 56);
-        const eb = editBar.getBoundingClientRect();
+        // 도구 단추 줄이 위 막대 뒤로 들어가면 (설명·완료 줄이 아직 보여도) 띄움
+        const eb = (editBar.querySelector('.fp-tools') || editBar).getBoundingClientRect();
         pc = planCard.getBoundingClientRect();
         on = eb.bottom < top + 4 && pc.bottom > top + 160;
       }
@@ -2698,7 +2705,8 @@
           addedRooms.length ? [el('h3', '➕ 직접 그린 방'), el('ul', addedRooms.map((r) => el('li', r.name + ' (' + kindLabel(r.kind) + ') ' + Math.round(r.w) + '×' + Math.round(r.h) + 'cm · ' + fmtA(area(r)))))] : null,
           plan.removed.length ? [el('h3', '🗑 지운 방'), el('ul', { class: 'fp-del-list' }, plan.removed.map((r) => el('li', el('span', r.name + ' ' + Math.round(r.w) + '×' + Math.round(r.h) + 'cm'),
             el('button', { type: 'button', class: 'btn btn-sm fp-b', onclick: () => restoreRoom(r), 'aria-label': r.name + ' 되살리기' }, '↩ 되살리기')))),
-          el('p', { class: 'tiny muted mb-0' }, '지운 방에만 붙어 있던 문·창·고정물은 도면에서 숨겨져요.')] : null,
+          el('p', { class: 'tiny muted mb-0' }, '지운 방에만 붙어 있던 문·창·고정물은 도면에서 숨겨져요.'
+            + (plan.doors.some((d) => d._flipped) ? ' 지운 방 쪽으로 열리던 문 ' + plan.doors.filter((d) => d._flipped).length + '개는 남은 방 쪽으로 열리게 그렸어요 — 실제 방향은 현장에서 확인하세요.' : ''))] : null,
           plan.sizeEdited ? [el('h3', '📐 전체 크기'), el('p', { class: 'small mb-0' }, Math.round(plan.baseSize.width) + '×' + Math.round(plan.baseSize.depth) + ' → ' + Math.round(plan.width) + '×' + Math.round(plan.depth) + 'cm')] : null,
           plan.edits.doorsAdded || plan.edits.doorsDeleted ? [el('h3', '🚪 문'), el('p', { class: 'small mb-0' }, [plan.edits.doorsAdded ? '추가 ' + plan.edits.doorsAdded + '개' : '', plan.edits.doorsDeleted ? '삭제 ' + plan.edits.doorsDeleted + '개' : ''].filter(Boolean).join(' · '))] : null,
           plan.edited ? el('button', { type: 'button', class: 'btn btn-sm btn-danger fp-b mt-8', onclick: resetAllRooms }, '도면 전체 원래대로') : null));

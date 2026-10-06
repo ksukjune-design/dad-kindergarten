@@ -276,6 +276,8 @@
       items: (seed.items || []).map((it, i) => normItem(Object.assign({ order: i }, MV.clone(it)), true)),
       inventory: (seed.inventory || []).map((it) => normInv(MV.clone(it), true)),
       activity: [{ at: now, text: '이사 관리 시작 — 기본 체크리스트를 불러왔습니다.' }],
+      // 큰 가전을 도면에 미리 놓아 둔 기본 배치 (data-layouts.js)
+      layouts: MV.seedLayouts ? MV.clone(MV.seedLayouts) : undefined,
     };
   }
   function mergeSeed(state) {

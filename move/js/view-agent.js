@@ -7,9 +7,14 @@
    라우트   #/agent        대화 화면 (메뉴 order 15, 기능이 있을 때만 nav 표시)
    대화     이 브라우저의 localStorage 'mv:agent:chat' 에 마지막 40개 (보는 사람마다 따로)
             매 요청 = [지시 턴(오늘·사실·앱 데이터 요약 JSON·규칙)] + 최근 대화 12턴 (120KB 이하)
-   도구     sample.limits().tools 가 있을 때만 — 할 일·메모·파트·예산·견적·짐 목록 읽기/고치기.
+   도구     sample.limits().tools 가 있을 때만 (없으면 요약만 보고 답하고 '직접 고치세요'로 안내)
+            읽기: get_overview, list_items, get_item, list_parts, get_budget, get_estimate,
+                  get_workplan(주별 일정), get_move_day(이사 당일 순서), list_inventory
+            고치기: update_item, add_item, add_note, update_budget, add_budget_line,
+                  add_quote, update_quote, update_inventory, add_inventory
             고치는 도구는 MV.items/MV.inv/MV.store.update 로만 바꾸고 활동 기록에 '🤖 ' 를 붙입니다.
-            삭제 도구는 없습니다.
+            삭제 도구는 없습니다. 자금흐름 상태가 아직 없으면 자금흐름 화면이 기본값을 만들게 합니다.
+   🤖 버튼  #/agent 가 아닌 모든 화면 오른쪽 아래 (모달이 열리면 숨김, 화면 아래 입력줄이 있으면 그 위로)
    되돌리기 요청 직전 상태를 MV.clone 으로 떠 두고, 답 아래 '변경 n건' 상자에서 한 번에 되돌림
             (MV.store.restore). 이후 데이터가 바뀌면 되돌리기를 막습니다. 새로고침하면 사라짐.
    오류     sample 오류 코드마다 한국어 안내, 자동 재시도 없음 (사용자가 '다시 보내기').
@@ -184,12 +189,7 @@
     return { msgs };
   }
   function saveChat() {
-    const msgs = R.chat.msgs.slice(-KEEP_MSGS).map((m) => {
-      const o = Object.assign({}, m);
-      delete o.status_; // 화면 전용
-      return o;
-    });
-    lsSet(CHAT_KEY, JSON.stringify({ v: 1, msgs }));
+    lsSet(CHAT_KEY, JSON.stringify({ v: 1, msgs: R.chat.msgs.slice(-KEEP_MSGS) }));
   }
   function loadPrefs() {
     try { const o = JSON.parse(lsGet(PREF_KEY) || '{}'); return { quick: !!(o && o.quick) }; } catch (e) { return { quick: false }; }
@@ -268,13 +268,22 @@
     const cs = getComputedStyle(n);
     return /(auto|scroll)/.test(cs.overflowY) && n.scrollHeight > n.clientHeight + 2;
   }
-  function pinned(ctl) {
+  /** ctl 이 화면 아래쪽에 붙어 있는 입력줄(바닥 막대)이면 그 막대의 윗변 y, 아니면 null */
+  function bottomBarTop(ctl) {
+    const vh = window.innerHeight;
     for (let n = ctl; n && n !== document.body && n !== document.documentElement; n = n.parentElement) {
       const pos = getComputedStyle(n).position;
-      if (pos === 'fixed' || pos === 'sticky') return true;
-      if (n !== ctl && scrollable(n)) return false;
+      if (pos === 'fixed' || pos === 'sticky') {
+        const r = n.getBoundingClientRect();
+        // 목차처럼 위아래로 긴 고정 영역은 올려도 소용없으니 그대로 둠
+        return (r.height < vh * 0.4 && r.bottom > vh * 0.6) ? r.top : null;
+      }
+      if (n !== ctl && scrollable(n)) return null;
     }
-    return document.documentElement.scrollHeight <= window.innerHeight + 2;
+    // 페이지가 스크롤되지 않는 화면(예: 데스크톱 체크리스트)에서 아래쪽에 있는 버튼·입력칸
+    if (document.documentElement.scrollHeight > vh + 2) return null;
+    const r = ctl.getBoundingClientRect();
+    return r.bottom > vh * 0.7 ? r.top : null;
   }
   function probeFab() {
     const r = fab.getBoundingClientRect();
@@ -287,9 +296,9 @@
         const e = document.elementFromPoint(x, y);
         if (!e || e === fab || fab.contains(e) || e.closest('#nav, .toast-wrap, .modal-back')) return;
         const ctl = e.closest('button, a[href], input, textarea, select, [role="button"], [contenteditable="true"]');
-        if (!ctl || !pinned(ctl)) return;
-        const t = ctl.getBoundingClientRect().top;
-        if (top === null || t < top) top = t;
+        if (!ctl) return;
+        const t = bottomBarTop(ctl);
+        if (t !== null && (top === null || t < top)) top = t;
       });
     } finally { fab.style.pointerEvents = ''; }
     return top;
@@ -1302,7 +1311,7 @@
     };
     R.active = call;
     saveChat();
-    paintAll(true);
+    if (opts.retryOf) paintAll(true); else appendMsgs([userMsg, bot]);
     updateComposer();
     updateFab();
     let finished = false;
@@ -1384,6 +1393,7 @@
     if (finished && !String(bot.text || '').trim()) bot.text = '(빈 답)';
     if (bot.status === 'pending') bot.status = 'done';
     // 이전 답의 되돌리기는 이번에 데이터가 바뀌었으면 막힘
+    const prevUndo = R.undo ? R.undo.msgId : null;
     checkUndo();
     if (bot.changes.length && findMsg(bot.id)) {
       if (R.undo) { const prev = findMsg(R.undo.msgId); if (prev && prev.undo === 'avail') prev.undo = 'stale'; }
@@ -1397,7 +1407,8 @@
       MV.store.emit('caps', MV.sync && MV.sync.cap);
       if (R.view && R.view.root.isConnected && R.view.mode !== 'blocked') { MV.rerender(true); return; }
     }
-    paintAll(false);
+    // 바뀐 답만 다시 그림 (대화 전체를 다시 그리면 화면 낭독기가 처음부터 다시 읽어요)
+    refreshMsgs([bot.id].concat(prevUndo ? [prevUndo] : [], R.chat.msgs.filter((m) => m.actions && m.actions.length).map((m) => m.id)));
     updateComposer();
     updateFab();
     if (R.view && document.activeElement === document.body && R.composerFocused) focusComposer();
@@ -1693,7 +1704,8 @@
       return node;
     }
     const pending = m.status === 'pending';
-    const bubble = el('div', { class: 'ag-bubble', 'aria-busy': pending ? 'true' : 'false' });
+    if (pending) node.setAttribute('aria-busy', 'true');
+    const bubble = el('div', { class: 'ag-bubble' });
     if (String(m.text || '').trim()) {
       const body = el('div', { class: 'ag-md' });
       body.appendChild(md(m.text));
@@ -1757,6 +1769,20 @@
     if (v.chips) { v.chips.hidden = !msgs.length; if (v.moreHint) requestAnimationFrame(v.moreHint); }
     if (!msgs.length) v.log.scrollTop = 0;
     else if (forceScroll || stick) { v.log.scrollTop = v.log.scrollHeight; v.stick = true; } else v.log.scrollTop = top;
+  }
+  function appendMsgs(list) {
+    const v = R.view;
+    if (!v || !v.log || !v.log.isConnected) return;
+    if (v.log.querySelector('.ag-welcome') || (v.chips && v.chips.hidden)) { paintAll(true); return; }
+    const keep = new Set(R.chat.msgs.map((m) => m.id));
+    MV.$$('.ag-msg', v.log).forEach((n) => { if (!keep.has(n.getAttribute('data-id'))) n.remove(); });
+    list.forEach((m) => { if (m && findMsg(m.id)) v.log.appendChild(buildMsg(m)); });
+    v.log.scrollTop = v.log.scrollHeight;
+    v.stick = true;
+  }
+  function refreshMsgs(ids) {
+    const seen = new Set();
+    ids.forEach((id) => { if (id && !seen.has(id)) { seen.add(id); paintMsg(id); } });
   }
   function paintMsg(id) {
     const v = R.view;
@@ -1913,6 +1939,7 @@
         onclick: () => { if (R.active) stop(); else submit(); },
       }, '보내기');
       v.ta.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && R.active && !e.isComposing) { e.preventDefault(); stop(); return; }
         if (e.key !== 'Enter' || e.shiftKey || e.altKey || e.ctrlKey || e.metaKey) return;
         if (e.isComposing || e.keyCode === 229) return;   // 한글 조합 중 Enter 는 글자 확정용
         e.preventDefault();
@@ -1929,7 +1956,7 @@
       const composer = el('div', { class: 'ag-composer' }, v.ta, v.send);
       wrap.appendChild(v.chips);
       wrap.appendChild(composer);
-      wrap.appendChild(el('div', { class: 'ag-hint' }, 'Enter 보내기 · Shift+Enter 줄바꿈 · 답은 확인하고 쓰세요'));
+      wrap.appendChild(el('div', { class: 'ag-hint' }, 'Enter 보내기 · Shift+Enter 줄바꿈 · Esc 중지 · 답은 확인하고 쓰세요'));
     }
     root.appendChild(wrap);
     R.view = v;
