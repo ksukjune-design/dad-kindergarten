@@ -1678,7 +1678,21 @@
 .fp-tools { display: inline-flex; flex-wrap: wrap; gap: 2px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px; padding: 2px; }
 .fp-tools .btn { border-color: transparent; background: transparent; min-height: 36px; padding: 0 10px; font-size: .84rem; }
 .fp-tools .btn[aria-pressed="true"] { background: var(--brand); color: var(--on-brand); }
-.fp-editrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; width: 100%; }
+.fp-editbar > .fp-tools { order: 0; }
+.fp-editbar > .fp-sizebtn { order: 1; }
+.fp-editbar > .fp-break { order: 2; flex: 0 0 100%; height: 0; }
+.fp-editbar > .fp-edittip { order: 3; }
+.fp-editbar > .fp-ebtn { order: 4; }
+.fp-dock { position: fixed; top: calc(var(--topbar-h) + 6px); left: 50%; transform: translateX(-50%); z-index: 25; display: flex; gap: 2px; padding: 3px;
+  background: var(--bg-2); border: 1px solid color-mix(in srgb, var(--brand) 40%, var(--line)); border-radius: 14px; box-shadow: var(--shadow-lg); max-width: calc(100vw - 12px); }
+.fp-dock .btn { flex-direction: column; gap: 1px; min-height: 46px; min-width: 58px; padding: 3px 6px; border-color: transparent; background: transparent; line-height: 1.1; }
+.fp-dock .btn:hover { background: var(--bg-3); }
+.fp-dock .btn[aria-pressed="true"] { background: var(--brand); color: var(--on-brand); }
+.fp-dock .btn.btn-primary { background: var(--brand-bg); color: var(--brand); }
+.fp-dico { font-size: 1rem; }
+.fp-dlab { font-size: .7rem; font-weight: 750; white-space: nowrap; }
+.fp-svg .fp-doorpad { cursor: pointer; }
+.fp-svg .fp-doorhit.is-pick { fill-opacity: .4; stroke-width: 2.6; stroke-dasharray: none; }
 .fp-edittip { flex: 1 1 220px; min-width: 0; font-size: .82rem; color: var(--ink-2); }
 .fp-kindsel { display: flex; flex-wrap: wrap; gap: 4px; }
 .fp-kindsel button { min-height: 36px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--line-2); background: var(--bg-2); color: var(--ink); font: inherit; font-size: .84rem; font-weight: 650; cursor: pointer; }
@@ -1690,6 +1704,13 @@
   .fp-bgdesc { display: none; }
   .fp-tools { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .fp-tools .btn { padding: 0 6px; }
+  /* 폰: [도구 2×2] / [설명] / [전체 크기 · 원래대로 · 완료] — 줄 수를 줄여 도면과 가깝게 */
+  .fp-editbar > .fp-break { display: none; }
+  .fp-editbar > .fp-edittip { order: 1; flex: 1 1 100%; }
+  .fp-editbar > .fp-sizebtn { order: 2; }
+  .fp-editbar > .fp-ebtn { order: 3; }
+  .fp-editbar > .fp-done { margin-left: auto; }
+  .fp-dock .btn { min-width: 54px; padding: 3px 4px; }
   .fp-bgscale { display: none; }
   .fp-wizbar { top: calc(var(--topbar-h) + 4px); padding: 8px 10px; }
   /* 폰: 안내 띠를 낮게 (설명은 '설명 보기'로), 길이를 넣는 2단계는 띠가 따라오지 않게 (자판과 함께 찍은 점을 가리지 않게) */
@@ -1926,28 +1947,63 @@
       doorAdd: '문을 달 방의 벽(가장자리) 가까이를 누르세요 — 90cm 문이 그 방 안쪽으로 열리게 달려요.',
       doorDel: '지울 문(빨간 점선 칸)을 누르세요.',
     };
+    const TOOL_DEFS = [['room', '✏️', '방 고치기'], ['draw', '＋', '방 그리기'], ['doorAdd', '🚪', '문 추가'], ['doorDel', '🚪', '문 삭제']];
+    const finishEdit = () => { editMode = false; tool = 'room'; preview = null; syncStageMode(); refresh(); };
     function drawEditBar() {
       // 사진 맞추기 중엔 안내 띠만 (도구를 눌러도 도면 누르기는 맞추기가 받으므로 헷갈리지 않게 숨김)
       editBar.hidden = !editMode || !!wiz;
-      if (!editMode || wiz) { editBar.textContent = ''; return; }
+      if (!editMode || wiz) { editBar.textContent = ''; drawDock(); return; }
       const plan = cur.plan;
       // 도구 단추에 초점이 있었으면 다시 그린 뒤에도 같은 단추에
       const ae = document.activeElement;
       const fTool = ae && editBar.contains(ae) && ae.getAttribute && ae.getAttribute('data-tool');
       editBar.textContent = '';
-      const T = (id, label) => el('button', { type: 'button', class: 'btn fp-b', 'data-tool': id, 'aria-pressed': String(tool === id), onclick: () => setTool(id) }, label);
+      const T = ([id, ico, label]) => el('button', { type: 'button', class: 'btn fp-b', 'data-tool': id, 'aria-pressed': String(tool === id), onclick: () => setTool(id) }, ico + ' ' + label);
+      // 한 줄로 펼쳐 두고 순서(order)로 배치: 넓은 화면 = [도구 · 전체 크기] / [설명 · 단추들], 폰 = [도구] / [설명] / [전체 크기 · 단추들]
       put(editBar,
-        el('div', { class: 'fp-editrow' },
-          el('div', { class: 'fp-tools', role: 'group', 'aria-label': '치수 수정 도구' },
-            T('room', '✏️ 방 고치기'), T('draw', '＋ 방 그리기'), T('doorAdd', '🚪 문 추가'), T('doorDel', '🚪 문 삭제')),
-          el('button', { type: 'button', class: 'btn btn-sm fp-b', 'data-tool': 'size', onclick: openSizeEditor, title: '도면 전체 가로·세로 (cm)' }, '📐 전체 크기 ' + Math.round(plan.width) + '×' + Math.round(plan.depth))),
-        el('div', { class: 'fp-editrow' },
-          el('div', { class: 'fp-edittip', 'aria-live': 'polite' }, TOOL_TIPS[tool] + ' 짐은 잠시 잠겨요.'),
-          tool === 'draw' ? el('button', { type: 'button', class: 'btn btn-sm fp-b', 'data-act': 'typed', onclick: () => openRoomEditor(null, typedRoomRect(), true), title: '끌지 않고 가로·세로·X·Y 숫자로 방 추가' }, '🔢 숫자로 넣기') : null,
-          plan.edited ? el('button', { type: 'button', class: 'btn btn-sm btn-danger fp-b', onclick: resetAllRooms }, '도면 전체 원래대로') : null,
-          el('button', { type: 'button', class: 'btn btn-sm btn-primary fp-b', onclick: () => { editMode = false; tool = 'room'; preview = null; syncStageMode(); refresh(); } }, '완료')));
-      if (fTool) { const b = editBar.querySelector('[data-tool="' + fTool + '"]'); if (b) b.focus({ preventScroll: true }); }
+        el('div', { class: 'fp-tools', role: 'group', 'aria-label': '치수 수정 도구' }, TOOL_DEFS.map(T)),
+        el('button', { type: 'button', class: 'btn btn-sm fp-b fp-sizebtn', 'data-tool': 'size', onclick: openSizeEditor, title: '도면 전체 가로·세로 (cm)' },
+          '📐 ', el('span', { class: 'fp-wl' }, '전체 '), '크기 ' + Math.round(plan.width) + '×' + Math.round(plan.depth)),
+        el('span', { class: 'fp-break', 'aria-hidden': 'true' }),
+        el('div', { class: 'fp-edittip', 'aria-live': 'polite' }, TOOL_TIPS[tool] + ' 짐은 잠시 잠겨요.'),
+        tool === 'draw' ? el('button', { type: 'button', class: 'btn btn-sm fp-b fp-ebtn', 'data-act': 'typed', onclick: () => openRoomEditor(null, typedRoomRect(), true), title: '끌지 않고 가로·세로·X·Y 숫자로 방 추가' }, '🔢 숫자로 넣기') : null,
+        plan.edited ? el('button', { type: 'button', class: 'btn btn-sm btn-danger fp-b fp-ebtn', onclick: resetAllRooms, title: '도면 전체 원래대로' }, el('span', { class: 'fp-wl' }, '도면 전체 '), '원래대로') : null,
+        el('button', { type: 'button', class: 'btn btn-sm btn-primary fp-b fp-ebtn fp-done', onclick: finishEdit }, '완료'));
+      if (fTool) { const b2 = editBar.querySelector('[data-tool="' + fTool + '"]'); if (b2) b2.focus({ preventScroll: true }); }
+      drawDock();
     }
+    /* ---- 따라다니는 도구 줄: 치수 수정 중 위 도구 줄이 화면 위로 밀려 나가면 위쪽에 작게 떠서, 도면을 보면서 도구를 바꿀 수 있게 ---- */
+    const dock = el('div', { class: 'fp-dock', hidden: true, role: 'toolbar', 'aria-label': '치수 수정 도구 (따라다니는 줄)' });
+    planCard.appendChild(dock);
+    let dockOn = false, dockRaf = 0;
+    function drawDock() {
+      const ae = document.activeElement;
+      const fd = ae && dock.contains(ae) && ae.getAttribute && ae.getAttribute('data-dock');
+      dock.textContent = '';
+      if (!editMode || wiz) { dock.hidden = true; dockOn = false; return; }
+      const D = (id, ico, label, onclick, cls) => el('button', { type: 'button', class: 'btn fp-b ' + (cls || ''), 'data-dock': id, 'aria-pressed': cls ? null : String(tool === id), onclick, 'aria-label': label },
+        el('span', { class: 'fp-dico', 'aria-hidden': 'true' }, ico), el('span', { class: 'fp-dlab', 'aria-hidden': 'true' }, label));
+      put(dock, TOOL_DEFS.map(([id, ico, label]) => D(id, ico, label, () => { setTool(id); toast(TOOL_TIPS[id], { ms: 3200 }); })),
+        D('done', '✓', '완료', finishEdit, 'btn-primary'));
+      placeDock();
+      if (fd) { const b2 = dock.querySelector('[data-dock="' + fd + '"]'); if (b2 && !dock.hidden) b2.focus({ preventScroll: true }); }
+    }
+    /** 위 도구 줄이 위 막대 뒤로 사라졌고 도면 카드는 아직 보이면 띄움 */
+    function placeDock() {
+      if (!editMode || wiz || !root.isConnected) { dock.hidden = true; dockOn = false; return; }
+      const top = pxv('--topbar-h', 56);
+      const eb = editBar.getBoundingClientRect(), pc = planCard.getBoundingClientRect();
+      const on = eb.bottom < top + 4 && pc.bottom > top + 160;
+      if (on !== dockOn || on) {
+        dockOn = on;
+        dock.hidden = !on;
+        if (on) dock.style.left = Math.round(pc.left + pc.width / 2) + 'px';
+      }
+    }
+    const onDockScroll = () => { if (!editMode || dockRaf) return; dockRaf = requestAnimationFrame(() => { dockRaf = 0; placeDock(); }); };
+    window.addEventListener('scroll', onDockScroll, { passive: true });
+    window.addEventListener('resize', onDockScroll);
+    ctx.onCleanup(() => { window.removeEventListener('scroll', onDockScroll); window.removeEventListener('resize', onDockScroll); cancelAnimationFrame(dockRaf); });
     function setTool(id) {
       tool = id;
       preview = null;
