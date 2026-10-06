@@ -65,7 +65,7 @@
   const PRI_LABEL = { high: '중요', mid: '보통', low: '여유' };
   const PRI_RANK = { high: 0, mid: 1, low: 2 };
   /* 자금흐름 예산에서 '자동 계산'이 되는 항목 (view-finance.js 의 LINE_META.auto) */
-  const AUTO_BUDGET = new Set(['mover', 'lg', 'waste', 'elevator', 'hug']);
+  const AUTO_BUDGET = new Set(['mover', 'lg', 'maker-other', 'waste', 'elevator', 'hug']);
   /* 이 코드가 오면 이 화면에서 기능을 숨김 (다시 묻지 않음) */
   const HIDE_CODES = new Set(['not_granted', 'sampling_disabled', 'not_declared', 'capability_disabled', 'capability_removed']);
   const BLOCK_COPY = {
@@ -599,7 +599,7 @@
   }
   /* 예산 묶음 — view-finance.js 의 GROUPS·GROUP_OF 와 같은 규칙 (줄에 group 이 없으면 id 로, 직접 넣은 줄은 '새로 사는 살림') */
   const GROUP_LABEL = { essential: '꼭 드는 이사 비용', purchase: '새로 사는 살림', optional: '선택·나중에' };
-  const GROUP_OF = { mover: 'essential', lg: 'essential', elevator: 'essential', waste: 'essential', internet: 'essential', washer: 'purchase', 'wardrobe-extra': 'purchase', wardrobe: 'optional', hug: 'optional', deco: 'purchase', clean: 'optional', reserve: 'optional' };
+  const GROUP_OF = { mover: 'essential', lg: 'essential', 'maker-other': 'essential', elevator: 'essential', waste: 'essential', internet: 'essential', washer: 'purchase', 'wardrobe-extra': 'purchase', wardrobe: 'optional', hug: 'optional', deco: 'purchase', clean: 'optional', reserve: 'optional' };
   const groupOf = (l) => (l && GROUP_LABEL[l.group] ? l.group : (l && GROUP_OF[l.id]) || 'purchase');
   function parseGroup(v) {
     const s = str(v, 20).toLowerCase().replace(/\s+/g, '');
@@ -863,7 +863,7 @@
       '[가족 결정 (2026-10-06, 최신 — 예전 안내보다 우선)]',
       '- 큰 가전: LG 870L 4도어 냉장고와 삼성 20kg 건조기는 ' + D.fmt(move) + '에 이삿짐센터가 세워서 옮겨요. 삼성 2in1 에어컨(거실 스탠드 + 안방 벽걸이, 실외기 1대)은 삼성전자서비스(1588-3366) 이전설치로 이사 전에 새 집에 설치해요 — 약 50만원(추정 45만~70만원). 안 되면 예비안: 이사 전에 철거만 하고 ' + D.fmt(move) + ' 오후~다음 날 설치. LG 베스트케어는 기본으로 쓰지 않아요.',
       '- 고장 난 세탁기는 지금 집에서 버려요(폐가전 무상방문수거 1599-0903). 새 통돌이 세탁기 약 50만원은 11/4~11/6 새 집 배송.',
-      '- 제조사 서비스 비용: 견적의 makerService(제조사별 byBrand)와 예산 줄 id "lg"는 이름과 달리 제조사 서비스 전체예요' + mkNow + '. "LG 이전"이라고 부르지 말고 그 이름(' + mkLabel + ', 예산 줄은 label)으로 부르세요.',
+      '- 제조사 서비스 비용: 견적의 makerService(제조사별 byBrand)가 제조사 서비스 전체예요' + mkNow + '. 예산에서는 둘로 나뉘어요: 줄 id "lg" = 삼성 에어컨 이전설치(이사 전에 내는 돈), 줄 id "maker-other" = 그 밖의 제조사 서비스(LG 베스트케어 등, 이사 날). "LG 이전"이라고 부르지 말고 그 이름(' + mkLabel + ', 예산 줄은 label)으로 부르세요.',
       '- 옷장: 새 옷장은 이사 전에 사지 않아요. 지금 있는 캐비닛장(3칸)·간이옷장을 가져가 쓰고, 걸린 옷은 행거박스·박스로 옮겨요(이삿짐센터에 행거박스를 몇 개 가져오는지 물어 견적에 넣기). 이사 뒤 2주쯤 살아 보고 방을 재서 간이 옷장·행거(이케아 등)를 사요 — 예산 "선택·나중에" 약 20만원(추정), ' + D.fmt(move) + ' 현금에는 안 넣어요. 이사 전 옷장 주문·벽 고정 동의는 필요 없고, 나중에 키 큰 옷장을 고르면 그때 벽 고정을 확인해요.',
       '- 붙박이장 비우기: 지금 집 붙박이장은 두고 가니 이사 전에 모두 비워요 — 아내 옷 → 가족 캐비닛장(3칸, 가져감) · \'나\' 옷 → 지금 간이옷장 · \'나\' 잡화 → 잡화정리 파트(리빙박스 하나에 담아 \'나-잡화\'라고 적기, 10/13) · 아이 옷 → 등원 옷은 아이 방 서랍, 외투·행사 옷은 간이옷장 · 여름옷·얇은 옷 → 우리 리빙박스에 담아 봄까지 보관. 간이옷장이 모자랄 때만 바퀴 달린 이동식 행거 1개(약 1.5만~3만원)를 사요 — 예산 줄 "이동식 행거·보관용품 (필요하면, 이사 전)"(지금 0원, 산 만큼 이사 뒤 간이 옷장 20만원에서 빼요). 간이옷장을 하나 더 사라고 권하지 마세요.',
       '- 커튼·소품은 지금 것을 그대로 가져가요(새로 안 사요, 0원). 사전방문 때 창 크기만 재서 지금 커튼이 맞는지 확인하고, 안 맞으면 이사 뒤 조정해요.',
@@ -1137,7 +1137,7 @@
         const c = makerCostOf(est);
         if (!c) return null;
         return { label: makerLabel(est), count: num(c.count), typical: krw(c.typical), low: krw(c.low), high: krw(c.high), byBrand: makerByBrand(c, krw),
-          note: '이삿짐센터 금액과 따로 제조사에 내는 돈(부가세 포함). 예산 줄 id "lg"가 이 돈이에요 — "LG 이전"이 아니라 label 이름으로 부르세요' };
+          note: '이삿짐센터 금액과 따로 제조사에 내는 돈(부가세 포함). 예산에서는 줄 id "lg"(삼성 에어컨, 이사 전)와 "maker-other"(그 밖의 제조사 서비스, 이사 날)로 나뉘어요 — "LG 이전"이 아니라 label 이름으로 부르세요' };
       })(),
       totalWithMakerService: est.totalPay ? krw(est.totalPay.typical) : null,
       makerBlocked: makerBlocked(est),
