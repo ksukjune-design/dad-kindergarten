@@ -2834,10 +2834,12 @@
       const flip = (v) => inv.map((x) => (x.id === it.id ? Object.assign({}, x, { lg: v }) : x));
       const a = compute(st, { inventory: flip(false) });
       const b = compute(st, { inventory: flip(true) });
-      const moverDelta = Math.max(0, a.typical - b.typical);
+      const moverDelta = Math.max(0, payK(a, 'typical') - payK(b, 'typical')); // 부가세 포함 (LG 소비자가와 같은 기준)
       const lgc = lgItemCost(it, c, inp);
       const brand = brandOf(it);
       const isWin = kind === 'ac_window';
+      const blockLg = !lgEligible(it);
+      const furn = FURN_WITH.test(nm(it)) ? (nm(it).match(FURN_WITH) || [])[1] : null;
       const parts = [];
       if (a.counts.acN !== b.counts.acN) parts.push('에어컨 이전설치');
       if (a.counts.fridges !== b.counts.fridges) parts.push('대형 냉장고 추가비');
@@ -2845,25 +2847,32 @@
       if (!parts.length) parts.push('짐량 안에 포함 (차량 등급 변화 없음)');
       const segBtn = (v, label) => el('button', {
         type: 'button', class: 'es-seg-b' + (!!it.lg === v ? ' is-on' : ''), 'aria-pressed': String(!!it.lg === v), 'data-fk': 'lg-' + it.id + '-' + (v ? 'lg' : 'mv'),
-        disabled: v && isWin ? true : null,
-        onclick: () => { if (!!it.lg !== v) MV.inv.update(it.id, { lg: v }, (v ? 'LG 서비스로 옮김: ' : '이삿짐센터로 옮김: ') + nm(it)); },
+        disabled: v && blockLg && !it.lg ? true : null,
+        title: v && blockLg ? (isWin ? '창문형 에어컨은 직접 떼고 다는 제품이라 LG 이전설치가 필요 없어요' : '다른 브랜드로 보여요 — LG 베스트케어 이전설치는 LG 제품만 돼요. LG 제품이면 이름을 고치세요') : null,
+        onclick: () => {
+          if (v && blockLg) { toast(isWin ? '창문형 에어컨은 LG 이전설치가 필요 없어요.' : '다른 브랜드 제품은 LG 이전설치를 맡길 수 없어요. LG 제품이면 이름을 고쳐 주세요.'); return; }
+          if (!!it.lg !== v) MV.inv.update(it.id, { lg: v }, (v ? 'LG 서비스로 옮김: ' : '이삿짐센터로 옮김: ') + nm(it));
+        },
       }, label);
       return el('div', { class: 'es-lgi' + (it.lg ? ' is-lg' : '') },
         el('div', { class: 'es-ico', 'aria-hidden': 'true' }, MV.inv.cat(it.cat).icon),
         el('div',
-          el('div', { class: 'es-lgi-name' }, nm(it), qtyOf(it) > 1 ? el('span', { class: 'chip' }, qtyOf(it) + '대') : null,
+          el('div', { class: 'es-lgi-name' }, el('button', { type: 'button', class: 'es-namebtn es-lgi-nb', 'data-fk': 'lgname-' + it.id, title: '눌러서 이름·브랜드 고치기', onclick: () => MV.inv.editor(it.id) }, nm(it) || '이름 없는 가전'),
+            qtyOf(it) > 1 ? el('span', { class: 'chip' }, qtyOf(it) + '대') : null,
             brand === 'lg' ? el('span', { class: 'chip good' }, 'LG 제품') : brand === 'other' ? el('span', { class: 'chip bad', title: 'LG 이전설치는 LG 제품만 가능' }, '다른 브랜드 — LG 불가') : el('span', { class: 'chip warn', title: '이름에 브랜드(예: LG 디오스)를 적거나 제품 링크를 넣어 두세요' }, '브랜드 확인 필요'),
             it.assumed ? el('span', { class: 'chip warn' }, '규격 추정') : null,
-            it.fate !== 'move' ? el('span', { class: 'chip', title: '처리가 ‘미정’이지만 ‘미정 짐도 가져가는 것으로 계산’이 켜져 있어 견적에 넣었어요' }, '처리 미정') : null),
+            it.fate !== 'move' ? el('span', { class: 'chip', title: '처리가 ‘미정’이지만 ‘미정 짐도 가져가는 것으로 계산’이 켜져 있어 견적에 넣었어요' }, '처리 미정') : null,
+            furn ? el('span', { class: 'chip warn', title: 'LG는 가구를 옮기지 않아요. 짐 목록에서 ‘' + furn + '’을 따로 나눠 적으면 이삿짐센터 짐량에 들어가요' }, '가구(' + furn + ') 포함 — 따로 나누세요') : null),
           el('div', { class: 'es-lgi-meta' }, LG_KIND[kind].label + ' · ' + dimTxt(it) + 'cm · ' + roomTxt(it))),
         el('div', { class: 'es-seg', role: 'group', 'aria-label': nm(it) + ' 누가 옮길지' }, segBtn(true, '🔌 LG 서비스'), segBtn(false, '🚚 이삿짐센터')),
         el('div', { class: 'es-lgi-costs' },
           el('div', { class: 'es-lgi-cost' + (it.lg ? ' is-on' : '') }, el('small', 'LG 서비스'),
             el('b', isWin ? '0원' : '약 ' + won(lgc.typical)),
             el('small', isWin ? '직접 떼고 달기' : won(lgc.low) + ' ~ ' + won(lgc.high) + (lgc.pipe ? ' · 배관 ' + r1(inp.acPipeM) + 'm 포함' : '') + ' · 운송비 ' + josa(won(c.lg_transport), '은/는') + ' 1건당 합계에 한 번')),
-          el('div', { class: 'es-lgi-cost' + (!it.lg ? ' is-on' : '') }, el('small', '이삿짐센터'),
+          el('div', { class: 'es-lgi-cost' + (!it.lg ? ' is-on' : '') }, el('small', '이삿짐센터 (부가세 포함)'),
             el('b', moverDelta ? '+' + won(moverDelta) : '추가 0원'),
             el('small', parts.join(' · ')))),
+        brand === 'other' && !isWin ? el('div', { class: 'es-lgi-does es-lgi-bad' }, '⛔ 이름이나 링크에 다른 브랜드가 있어 LG 서비스를 고를 수 없어요. LG 제품이라면 이름을 눌러 고치세요.') : null,
         el('div', { class: 'es-lgi-does' }, '🔧 ' + LG_DOES[kind]));
     });
     return el('section', { class: 'card', 'aria-label': '가전별 선택' },
