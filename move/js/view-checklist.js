@@ -386,7 +386,7 @@
   function partForm(existing, onDone) {
     const groups = [];
     MV.parts.list().forEach((p) => { if (p.group && !groups.includes(p.group)) groups.push(p.group); });
-    const name = el('input', { class: 'input', value: existing ? existing.name : '', placeholder: '예) 아이 학교 전학', maxlength: '40' });
+    const name = el('input', { class: 'input', value: existing ? existing.name : '', placeholder: '예) 아이 입학 준비', maxlength: '40' });
     const pick = emojiPicker(existing ? existing.emoji : '📌');
     const desc = el('input', { class: 'input', value: existing ? (existing.desc || '') : '', placeholder: '한 줄 설명 (선택)' });
     const listId = 'ck-groups-' + Math.random().toString(36).slice(2, 7);
