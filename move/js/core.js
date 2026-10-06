@@ -47,7 +47,7 @@
   const MV = global.MV = global.MV || {};
   MV.VERSION = '1.0.0';
   /** 배포 설정 — sharedUrl: claude.ai 공유 버전(AI 비서·함께 쓰기) 주소 */
-  MV.config = MV.config || { sharedUrl: '' };
+  MV.config = MV.config || { sharedUrl: 'https://claude.ai/artifact/GKFEJDgH6AwCm6fRszZbdy' };
 
   /* ---------------- DOM ---------------- */
   function applyProps(node, props, isSvg) {
