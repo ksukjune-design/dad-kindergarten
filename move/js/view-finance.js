@@ -117,8 +117,16 @@
     mid: { label: '신뢰도 중간', cls: 'warn' },
     low: { label: '신뢰도 낮음 (추정)', cls: 'think' },
   };
-  function basis(conf, text, links, check) {
+  function basis(conf, text, links, check, compact) {
     const c = CONF[conf] || CONF.mid;
+    if (compact) {
+      return el('details', { class: 'fn-why' },
+        el('summary', null, el('span', { class: 'chip ' + c.cls }, c.label), ' 근거 보기'),
+        el('div', { class: 'fn-basis' },
+          el('span', { class: 'fn-basis-txt' }, text),
+          (links || []).map((l) => el('a', { class: 'fn-src', href: l.url, target: '_blank', rel: 'noopener noreferrer' }, l.label + ' ↗')),
+          conf !== 'high' ? el('span', { class: 'fn-verify' }, '⚠ ' + (check || '세무사·은행 확인 권장')) : null));
+    }
     return el('div', { class: 'fn-basis' },
       el('span', { class: 'chip ' + c.cls }, c.label),
       el('span', { class: 'fn-basis-txt' }, '근거: ' + text),
@@ -137,14 +145,14 @@
     { max: Infinity, rate: 0.006, limit: null, label: '15억원 이상', rateTxt: '0.6%' },
   ];
   const VAT = {
-    general: { label: '일반과세자 (+부가세 10%)', rate: 0.10 },
-    simple: { label: '간이과세자 (+약 4%, 관행)', rate: 0.04 },
+    general: { label: '일반과세자 (+10%)', rate: 0.10 },
+    simple: { label: '간이과세자 (+약 4%)', rate: 0.04 },
     none: { label: '부가세 없음', rate: 0 },
   };
   const BANDS = {
-    low: { label: '총급여 5,500만원 이하 (17%)', rate: 0.17 },
-    mid: { label: '총급여 5,500만원 초과 ~ 8,000만원 이하 (15%)', rate: 0.15 },
-    none: { label: '총급여 8,000만원 초과 (공제 대상 아님)', rate: 0 },
+    low: { label: '5,500만원 이하 (17%)', rate: 0.17 },
+    mid: { label: '5,500만~8,000만원 (15%)', rate: 0.15 },
+    none: { label: '8,000만원 초과 (대상 아님)', rate: 0 },
   };
   const MARGINAL = [
     [0.066, '6.6% (과세표준 1,400만원 이하)'],
@@ -491,7 +499,7 @@
     const capLeft = Math.max(0, 4000000 - Math.max(0, num(f.tax.subscription)));
     const deduction = Math.min(Math.round(repaid * 0.4), capLeft);
     const rate = num(f.tax.marginal) || 0.165;
-    return { repaid, capLeft, deduction, rate, saving: Math.round(deduction * rate), low: Math.round(deduction * 0.066), high: Math.round(deduction * 0.264) };
+    return { repaid, prepaid: Math.min(original, Math.max(0, num(f.loan.prepaid))), capLeft, deduction, rate, saving: Math.round(deduction * rate), low: Math.round(deduction * 0.066), high: Math.round(deduction * 0.264) };
   }
   function computeRecon(f, flow) {
     const o = f.old, l = f.loan, n = f.newHome;
@@ -775,18 +783,23 @@
 }
 
 .fn-alerts { margin: 0 0 10px; }
-.fn-alert { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 4px 10px; align-items: center; padding: 5px 8px 5px 12px; border-radius: var(--radius-sm); background: var(--warn-bg); border: 1px solid color-mix(in srgb, var(--warn) 30%, var(--line)); }
+.fn-alert { display: grid; width: 100%; grid-template-columns: auto minmax(0, 1fr) auto; gap: 4px 10px; align-items: center; min-height: 40px; padding: 7px 12px; border-radius: var(--radius-sm); background: var(--warn-bg); border: 1px solid color-mix(in srgb, var(--warn) 30%, var(--line)); color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.fn-alert:hover { border-color: var(--warn); }
+.fn-alert.is-bad:hover { border-color: var(--bad); }
+.fn-alert-go { font-weight: 800; color: var(--ink-2); white-space: nowrap; font-size: .9rem; }
 .fn-alert + .fn-alert { margin-top: 5px; }
 .fn-alert.is-bad { background: var(--bad-bg); border-color: color-mix(in srgb, var(--bad) 40%, var(--line)); }
 .fn-alert.is-info { background: var(--bg-2); border-color: var(--line); }
+div.fn-alert { cursor: default; }
 .fn-alert-ico { font-size: 1.05rem; line-height: 1.4; align-self: start; }
 .fn-alert-txt { font-size: .88rem; font-weight: 600; line-height: 1.5; }
 .fn-alert.is-bad .fn-alert-txt b { color: var(--bad); }
-.fn-alert .btn { min-height: 36px; }
 .fn-alerts-more { margin-top: 6px; }
 @media (max-width: 640px) {
-  .fn-alert { grid-template-columns: auto minmax(0, 1fr); }
-  .fn-alert .btn { grid-column: 2; justify-self: start; }
+  .fn-alert { gap: 4px 8px; padding: 7px 10px; }
+  .fn-alert-txt { font-size: .85rem; }
+  .fn-alert-go-t { display: none; }
+  .fn-alert-go { font-size: 1.2rem; }
 }
 
 .fn-tabbar { position: sticky; top: var(--topbar-h); z-index: 12; margin: 0 -4px 12px; padding: 6px 4px 8px; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(8px); }
@@ -824,7 +837,8 @@
 .fn-fields { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
 @media (max-width: 420px) { .fn-two { grid-template-columns: 1fr; } }
 .fn-suffix { display: flex; align-items: center; gap: 6px; }
-.fn-suffix > em { font-style: normal; color: var(--ink-3); font-weight: 700; }
+.fn-suffix > em { font-style: normal; color: var(--ink-3); font-weight: 700; white-space: nowrap; flex: none; }
+.fn-suffix > .input { flex: 1 1 auto; min-width: 0; }
 .fn-note { font-size: .82rem; color: var(--ink-3); }
 .fn-chk { min-height: 36px; padding: 4px 0; }
 .fn-chk span { line-height: 1.45; }
@@ -846,6 +860,8 @@
 .card.fn-step-card + .card { margin-top: 0; }
 .fn-step.is-done .fn-step-card { background: color-mix(in srgb, var(--good-bg) 55%, var(--bg-2)); }
 .fn-step-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.fn-step-name { flex: 1 1 220px; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.fn-step-name .chip { flex: none; }
 .fn-step-title { margin: 0; font-size: 1.02rem; min-width: 0; }
 .fn-time { width: 136px; min-height: 36px; padding: 4px 8px; font-variant-numeric: tabular-nums; }
 .fn-done { margin-left: auto; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line-2); min-height: 36px; font-weight: 700; }
@@ -886,7 +902,7 @@
   .fn-num { width: 28px; height: 28px; font-size: .82rem; }
   .fn-step-card { padding: 10px 12px; }
   .fn-time { width: 128px; }
-  .fn-step-title { flex-basis: 100%; order: 3; }
+  .fn-step-name { order: 3; flex-basis: 100%; }
   .fn-result-v { font-size: 1.55rem; }
 }
 
@@ -976,11 +992,23 @@
 .fn-bl-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; align-items: center; }
 .fn-bl.is-paid .fn-bl-label .input { text-decoration: line-through; color: var(--ink-3); }
 .fn-bl.is-off { opacity: .55; }
-.fn-range { font-size: .74rem; color: var(--ink-3); }
+.fn-range { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; margin-top: 4px; font-size: .76rem; color: var(--ink-3); }
+.fn-why { font-size: .76rem; color: var(--ink-3); min-width: 0; }
+.fn-why > summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 4px; min-height: 28px; font-weight: 650; }
+.fn-why > summary::-webkit-details-marker { display: none; }
+.fn-why > summary::after { content: '▾'; font-size: .8em; }
+.fn-why[open] > summary::after { content: '▴'; }
+.fn-why .chip { font-size: .7rem; padding: 0 7px; }
+.fn-why .fn-basis { margin-top: 2px; }
+.fn-range .fn-why[open] { flex-basis: 100%; }
 @media (max-width: 1000px) {
   .fn-bl-head { display: none; }
-  .fn-bl { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; grid-template-areas: "label label del" "amount amount amount" "date paid paid" "memo memo memo"; }
-  .fn-bl-paid { align-self: center; }
+  .fn-bl { grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) auto; grid-template-areas: "label label del" "amount date paid" "memo memo memo"; }
+  .fn-bl-paid { padding-top: 6px; }
+}
+@media (max-width: 640px) {
+  .fn-bl { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "label del" "amount amount" "date paid" "memo memo"; }
+  .fn-bl-paid { align-self: center; padding-top: 0; }
 }
 
 /* --- 계산기 공통 --- */
@@ -1002,6 +1030,9 @@
 .fn-prot.is-done .fn-prot-title label { color: var(--ink-3); text-decoration: line-through; }
 .fn-prot-body { grid-column: 2; font-size: .88rem; color: var(--ink-2); }
 .fn-prot-body > * + * { margin-top: 6px; }
+.fn-prot-body .fn-kv, .fn-prot-body .fn-total { max-width: 560px; }
+.fn-prot-body .field { max-width: 380px; }
+.fn-prot-body .fn-fields { max-width: 560px; }
 .fn-prot-link { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: .82rem; }
 
 /* --- 당일 시트 --- */
@@ -1012,15 +1043,16 @@
 .fn-sheet-sum span { font-size: .76rem; color: var(--ink-3); font-weight: 700; }
 .fn-sheet-row { display: grid; grid-template-columns: 30px 54px minmax(0, 1fr) auto; gap: 4px 10px; align-items: start; padding: 8px 0; border-bottom: 1px solid var(--line); break-inside: avoid; }
 .fn-sheet-row input[type=checkbox] { width: 22px; height: 22px; margin: 2px 0 0; accent-color: var(--good); }
-.fn-sheet-time { font-weight: 800; font-variant-numeric: tabular-nums; }
+.fn-sheet-time { font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .fn-sheet-what b { display: block; }
 .fn-sheet-what small { display: block; color: var(--ink-3); font-size: .78rem; }
 .fn-sheet-amt { text-align: right; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .fn-sheet-amt small { display: block; font-weight: 600; color: var(--ink-3); font-size: .74rem; }
 .fn-sheet-contacts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 16px; font-size: .9rem; }
 @media (max-width: 560px) {
-  .fn-sheet-sum { grid-template-columns: 1fr; }
-  .fn-sheet-row { grid-template-columns: 28px 48px minmax(0, 1fr); }
+  .fn-sheet-sum { grid-template-columns: 1fr; gap: 4px; }
+  .fn-sheet-sum > div { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 5px 10px; }
+  .fn-sheet-row { grid-template-columns: 26px 50px minmax(0, 1fr); gap: 4px 8px; }
   .fn-sheet-amt { grid-column: 3; text-align: left; }
   .fn-sheet-contacts { grid-template-columns: 1fr; }
 }
@@ -1320,10 +1352,13 @@
     let LIMIT = 4;
     try { if (window.matchMedia('(max-width: 640px)').matches) LIMIT = 2; } catch (e) { /* 무시 */ }
     const shown = alertsOpen ? list : list.slice(0, LIMIT);
-    const out = shown.map((a) => el('div', { class: 'fn-alert is-' + a.level, role: a.level === 'bad' ? 'alert' : null },
+    const out = shown.map((a) => el('button', {
+      class: 'fn-alert is-' + a.level, type: 'button', 'data-fk': 'alert-' + a.id,
+      'aria-label': a.text + ' — 자세히 보기', onclick: () => P.goTo(a.tab, a.anchor),
+    },
       el('span', { class: 'fn-alert-ico', 'aria-hidden': 'true' }, a.level === 'bad' ? '🚨' : a.level === 'warn' ? '⚠️' : 'ℹ️'),
       el('span', { class: 'fn-alert-txt' }, a.text),
-      el('button', { class: 'btn btn-sm', type: 'button', 'data-fk': 'alert-' + a.id, onclick: () => P.goTo(a.tab, a.anchor) }, '보기 →')));
+      el('span', { class: 'fn-alert-go', 'aria-hidden': 'true' }, el('span', { class: 'fn-alert-go-t' }, '보기 '), '›')));
     if (list.length > LIMIT) {
       out.push(el('div', { class: 'fn-alerts-more' }, el('button', {
         class: 'btn btn-ghost btn-sm fn-mini-btn', type: 'button', 'data-fk': 'alert-more', 'aria-expanded': String(alertsOpen),
@@ -1381,10 +1416,10 @@
     const lim = P.c.f.flow.limits;
     const setLim = (k) => (v) => upd((fin) => { fin.flow.limits[k] = v > 0 ? v : null; });
     return el('section', { class: 'card fn-anchor', id: 'fn-limits' },
-      el('div', { class: 'fn-card-h' }, el('h3', '내 이체한도')),
+      el('div', { class: 'fn-card-h' }, el('h3', '내 이체한도'), el('span', { class: 'small muted' }, '모르면 비워 두세요')),
       el('div', { class: 'fn-two' },
-        moneyField('1회 한도', lim.perTx, setLim('perTx'), { placeholder: '예: 1억 (모르면 비워 두기)', fk: 'lim-tx', emptyZero: true }),
-        moneyField('1일 한도', lim.daily, setLim('daily'), { placeholder: '예: 5억 (모르면 비워 두기)', fk: 'lim-day', emptyZero: true })),
+        moneyField('1회 한도', lim.perTx, setLim('perTx'), { placeholder: '예: 1억', fk: 'lim-tx', emptyZero: true }),
+        moneyField('1일 한도', lim.daily, setLim('daily'), { placeholder: '예: 5억', fk: 'lim-day', emptyZero: true })),
       P.live('div', 'fn-step-body', () => {
         const fl = P.c.flow;
         const out = [el('div', { class: 'fn-kv' },
@@ -1436,15 +1471,14 @@
     if (kind !== 'task') body.appendChild(P.live('div', 'fn-step-body', () => stepLive(P, id)));
     if (MEMO_LABEL[id]) {
       body.appendChild(el('div', { class: 'fn-memo-input' }, textField(MEMO_LABEL[id], (f.flow.memo || {})[id], (v) => updSilent((fin) => { fin.flow.memo[id] = v; }),
-        { fk: 'memo-' + id, placeholder: '은행·계좌번호·예금주 메모 (이 기기에만 저장)' })));
+        { fk: 'memo-' + id, placeholder: '은행 · 계좌번호 · 예금주' })));
     }
     li.append(
       el('div', { class: 'fn-rail', 'aria-hidden': 'true' }, el('span', { class: 'fn-num' }, String(i + 1)), el('span', { class: 'fn-line' })),
       el('div', { class: 'card fn-step-card' },
         el('div', { class: 'fn-step-head' },
           time,
-          chip(stepWho(id), KIND_CHIP[kind]),
-          el('h3', { class: 'fn-step-title' }, title),
+          el('div', { class: 'fn-step-name' }, chip(stepWho(id), KIND_CHIP[kind]), el('h3', { class: 'fn-step-title' }, title)),
           doneBox),
         body));
     return li;
@@ -1791,8 +1825,8 @@
     // 항목명
     const labelCell = el('div', { class: 'fn-bl-label' },
       textField('항목 이름', l.label, (v) => updSilent((fin) => { const x = fin.budget.lines.find((y) => y.id === l.id); if (x) x.label = v; }), { fk: 'bl-label-' + l.id, bare: true }),
-      meta ? el('div', { class: 'fn-range' }, '보통 ' + (meta.low ? krw(meta.low) : '0원') + ' ~ ' + krw(meta.high)) : null,
-      meta ? basis(meta.conf, meta.basis, meta.auto === 'hug' ? [LINK.hug] : [], meta.conf === 'mid' ? 'HUG에 확인' : '견적·영수증으로 확인') : null);
+      meta ? el('div', { class: 'fn-range' }, el('span', '보통 ' + (meta.low ? krw(meta.low) : '0원') + ' ~ ' + krw(meta.high)),
+        basis(meta.conf, meta.basis, meta.auto === 'hug' ? [LINK.hug] : [], meta.conf === 'mid' ? 'HUG에 확인' : '견적·영수증으로 확인', true)) : null);
     // 금액
     const amountCell = el('div', { class: 'fn-bl-amount' });
     if (meta && meta.auto) {
@@ -1849,7 +1883,7 @@
     row.append(
       el('div', { class: 'fn-bl-label' },
         textField('항목 이름', r.label, (v) => updSilent((fin) => { const x = fin.budget.refunds.find((y) => y.id === r.id); if (x) x.label = v; }), { fk: 'rf-label-' + r.id, bare: true }),
-        meta ? basis(meta.conf, meta.basis, [], '관리사무소·은행 확인') : null),
+        meta ? el('div', { class: 'fn-range' }, basis(meta.conf, meta.basis, [], '관리사무소·은행 확인', true)) : null),
       el('div', { class: 'fn-bl-amount' }, moneyField('금액', r.amount, (v) => setR((x) => { x.amount = v; }), { fk: 'rf-amt-' + r.id, bare: true })),
       el('div', { class: 'fn-bl-date' }),
       el('div', { class: 'fn-bl-paid' }, checkbox('받음', r.got, (v) => setR((x) => { x.got = v; }), { fk: 'rf-got-' + r.id })),
@@ -1960,7 +1994,7 @@
         el('div', { class: 'small muted' }, g.minRate === 0 ? '원금이 작아서 무이자여도 차액이 1천만원 미만이에요.' : '경계값이라 여유를 두고 ' + g.rec.map((x) => pctTxt(x.r) + '(월 ' + won(x.m) + ')').join(' ~ ') + '를 권해요.')));
     }
     if (g.taxable && g.actual === 0) {
-      out.push(el('div', { class: 'fn-warn' }, '무이자로 약 ' + g.years.toFixed(1) + '년 지났다면 의제 증여 누적 약 ' + krw(g.cumulative) + '. 성년 자녀 공제 ' + krw(g.deduction) + '로 약 ' + (g.yearsToExhaust != null ? g.yearsToExhaust.toFixed(1) : '-') + '년분까지 흡수돼요(신고는 필요할 수 있음). 진짜 위험은 아래 "원금 전체가 증여로 판정"되는 경우예요.'));
+      out.push(el('div', { class: 'fn-warn' }, '무이자로 약 ' + g.years.toFixed(1) + '년 지났다면 의제 증여 누적 약 ' + krw(g.cumulative) + '. 성년 자녀 공제 ' + krw(g.deduction) + '으로 약 ' + (g.yearsToExhaust != null ? g.yearsToExhaust.toFixed(1) : '-') + '년분까지 흡수돼요(신고는 필요할 수 있음). 진짜 위험은 아래 "원금 전체가 증여로 판정"되는 경우예요.'));
     }
     return out;
   }
@@ -2070,7 +2104,7 @@
       P.live('section', 'card tint-good', () => {
         const c = P.c;
         return [
-          el('div', { class: 'fn-card-h' }, el('h3', '2027년 2월 연말정산 예상 환급 (' + c.rentCredit.year + ' 귀속)')),
+          el('div', { class: 'fn-card-h' }, el('h3', (c.rentCredit.year + 1) + '년 2월 연말정산 예상 환급 (' + c.rentCredit.year + '년 귀속)')),
           el('div', { class: 'fn-big-num is-good' }, '약 ' + krw(c.rentCredit.credit + c.housing.saving)),
           el('div', { class: 'fn-formula' }, '월세 세액공제 ' + won(c.rentCredit.credit) + ' + 주택자금 소득공제 절세 ' + won(c.housing.saving)),
         ];
@@ -2123,7 +2157,7 @@
     const h = P.c.housing;
     return [
       el('div', { class: 'fn-kv' },
-        el('span', { class: 'k' }, '2026년 갚는 원금 (2,200만 + 7,800만)'), el('span', { class: 'v' }, won(h.repaid)),
+        el('span', { class: 'k' }, P.c.rentCredit.year + '년 갚는 원금 (' + krw(h.prepaid) + ' + ' + krw(h.repaid - h.prepaid) + ')'), el('span', { class: 'v' }, won(h.repaid)),
         el('span', { class: 'k' }, '× 40% (한도 ' + krw(h.capLeft) + ')'), el('span', { class: 'v' }, won(h.deduction)),
         el('span', { class: 'sep' }),
         el('span', { class: 'k strong' }, '절세액 (한계세율 ' + pctTxt(h.rate * 100, 1) + ')'), el('span', { class: 'v is-good' }, won(h.saving))),

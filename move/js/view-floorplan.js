@@ -867,7 +867,13 @@
   MV.css('fp', `
 .fp-tabs { width: fit-content; max-width: 100%; margin-bottom: 12px; }
 .fp-tabs button { min-height: 36px; }
+.fp-headrow { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-bottom: 10px; }
+.fp-headrow > .fp-tabs, .fp-headrow > .fp-tb { margin-bottom: 0; }
 .fp-tb { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 10px; }
+@media (max-height: 860px) and (min-width: 1000px) {
+  .fp-vh { margin-bottom: 10px; }
+  .fp-vh .sub { display: none; }
+}
 .fp-tb .fp-grp { display: inline-flex; align-items: center; gap: 2px; background: var(--bg-3); border-radius: 12px; padding: 2px; }
 .fp-tb .fp-grp .btn { border-color: transparent; background: transparent; }
 .fp-tb .fp-grp .btn:hover { background: var(--bg-2); }
@@ -888,7 +894,7 @@
 .fp-chips .fp-title { font-weight: 800; font-size: .95rem; margin-right: 2px; }
 .fp-editbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 8px; font-size: .88rem; }
 .fp-editbar .spacer { flex: 1; }
-.fp-scroll { overflow: auto; max-height: calc(100vh - 150px); -webkit-overflow-scrolling: touch; border-radius: var(--radius-sm); }
+.fp-scroll { overflow: auto; max-height: calc(100vh - 150px); -webkit-overflow-scrolling: touch; border-radius: var(--radius-sm); touch-action: pan-x pan-y; }
 .fp-stage { position: relative; margin: 0 auto; }
 .fp-svg { display: block; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; font-family: var(--font); }
 .fp-svg text, .fp-svg .fp-deco { pointer-events: none; }
@@ -907,7 +913,15 @@
 .fp-selinfo { font-size: .8rem; padding: 0 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fp-selinfo strong { margin-right: 4px; }
 .fp-selbtns { display: flex; gap: 4px; flex-wrap: wrap; }
-.fp-selbtns .btn { min-height: 36px; padding: 0 10px; font-size: .84rem; }
+.fp-selbtns .btn { min-height: 36px; padding: 0 10px; font-size: .84rem; gap: 4px; }
+@media (max-width: 600px) {
+  .fp-selbar { padding: 4px; gap: 2px; border-radius: 10px; max-width: 182px; }
+  .fp-selinfo { font-size: .72rem; padding: 0 2px; }
+  .fp-selinfo strong { display: block; overflow: hidden; text-overflow: ellipsis; }
+  .fp-selbtns { flex-wrap: nowrap; gap: 3px; }
+  .fp-selbtns .btn { padding: 0; width: 38px; min-width: 38px; font-size: 1rem; }
+  .fp-selbtns .btn .fp-bl { display: none; }
+}
 .fp-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: .75rem; color: var(--ink-3); margin: 8px 4px 0; align-items: center; }
 .fp-legend span { display: inline-flex; align-items: center; gap: 5px; }
 .fp-legend svg { width: 22px; height: 12px; flex: none; }
@@ -937,6 +951,9 @@
 .fp-row-btns .btn { min-height: 36px; }
 .fp-row-btns .btn-icon { width: 36px; }
 .fp-msgs { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 5px; }
+.fp-msgrow { display: flex; gap: 6px; align-items: stretch; }
+.fp-msgrow .fp-msg { flex: 1 1 auto; min-width: 0; }
+.fp-fix { flex: none; min-height: 36px; white-space: nowrap; align-self: center; }
 .fp-msg { width: 100%; display: flex; gap: 8px; align-items: flex-start; text-align: left; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 7px 10px; font: inherit; font-size: .87rem; color: var(--ink); cursor: pointer; min-height: 36px; line-height: 1.45; }
 .fp-msg.is-bad { border-color: color-mix(in srgb, var(--bad) 40%, var(--line)); background: var(--bad-bg); }
 .fp-msg.is-warn { border-color: color-mix(in srgb, var(--warn) 40%, var(--line)); background: var(--warn-bg); }
@@ -985,6 +1002,8 @@
 .fp-miss li:last-child { border-bottom: 0; }
 .fp-miss .fp-mname { flex: 1 1 160px; min-width: 0; font-weight: 650; }
 .fp-area-prev { font-size: .9rem; margin-top: 10px; padding: 8px 10px; border-radius: 10px; background: var(--bg-3); }
+.fp-area-prev.is-bad { background: var(--bad-bg); color: var(--ink); border: 1px solid color-mix(in srgb, var(--bad) 35%, var(--line)); }
+.fp-prev-warn { margin-top: 6px; font-size: .84rem; color: var(--ink-2); display: flex; flex-direction: column; gap: 2px; }
 @media (max-width: 860px) {
   .fp-scroll { max-height: calc(100vh - var(--bottom-h) - 150px); }
 }
@@ -1127,7 +1146,7 @@
       const room = roomAt(plan, o.r.x + o.r.w / 2, o.r.y + o.r.h / 2);
       const out = !within(o.r, plan.bounds, 1);
       const sb = (act, ico, label, onclick, o2) => el('button', Object.assign({ type: 'button', class: 'btn', 'data-act': act, onclick, 'aria-label': label }, o2 || {}),
-        el('span', { 'aria-hidden': 'true' }, ico), el('span', { class: 'fp-bl', 'aria-hidden': 'true' }, (o2 && o2.short) || label));
+        el('span', { 'aria-hidden': 'true' }, ico), el('span', { class: 'fp-bl', 'aria-hidden': 'true' }, ' ' + ((o2 && o2.short) || label)));
       selBar.textContent = '';
       put(selBar,
         el('div', { class: 'fp-selinfo' }, el('strong', shortName(o.it.name, 20)),
@@ -1387,7 +1406,8 @@
       const kv = [];
       const pushObj = (o, prefix) => {
         if (!o || typeof o !== 'object') return;
-        Object.entries(o).forEach(([k2, v2]) => { if (v2 != null && v2 !== '' && typeof v2 !== 'object') kv.push([prefix + k2, String(v2)]); });
+        const LB = MV.planLabels && typeof MV.planLabels === 'object' ? MV.planLabels : {};
+        Object.entries(o).forEach(([k2, v2]) => { if (v2 != null && v2 !== '' && typeof v2 !== 'object') kv.push([prefix + (LB[k2] || k2), String(v2)]); });
       };
       pushObj(plan.complex, ''); pushObj(plan.unit, '');
       const edited = plan.rooms.filter((r) => r.edited);
@@ -2100,18 +2120,19 @@
         try { history.replaceState(null, '', '#/plan/new'); } catch (e) { /* 무시 */ }
       }
       const spacePart = MV.parts && MV.parts.list ? MV.parts.list().find((p) => p.id === 'space' || /공간설계/.test(p.name || '')) : null;
-      root.appendChild(el('div', { class: 'view-head' },
+      root.appendChild(el('div', { class: 'view-head fp-vh' },
         el('div', el('h1', '📐 공간설계'), el('div', { class: 'sub' }, '두 집 도면에 우리 짐을 놓아 보고, 버릴 것·살 것을 정해요')),
         spacePart && MV.views.checklist ? el('div', { class: 'actions' }, el('a', { class: 'btn btn-sm btn-ghost fp-b', href: '#/checklist/' + encodeURIComponent(spacePart.id) }, (spacePart.emoji || '📐') + ' ' + spacePart.name + ' 체크리스트')) : null));
-      root.appendChild(el('div', { class: 'tabs fp-tabs', role: 'tablist', 'aria-label': '도면 선택' },
+      const headRow = el('div', { class: 'fp-headrow' }, el('div', { class: 'tabs fp-tabs', role: 'tablist', 'aria-label': '도면 선택' },
         TABS.map(([id, label]) => el('button', {
           type: 'button', role: 'tab', 'aria-selected': String(id === tab), class: id === tab ? 'active' : '',
           onclick: () => MV.go('#/plan/' + id),
         }, label))));
+      root.appendChild(headRow);
       if (!MV.plans || typeof MV.plans !== 'object') { root.appendChild(emptyCard('도면 데이터(MV.plans)가 아직 없어요.')); return; }
       if (tab === 'compare') { renderCompare(root, ctx); return; }
       if (!MV.plans[tab]) { root.appendChild(emptyCard(PLAN_LABEL[tab] + ' 도면 데이터가 아직 없어요.')); return; }
-      renderEditor(root, tab, ctx);
+      renderEditor(root, tab, ctx, headRow);
     },
   });
 

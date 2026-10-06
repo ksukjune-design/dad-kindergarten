@@ -11,9 +11,9 @@
             MV.date.parse(s) / str(d) / add(s, n) / diff(a, b) (= b - a 일수)
             MV.date.dday(s) → {n, label, overdue}  /  fmt(s) '11/3(화)'  /  fmtLong(s)
             MV.date.weekStart(s) 월요일 / MV.date.moveDate() 이사일
-   돈       MV.fmt.won(n) '295,770,000원' / num(n) / man(n) '120만원'
-            eok(n) '2억 9,577만원' / krw(n) 크기에 맞춰 / pct(x, d)
-            MV.parseMoney('3.78억' | '2억 9,577만' | '120만' | '1,200,000') → 원
+   돈       MV.fmt.won(n) '295,700,000원' / num(n) / man(n) '120만원'
+            eok(n) '2억 9,570만원' / krw(n) 크기에 맞춰 / pct(x, d)
+            MV.parseMoney('3.78억' | '2억 9,570만' | '120만' | '1,200,000') → 원
    저장소   MV.store.get() → state
             MV.store.update(fn(state), {log, silent}) 변경 + 저장 + 'change' 알림
             MV.store.on('change', fn) → 해제함수

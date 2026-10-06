@@ -935,6 +935,8 @@
 .es-qwarns li.is-info { background: var(--bg); border-color: var(--kid); }
 .es-qnorm { font-size: .78rem; color: var(--ink-3); margin-top: 4px; }
 .es-qtbl td.es-qbest { font-weight: 800; }
+.es-qtbl td { vertical-align: top; }
+.es-qtbl td .chip { margin-top: 2px; }
 .es-qcmp-cards { display: none; flex-direction: column; gap: 8px; }
 @media (max-width: 760px) { .es-qcmp-tbl { display: none; } .es-qcmp-cards { display: flex; } }
 .es-qcmp-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); }
@@ -1035,13 +1037,17 @@
      - updater: 한 번 만든 입력 폼의 값·자동 안내만 바꿈 (입력칸을 지우지 않음)
      - 마우스·손가락을 누르고 있는 동안에는 다시 그리기를 미뤄 클릭이 사라지지 않게 함 */
   let R = null;
-  const ptr = { down: false, at: 0, timer: null, sel: null };
+  const ptr = { down: false, at: 0, timer: null, retry: null, sel: null };
   function region(build, name) {
     const node = el('div', { class: 'es-region', 'data-region': name || '' });
     const reg = { node, build, name: name || '', dirty: false };
     if (R) R.regions.push(reg);
     fillRegion(reg);
     return node;
+  }
+  /* null·false 를 걸러 자식 바꾸기 (replaceChildren 은 null 을 글자 'null' 로 넣음) */
+  function setKids(node, ...kids) {
+    node.replaceChildren(...kids.flat(Infinity).filter((k) => k !== null && k !== undefined && k !== false).map((k) => (k instanceof Node ? k : document.createTextNode(String(k)))));
   }
   function fillRegion(reg) {
     let kids;
@@ -1099,8 +1105,8 @@
   function tryFlush() {
     if (!R || !R.pending) return;
     if (ptr.down && Date.now() - ptr.at < 1200) {
-      clearTimeout(ptr.timer);
-      ptr.timer = setTimeout(tryFlush, 400);
+      // 누르고 있는 동안은 미룸 — 손을 떼면(releasePtr) 바로 다시 시도, 길게 누르면 최대 1.2초 뒤
+      if (!ptr.retry) ptr.retry = setTimeout(() => { ptr.retry = null; tryFlush(); }, 250);
       return;
     }
     ptr.down = false;
@@ -1652,7 +1658,7 @@
       el('p', { class: 'small es-muted mb-0' }, '방문견적 업체 3곳에 똑같이 보내세요. 버릴 짐과 LG가 옮길 가전은 따로 표시돼요.'),
       el('div', { class: 'row' },
         el('button', { type: 'button', class: 'btn btn-primary', onclick: () => copyText(ta.value, ta) }, '📋 복사'),
-        el('button', { type: 'button', class: 'btn', onclick: () => { MV.ui.download('짐목록-' + D.today() + '.csv', '﻿' + data.csv, 'text/csv;charset=utf-8'); MV.ui.toast('CSV 파일을 저장했어요.'); } }, '⬇ CSV 저장')),
+        el('button', { type: 'button', class: 'btn', onclick: () => { MV.ui.download('move-inventory-' + D.today() + '.csv', '﻿' + data.csv, 'text/csv;charset=utf-8'); MV.ui.toast('CSV 파일을 저장했어요.'); } }, '⬇ CSV 저장')),
       ta);
     MV.ui.modal({ title: '업체에 보낼 짐 목록', wide: true, body, actions: [{ label: '닫기', kind: 'ghost' }] });
   }
@@ -1834,7 +1840,7 @@
       Array.from(dsel.options).forEach((o, i) => { const t = modeLabel(DATE_MODES[i], c, di); if (o.textContent !== t) o.textContent = t; });
       if (document.activeElement !== dsel) dsel.value = inpNow().dateMode;
       const lun = di.lunar;
-      dfact.replaceChildren(
+      setKids(dfact,
         el('div', el('b', D.fmtLong(di.date)), ' — ',
           lun ? '음력 ' + lun.month + '월 ' + lun.day + '일 → ' : '음력 정보 없음 → ',
           lun ? el('b', { style: { color: di.sohn ? 'var(--bad)' : 'var(--good)' } }, di.sohn ? '손없는날이에요 (할증·예약 경쟁 큼)' : '손없는날이 아니에요') : '날짜 유형을 직접 고르세요',
@@ -1909,7 +1915,7 @@
       const inp = est.inputs;
       const c = est.coef;
       const b = est.volumeParts.boxes;
-      boxRes.replaceChildren('→ 박스 약 ' + b + '개 (' + m3(b * c.m3_per_box) + ')',
+      setKids(boxRes,'→ 박스 약 ' + b + '개 (' + m3(b * c.m3_per_box) + ')',
         el('small', '= 기준 ' + c.boxes_typical + '개 × ' + inp.pyeong + '/24평 × ' + inp.persons + '명 보정 × (1−' + inp.reducePct + '%) + 붙박이장 ' + inp.builtinBoxes + '개' +
           (est.next && est.next.headroom < 3 ? ' · 박스 ' + est.next.boxes + '개 더 늘면 ' + tonsLabel(est.next.tons) : '')));
     });
@@ -1921,7 +1927,7 @@
       const est = R.est;
       const u = est.counts.acUnits;
       const lgAc = MV.inv.list((it) => isAircon(it) && it.lg && isGoing(it, est.inputs)).reduce((s, it) => s + qtyOf(it), 0);
-      acBox.replaceChildren(
+      setKids(acBox,
         el('div', el('b', '❄️ 에어컨 이전 (짐 목록에서 자동): '),
           est.counts.acN ? AC_T.filter((t) => u[t]).map((t) => AC_LABEL[t] + ' ' + u[t] + '대').join(', ') + ' — 이삿짐센터 협력 기사' : '이삿짐센터가 옮길 에어컨 없음'),
         el('div', { class: 'es-note' }, lgAc ? 'LG 서비스로 옮기는 에어컨 ' + lgAc + '대는 빠져 있어요. ' : '',
@@ -2120,18 +2126,27 @@
   function newQuote() {
     return { id: MV.uid('qt'), company: '', date: '', amount: null, vatIncluded: true, tons: null, crew: null, ladder: false, aircon: false, arrange: false, waste: false, deposit: null, licenseChecked: false, insuranceChecked: false, visitDone: false, note: '' };
   }
-  function quoteEval(q, est, raw) {
+  /* 견적 3곳 이상이면 '다른 업체 중앙값' 기준으로, 그보다 적으면 모델 범위 기준으로 너무 싸거나 비싼지 봄 */
+  function peerMedian(raw) {
+    const ns = quotesOf(estSt()).map((x) => normQuote(x, raw)).filter(Boolean).map((x) => x.amount);
+    return ns.length >= 3 ? median(ns) : null;
+  }
+  function quoteEval(q, est, raw, peerMed) {
     const n = normQuote(q, raw);
     const out = { n, badges: [], warns: [], tooCheap: false, tooHigh: false, diff: null };
     if (!n) { out.warns.push({ t: '금액을 넣으면 모델과 비교해요.', k: 'info' }); return out; }
     const c = raw.coef;
+    const pm = peerMed === undefined ? peerMedian(raw) : peerMed;
     out.diff = n.amount / est.typical - 1;
-    out.tooCheap = n.amount < est.low;
-    out.tooHigh = n.amount > est.high;
+    const peerDiff = pm ? n.amount / pm - 1 : null;
+    out.tooCheap = pm ? (peerDiff < -0.15 || n.amount < est.typical * 0.6) : n.amount < est.low;
+    out.tooHigh = pm ? peerDiff > 0.25 : n.amount > est.high;
     const dTxt = Math.abs(out.diff) < 0.005 ? '모델과 거의 같음' : '모델보다 ' + Math.abs(Math.round(out.diff * 100)) + '% ' + (out.diff < 0 ? '낮음' : '높음');
-    out.badges.push({ t: dTxt, cls: out.tooCheap ? 'bad' : out.tooHigh ? 'warn' : 'good' });
-    if (out.tooCheap) out.warns.push({ t: '모델 하한(' + won(est.low) + ')보다 싸요 — 당일 ‘짐이 많다’며 증차·증원 추가요금을 요구할 위험이 있어요. 포함 항목을 서면으로 받으세요.', k: 'bad' });
-    else if (out.tooHigh) out.warns.push({ t: '모델 상한(' + won(est.high) + ')보다 비싸요 — 포함 항목을 다시 확인하고 협상해 보세요.', k: 'warn' });
+    out.badges.push({ t: dTxt, cls: out.tooCheap ? 'bad' : out.tooHigh ? 'warn' : (pm || Math.abs(out.diff) <= 0.15) ? 'good' : '' });
+    if (pm && Math.abs(peerDiff) >= 0.005) out.badges.push({ t: '다른 견적 중앙값보다 ' + Math.abs(Math.round(peerDiff * 100)) + '% ' + (peerDiff < 0 ? '낮음' : '높음'), cls: out.tooCheap ? 'bad' : out.tooHigh ? 'warn' : '' });
+    if (out.tooCheap) out.warns.push({ t: (pm ? '다른 견적들보다 눈에 띄게 싸요' : '모델 하한(' + won(est.low) + ')보다 싸요') + ' — 당일 ‘짐이 많다’며 증차·증원 추가요금을 요구할 위험이 있어요. 포함 항목을 서면으로 받으세요.', k: 'bad' });
+    else if (out.tooHigh) out.warns.push({ t: (pm ? '다른 견적들보다 눈에 띄게 비싸요' : '모델 상한(' + won(est.high) + ')보다 비싸요') + ' — 포함 항목을 다시 확인하고 협상해 보세요.', k: 'warn' });
+    else if (!pm && out.diff < -0.15) out.warns.push({ t: '모델 범위 안이지만 꽤 낮은 편이에요. 모델은 신뢰도 낮은 추정치라 견적 3곳이 모이면 서로 비교해 판단하세요.', k: 'info' });
     if (!q.ladder && raw.parts.ladder > 0) out.warns.push({ t: '사다리차 미포함(또는 미확인) — 약 ' + won(raw.parts.ladder) + ' 더 들 수 있어요 (환산에 더했어요).', k: 'warn' });
     if (!q.aircon && raw.parts.aircon > 0) out.warns.push({ t: '에어컨 이전 미포함(또는 미확인) — 약 ' + won(raw.parts.aircon) + ' (환산에 더했어요).', k: 'warn' });
     if (!q.waste && raw.parts.waste > 0) out.warns.push({ t: '폐기물 처리 미포함 — 약 ' + won(raw.parts.waste) + ' (환산에 더했어요).', k: 'warn' });
@@ -2153,11 +2168,13 @@
     return out;
   }
   function bestQuote(est, raw) {
-    const scored = quotesOf(estSt()).map((q) => ({ q, ev: quoteEval(q, est, raw) })).filter((x) => x.ev.n);
+    const pm = peerMedian(raw);
+    const scored = quotesOf(estSt()).map((q) => ({ q, ev: quoteEval(q, est, raw, pm) })).filter((x) => x.ev.n);
     if (scored.length < 2) return null;
+    const rangeTxt = pm ? '너무 싸지 않은 견적 중' : '모델 범위 안에서';
     let pool = scored.filter((x) => !x.ev.tooCheap && x.q.licenseChecked && x.q.insuranceChecked);
-    let basis = '허가·보험 확인 + 모델 범위 안에서 가장 저렴';
-    if (!pool.length) { pool = scored.filter((x) => !x.ev.tooCheap); basis = '모델 범위 안에서 가장 저렴 (허가·보험 확인 전)'; }
+    let basis = '허가·보험 확인 + ' + rangeTxt + ' 가장 저렴';
+    if (!pool.length) { pool = scored.filter((x) => !x.ev.tooCheap); basis = rangeTxt + ' 가장 저렴 (허가·보험 확인 전)'; }
     if (!pool.length) return null;
     pool.sort((a, b) => a.ev.n.amount - b.ev.n.amount);
     return { id: pool[0].q.id, basis };
@@ -2181,24 +2198,25 @@
     if (!qs.length) {
       return el('section', { class: 'card' }, el('div', { class: 'empty' },
         el('span', { class: 'big', 'aria-hidden': 'true' }, '📑'),
-        el('p', '아직 받은 견적이 없어요. 방문견적을 받을 때마다 아래 ‘+ 견적 추가’로 넣으세요.'),
-        el('p', { class: 'small' }, '권장: 플랫폼 2곳 + 지인 추천 1~2곳 → 후보 5곳 중 3곳 방문견적')));
+        el('p', '아직 받은 견적이 없어요. 방문견적을 받을 때마다 넣으면 모델과 비교하고 ‘견적으로 보정’할 수 있어요.'),
+        el('p', { class: 'small' }, '권장: 플랫폼 2곳 + 지인 추천 1~2곳 → 후보 5곳 중 3곳 방문견적'),
+        el('button', { type: 'button', class: 'btn btn-primary', onclick: addQuote }, '+ 견적 추가')));
     }
     const best = bestQuote(est, raw);
-    const rows = qs.map((q) => ({ q, ev: quoteEval(q, est, raw) }))
+    const pm = peerMedian(raw);
+    const rows = qs.map((q) => ({ q, ev: quoteEval(q, est, raw, pm) }))
       .sort((a, b) => (a.ev.n ? a.ev.n.amount : Infinity) - (b.ev.n ? b.ev.n.amount : Infinity));
-    const chk = (v) => (v ? '✓' : '·');
+    const incl = (q) => [['ladder', '사다리차'], ['aircon', '에어컨'], ['arrange', '정리'], ['waste', '폐기물']].filter(([k]) => q[k]).map(([, l]) => l);
+    const checks = (q) => [['visitDone', '방문'], ['licenseChecked', '허가'], ['insuranceChecked', '보험']].map(([k, l]) => el('span', { class: 'chip ' + (q[k] ? 'good' : ''), title: q[k] ? l + ' 확인함' : l + ' 확인 전' }, (q[k] ? '✓ ' : '') + l));
     const tbl = el('table', { class: 'tbl es-qtbl' },
-      el('thead', el('tr', el('th', '업체'), el('th', { class: 'num' }, '견적 금액'), el('th', { class: 'num' }, '같은 조건 환산'), el('th', '모델 대비'),
-        el('th', '톤·인원'), el('th', { title: '사다리차·에어컨·정리·폐기물' }, '포함'), el('th', { title: '방문·허가·보험' }, '확인'))),
+      el('thead', el('tr', el('th', '업체'), el('th', { class: 'num' }, '같은 조건 환산'), el('th', '모델·다른 견적 대비'), el('th', '포함 · 확인'))),
       el('tbody', rows.map(({ q, ev }) => el('tr',
-        el('td', { class: best && best.id === q.id ? 'es-qbest' : '' }, q.company || '이름 없는 업체', best && best.id === q.id ? el('span', { class: 'chip good', style: { marginLeft: '6px' } }, '⭐ 추천') : null),
-        el('td', { class: 'num' }, num(q.amount, 0) > 0 ? won(q.amount) : '—'),
-        el('td', { class: 'num' }, ev.n ? won(ev.n.amount) : '—'),
-        el('td', ev.badges.map((b) => el('span', { class: 'chip ' + b.cls }, b.t))),
-        el('td', { class: 'small' }, (num(q.tons, 0) ? tonsLabel(num(q.tons, 0)) : '—') + ' · ' + (num(q.crew, 0) ? q.crew + '명' : '—')),
-        el('td', { class: 'small', title: '사다리차 · 에어컨 · 정리 · 폐기물' }, '사다리 ' + chk(q.ladder) + ' 에어컨 ' + chk(q.aircon) + ' 정리 ' + chk(q.arrange) + ' 폐기 ' + chk(q.waste)),
-        el('td', { class: 'small' }, '방문 ' + chk(q.visitDone) + ' 허가 ' + chk(q.licenseChecked) + ' 보험 ' + chk(q.insuranceChecked))))));
+        el('td', { class: best && best.id === q.id ? 'es-qbest' : '' }, el('div', q.company || '이름 없는 업체'),
+          best && best.id === q.id ? el('span', { class: 'chip good' }, '⭐ 추천') : null,
+          el('div', { class: 'tiny es-muted' }, (num(q.tons, 0) ? tonsLabel(num(q.tons, 0)) : '톤 —') + ' · ' + (num(q.crew, 0) ? q.crew + '명' : '인원 —') + (q.date ? ' · ' + D.fmt(q.date) : ''))),
+        el('td', { class: 'num' }, el('b', ev.n ? won(ev.n.amount) : '—'), el('div', { class: 'tiny es-muted' }, '견적 ' + (num(q.amount, 0) > 0 ? won(q.amount) : '—'))),
+        el('td', el('div', { class: 'es-qbadges', style: { marginTop: 0 } }, ev.badges.map((b) => el('span', { class: 'chip ' + b.cls }, b.t)))),
+        el('td', el('div', { class: 'small' }, incl(q).length ? '포함: ' + incl(q).join('·') : '포함 항목 미확인'), el('div', { class: 'es-qbadges', style: { marginTop: '4px' } }, checks(q)))))));
     const cards = el('div', { class: 'es-qcmp-cards' }, rows.map(({ q, ev }) => el('div', { class: 'es-qcmp-card' },
       el('div', { class: 'strong' }, q.company || '이름 없는 업체', best && best.id === q.id ? el('span', { class: 'chip good', style: { marginLeft: '6px' } }, '⭐ 추천') : null),
       el('div', { class: 'es-qc-amt' }, ev.n ? won(ev.n.amount) : '—'),
@@ -2278,7 +2296,7 @@
       card.classList.toggle('is-best', !!best && best.id === id);
       card.classList.toggle('is-cheap', ev.tooCheap);
       badges.replaceChildren(...ev.badges.map((b) => el('span', { class: 'chip ' + b.cls }, b.t)),
-        best && best.id === id ? el('span', { class: 'chip good' }, '⭐ 추천') : null);
+        ...(best && best.id === id ? [el('span', { class: 'chip good' }, '⭐ 추천')] : []));
       normTxt.textContent = ev.n ? '같은 조건 환산 ' + won(ev.n.amount) + (ev.n.adds.length ? ' (= 견적 ' + won(q.amount) + ' + ' + ev.n.adds.map((a) => a.label + ' ' + won(a.v)).join(' + ') + ')' : '') + ' · 모델 기준 ' + won(est.typical) : '';
       warns.replaceChildren(...ev.warns.map((w) => el('li', { class: 'is-' + w.k }, w.t)));
       if (document.activeElement !== company && company.value !== (q.company || '')) company.value = q.company || '';
@@ -2288,14 +2306,15 @@
     }, card);
     return card;
   }
+  function addQuote() {
+    const q = newQuote();
+    mem.focusQuote = q.id;
+    MV.store.update((st) => { ensureEst(st).quotes.push(q); }, { log: '업체 견적 칸 추가' });
+  }
   function quotesEditor() {
     const wrap = el('section', { class: 'es-qlist', 'aria-label': '업체 견적 입력' });
     const list = el('div', { class: 'es-qlist' });
-    const addBtn = el('button', { type: 'button', class: 'btn btn-primary', onclick: () => {
-      const q = newQuote();
-      mem.focusQuote = q.id;
-      MV.store.update((st) => { ensureEst(st).quotes.push(q); }, { log: '업체 견적 칸 추가' });
-    } }, '+ 견적 추가');
+    const addBtn = el('button', { type: 'button', class: 'btn btn-primary', onclick: addQuote }, '+ 견적 추가');
     let sig = null;
     const rebuild = () => {
       const qs = quotesOf(estSt());
@@ -2307,14 +2326,16 @@
         if (n) { n.focus({ preventScroll: true }); n.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
       }
     };
+    const headRow = el('div', { class: 'row' }, el('h2', { class: 'es-h2', style: { margin: 0 } }, '✍️ 받은 견적 입력'), el('span', { class: 'spacer' }), addBtn);
     upd(() => {
       const s = quotesOf(estSt()).map((q) => q.id).join(',');
+      headRow.hidden = !s;
       if (s === sig) return;
       const a = document.activeElement;
       if (a && list.contains(a) && isTyping(a)) { if (R) R.dirty = true; return; }
       rebuild();
     });
-    wrap.append(el('div', { class: 'row' }, el('h2', { class: 'es-h2', style: { margin: 0 } }, '✍️ 받은 견적 입력'), el('span', { class: 'spacer' }), addBtn), list);
+    wrap.append(headRow, list);
     return wrap;
   }
   function askCard() {
@@ -2474,6 +2495,17 @@
       return el('label', { class: 'check' }, x, el('span', label));
     };
     const condsOk = under && checks.schedule && checks.landlord && checks.brand && !otherBrand.length;
+    let savingTxt = '리서치: 에어컨을 뺀 가전만 LG로 먼저 옮기면 차량 등급이 잘 안 바뀌어 이사비는 0~20만원 정도만 줄어요. ';
+    if (nLg) {
+      const st = stGet();
+      const ids = new Set(items.map((it) => it.id));
+      const allMover = compute(st, { inventory: (st.inventory || []).filter((x) => x && typeof x === 'object').map((it) => (ids.has(it.id) ? Object.assign({}, it, { lg: false }) : it)) });
+      const save = Math.max(0, allMover.typical - est.typical);
+      const acPart = Math.max(0, allMover.parts.aircon - est.parts.aircon);
+      savingTxt = '이 짐 목록이면 지금 선택으로 이삿짐센터 비용이 약 ' + won(save) + ' 줄어요' + (acPart > 0 ? ' (그중 에어컨 이전설치 몫 약 ' + won(acPart) + ')' : '') +
+        (allMover.tons !== est.tons ? ', 차량도 ' + tonsLabel(allMover.tons) + ' → ' + tonsLabel(est.tons) + '로 내려가요. ' : '. ') +
+        '리서치는 에어컨을 뺀 가전만 따지면 0~20만원 정도라고 봤어요. ';
+    }
     let verdict;
     if (!nLg) verdict = el('p', '지금은 모두 이삿짐센터로 계산 중이에요. 냉장고·건조기·에어컨처럼 파손이 걱정되는 가전부터 LG 견적(1544-7777)을 받아 보세요.');
     else if (otherBrand.length) verdict = el('p', { style: { color: 'var(--bad)' } }, el('b', '⚠ ' + otherBrand.map(nm).join(', ')), '은(는) 다른 브랜드로 보여요. LG 이전설치는 LG 제품만 돼요 — 이삿짐센터로 바꾸세요.');
@@ -2483,7 +2515,7 @@
     return el('section', { class: 'card es-reco tint-kid', 'aria-label': '추천' },
       sectionHead('🧭', '어떻게 할까요?'),
       verdict,
-      el('p', { class: 'small' }, 'LG로 먼저 옮겨도 이삿짐센터 차량 등급은 잘 안 바뀌어서 이사비는 0~20만원 정도만 줄어요. LG 사전 이전은 ‘비용 절감’보다 ‘가전 파손 위험 분리’ 목적이에요 (지난번 세탁기 고장 경험). 정수기형 냉장고·히트펌프 건조기·에어컨·벽걸이 TV는 전문기사에게 맡길 가치가 커요.'),
+      el('p', { class: 'small' }, savingTxt, 'LG 사전 이전은 ‘비용 절감’보다 ‘가전 파손 위험 분리’ 목적으로 보세요 (지난번 세탁기 고장 경험). 정수기형 냉장고·히트펌프 건조기·에어컨·벽걸이 TV는 전문기사에게 맡길 가치가 커요.'),
       el('ul', { class: 'es-conds' },
         el('li', { class: !nLg ? 'is-no' : under ? 'is-ok' : 'is-bad' }, el('span', { class: 'es-cmark', 'aria-hidden': 'true' }, !nLg ? '·' : under ? '✓' : '✕'),
           el('span', 'LG 총견적 약 30만원 이하 — 지금 ' + (nLg && lgc ? '약 ' + won(total) + ' (' + won(lgc.low) + '~' + won(lgc.high) + ')' : 'LG 선택 없음'))),
@@ -2548,7 +2580,7 @@
       document.removeEventListener('change', onChangeCap, true);
       root.removeEventListener('focusout', onFocusOut);
       if (wideMQ.removeEventListener) wideMQ.removeEventListener('change', onMQ);
-      clearTimeout(ptr.timer);
+      clearTimeout(ptr.timer); clearTimeout(ptr.retry); ptr.retry = null;
       ptr.down = false; ptr.sel = null;
       if (R === myR) R = null;
     });
