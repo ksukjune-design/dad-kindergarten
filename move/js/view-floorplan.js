@@ -14,6 +14,8 @@
                           size:    { width, depth } | 없음              전체 크기 (외곽·치수선·화면 맞춤이 따라감)
                           doorsAdded:   [{ id, x, y, width, orientation, swing, hinge, room }]   room 을 지우면 숨김 (그린 방이면 함께 지움 · 되돌리기 가능)
                           doorsDeleted: ['x,y,o']                       지운 원래 문 (x·y·방향으로 만든 고정 키)
+                          fixtures: { '<kind@x,y>': { w, h, measured:true, width, depth?, height? } }   실측한 설비 자리 (지금은 냉장고 자리)
+                                    w·h = 도면에 그릴 크기(cm), width = 잰 폭(자리 긴 쪽), depth·height = 잰 깊이·높이 (없으면 도면 그대로)
                         }
                         병합 도면 = 원래 − 지운 방 + 그린 방 + 덮어쓰기 + 전체 크기 (점검·자동 배치·비교·면적 모두 이것을 씀)
             planBg    = { old: Bg|null, new: Bg|null }   평면도 사진 (백업 파일에 함께 들어감)
@@ -24,6 +26,7 @@
    조작     끌기(마우스·터치·펜, 도면 밖으로는 못 나감 · 가장자리에서 자동 스크롤) · 두 손가락 확대/축소(도면만)
             키보드 단축키는 도면에 초점이 있거나 마우스가 도면 위에 있을 때만 (방향키·R·Delete·Esc)
             ✏️ 치수 수정 도구: 방 고치기(누르기) · 방 그리기(끌기 또는 🔢 숫자로) · 문 추가(벽 누르기) · 문 삭제(문 누르기, 손가락 칸 44px) · 전체 크기
+              방 고치기 중 냉장고 자리를 누르면(또는 배치 점검·설비 설명의 '📏 실측 입력') 잰 폭·깊이·높이를 넣는 창
               폰·태블릿 폭에선 도구 줄이 화면 위로 밀려 나가면 아래 메뉴 위에 '따라다니는 도구 줄'이 뜸
               방을 옮기거나 크기를 바꾸면 그 방에 단 문(doorsAdded.room)도 같은 벽을 따라 옮김 · 지운 방 쪽으로 열리던 문은 남은 방 쪽으로 뒤집어 그림
             🖼 평면도 사진: 고르기 → 📏 축척 맞추기(두 점 + 실제 길이 → 왼쪽 위 모서리) · ✋ 위치 옮기기 · 돌리기 · 진하기
@@ -323,6 +326,55 @@
   }
   const segLen = (o) => (o && o.length != null ? Math.max(0, num(o.length, 0)) : Math.max(0, num(o && o.width, 0)));
 
+  /* ---------------- 설비 자리 실측 (냉장고 자리) ---------------- */
+  /** 실측을 넣을 수 있는 설비 종류 */
+  const FX_MEASURABLE = ['fridge-spot'];
+  const fxMeasurable = (f) => !!f && FX_MEASURABLE.includes(String(f.kind || ''));
+  /** 설비 이름에서 '(추정)'·'(확인)' 꼬리를 뗀 것 */
+  const fxShortName = (f) => String((f && f.name) || '설비 자리').replace(/\s*\((추정|확인)\)\s*$/, '') || '설비 자리';
+  /** 잰 값 한 줄: '실측 폭 93cm · 깊이 65cm · 높이 185cm' */
+  const measTxt = (m) => '실측 폭 ' + cm1(m.width) + 'cm' + (m.depth != null ? ' · 깊이 ' + cm1(m.depth) + 'cm' : '') + (m.height != null ? ' · 높이 ' + cm1(m.height) + 'cm' : '');
+  /** 원래 설비 자리를 가리키는 고정 키 (자료 순서·이름이 바뀌어도 같은 자리를 가리키도록 종류·x·y로) */
+  const fxStoreKey = (f) => String((f && f.kind) || 'fx') + '@' + Math.round(num(f && f.x, 0)) + ',' + Math.round(num(f && f.y, 0));
+  const FXM = { wMin: 30, wMax: 300, dMin: 10, dMax: 200, hMin: 100, hMax: 300 };   // 실측 입력으로 받아 주는 범위 (cm)
+  /** 저장된 실측 → { width, depth, height } (없거나 잘못되면 null). 예전 모양 { w, h, measured } 도 읽음. axis = 자리 긴 쪽 방향 'v'|'h' */
+  function fxMeasOf(e, axis) {
+    if (!e || typeof e !== 'object' || e.measured === false) return null;
+    let width = num(e.width, NaN), depth = num(e.depth, NaN);
+    if (!isFinite(width)) width = num(axis === 'v' ? e.h : e.w, NaN);
+    if (!isFinite(depth) && e.width == null) depth = num(axis === 'v' ? e.w : e.h, NaN);
+    if (!(width >= FXM.wMin && width <= FXM.wMax)) return null;
+    const height = num(e.height, NaN);
+    return { width: r1(width), depth: depth >= FXM.dMin && depth <= FXM.dMax ? r1(depth) : null, height: height >= FXM.hMin && height <= FXM.hMax ? r1(height) : null };
+  }
+  /**
+   * 실측한 크기로 다시 그린 자리 {x,y,w,h}. 벽에 붙은 쪽(원래 도면에서 그 자리가 든 방의 가까운 벽)은 그대로 두고 늘이거나 줄임.
+   * f = 원래 자료의 설비, m = { width, depth }, rooms = 원래 방들 [{x,y,w,h}]
+   */
+  function fxMeasRect(f, m, rooms) {
+    const r = fxRect(f);
+    const v = r.h >= r.w;   // 'v' = 긴 쪽이 세로
+    const L = m.width, D = m.depth != null ? m.depth : (v ? r.w : r.h);
+    const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
+    let room = null;
+    (rooms || []).forEach((rm) => { if (rm.w > 0 && rm.h > 0 && hasPt(rm, cx, cy) && (!room || rm.w * rm.h < room.w * room.h)) room = rm; });
+    // 긴 쪽: 방 끝에 붙어 있으면(5cm 안) 그 끝을, 아니면 가운데를 그대로
+    const along = (p0, s0, lo, span) => {
+      if (!room) return p0 + s0 / 2 - L / 2;
+      const a = Math.abs(p0 - lo), z = Math.abs(lo + span - (p0 + s0));
+      if (Math.min(a, z) > 5) return p0 + s0 / 2 - L / 2;
+      return a <= z ? p0 : p0 + s0 - L;
+    };
+    // 깊이 쪽: 더 가까운 벽에 붙인 채로
+    const cross = (p0, s0, lo, span) => {
+      if (!room) return p0;
+      return Math.abs(lo + span - (p0 + s0)) < Math.abs(p0 - lo) ? p0 + s0 - D : p0;
+    };
+    return v ? { x: r1(cross(r.x, r.w, room && room.x, room && room.w)), y: r1(along(r.y, r.h, room && room.y, room && room.h)), w: r1(D), h: r1(L) }
+      : { x: r1(along(r.x, r.w, room && room.x, room && room.w)), y: r1(cross(r.y, r.h, room && room.y, room && room.h)), w: r1(L), h: r1(D) };
+  }
+  const baseRoomsOf = (base) => (Array.isArray(base && base.rooms) ? base.rooms : []).filter((r) => r && typeof r === 'object').map(fxRect);
+
   /* ---------------- 평면도 사진 기하 ----------------
      사진 픽셀 (u, v) → 도면 cm: 크기 cmPerPx 로 늘린 뒤 rot 만큼 시계 방향으로 돌리고, 돌린 외곽의 좌상단을 (x, y) 에 둠 */
   function bgDims(bg) {
@@ -442,6 +494,8 @@
       // 새 항목은 예전 자료에 없을 수 있음 → 비어 있는 것으로
       ['added', 'deleted', 'doorsAdded', 'doorsDeleted'].forEach((f) => { if (!Array.isArray(E[f])) E[f] = []; });
       if (E.size != null && (typeof E.size !== 'object' || Array.isArray(E.size))) delete E.size;
+      // 설비 자리 실측 (냉장고 자리 등) — 예전 자료엔 없음
+      if (!E.fixtures || typeof E.fixtures !== 'object' || Array.isArray(E.fixtures)) E.fixtures = {};
     });
     return st.planEdits;
   }
@@ -584,10 +638,21 @@
       const nd = Object.assign({}, d, { swing: flipSwing(d), _flipped: true });
       return swingIn(nd, liveRooms) ? nd : d;
     };
+    // 설비 자리: 실측을 넣은 자리(냉장고 자리)는 잰 크기로 — _fk 고정 키, _axis 자리 긴 쪽 방향, _orig 원래 도면 크기, _meas 잰 값
+    const baseRooms = baseRoomsOf(base);
+    let fxMeasured = 0;
+    const fixtures = arr(base.fixtures).filter((f) => !rectHidden(f)).map((f) => {
+      const r0 = fxRect(f);
+      const out = Object.assign({}, f, { _fk: fxStoreKey(f), _axis: r0.h >= r0.w ? 'v' : 'h', _orig: r0 });
+      const m = fxMeasurable(f) ? fxMeasOf(E.fixtures[out._fk], out._axis) : null;
+      if (!m) return out;
+      fxMeasured++;
+      return Object.assign(out, fxMeasRect(f, m, baseRooms), { _measured: true, _meas: m });
+    });
     const p = Object.assign({}, base, {
       key, rooms, doors: doors.concat(doorsAdded).map(flipDead),
       windows: arr(base.windows).filter((w) => !segHidden(w)),
-      fixtures: arr(base.fixtures).filter((f) => !rectHidden(f)),
+      fixtures,
       // 붙박이장은 옷 수납 길이 비교에 쓰이므로 방을 지워도 남김 (실측으로 따로 확인)
       builtins: arr(base.builtins),
       name: String(base.name || PLAN_LABEL[key]), short: String(base.short || PLAN_LABEL[key]),
@@ -603,8 +668,8 @@
     p.doorsHidden = doorsHidden;
     p.removed = removed;
     p.edits = { rooms: kept.filter((r) => r.edited).length, added: added.length, deleted: removed.length, size: p.sizeEdited,
-      doorsAdded: doorsAdded.length, doorsDeleted: doorsGone.length };
-    p.edited = !!(p.edits.rooms || p.edits.added || p.edits.deleted || p.edits.size || p.edits.doorsAdded || p.edits.doorsDeleted);
+      doorsAdded: doorsAdded.length, doorsDeleted: doorsGone.length, fixtures: fxMeasured };
+    p.edited = !!(p.edits.rooms || p.edits.added || p.edits.deleted || p.edits.size || p.edits.doorsAdded || p.edits.doorsDeleted || p.edits.fixtures);
     let x0 = 0, y0 = 0, x1 = p.width, y1 = p.depth;
     const grow = (r) => { if (r.w <= 0 || r.h <= 0) return; x0 = Math.min(x0, r.x); y0 = Math.min(y0, r.y); x1 = Math.max(x1, r.x + r.w); y1 = Math.max(y1, r.y + r.h); };
     rooms.forEach(grow); p.fixtures.forEach((f) => grow(fxRect(f))); p.builtins.forEach((f) => grow(fxRect(f)));
@@ -625,6 +690,7 @@
     if (e.size) out.push('전체 크기 ' + Math.round(plan.width) + '×' + Math.round(plan.depth) + 'cm');
     if (e.doorsAdded) out.push('문 추가 ' + e.doorsAdded);
     if (e.doorsDeleted) out.push('문 삭제 ' + e.doorsDeleted);
+    if (e.fixtures) out.push(plan.fixtures.filter((f) => f._measured).map((f) => fxShortName(f) + ' 실측 ' + cm1(f._meas.width) + 'cm').join(', ') || '설비 자리 실측');
     return out.join(' · ');
   }
   /** 그림 범위: 도면 + (예전 자료 등으로) 도면 밖에 놓인 짐까지 보이게 넓힘 → 보이지 않는 짐이 생기지 않도록.
@@ -704,7 +770,8 @@
   function statics(plan) {
     const out = [];
     plan.doors.forEach((d) => { const g = doorGeom(d); out.push({ r: g.swing, type: 'door', name: '문' }, { r: g.front, type: 'doorway', name: '문 앞' }); });
-    plan.fixtures.forEach((f) => { const r = fxRect(f); if (r.w >= 30 && r.h >= 30) out.push({ r, type: 'fixture', name: String(f.name || '고정물') }); });
+    // 냉장고 자리는 '냉장고를 놓는 곳'이라 장애물이 아님 (실측으로 크게 그려져도 냉장고와 겹친다고 하지 않게)
+    plan.fixtures.forEach((f) => { const r = fxRect(f); if (r.w >= 30 && r.h >= 30 && String(f.kind || '') !== 'fridge-spot') out.push({ r, type: 'fixture', name: String(f.name || '고정물') }); });
     plan.builtins.forEach((b) => out.push({ r: fxRect(b), type: 'builtin', name: String(b.name || '붙박이') }));
     return out;
   }
@@ -936,7 +1003,7 @@
   /* ---------------- 설비 자리 점검 (냉장고 자리 · 에어컨 배관구) ---------------- */
   const isFridge = (it) => !!it && (it.tag === 'fridge' || (!it.tag && /냉장고/.test(it.name || '') && !/김치/.test(it.name || '')));
   const fxKind = (f) => String((f && f.kind) || '');
-  const fxGuess = (plan, f) => plan.confidence !== 'high' || /추정|확인/.test(String(f.name || '') + ' ' + String(f.note || ''));
+  const fxGuess = (plan, f) => !f._measured && (plan.confidence !== 'high' || /추정|확인/.test(String(f.name || '') + ' ' + String(f.note || '')));
   /** 두 사각형 사이 빈 거리 (겹치면 0, cm) */
   const rectGap = (a, b) => Math.hypot(Math.max(0, a.x - b.x - b.w, b.x - a.x - a.w), Math.max(0, a.y - b.y - b.h, b.y - a.y - a.h));
   /** 한 축에서 두 구간이 겹치는 길이 */
@@ -953,9 +1020,66 @@
     if (h >= 183 && h <= 190) return '높이 약 188cm 이상';
     return '높이 약 ' + Math.ceil(h + 1.5) + 'cm 이상';
   }
+  const FRIDGE_TOP_GAP = 1.3;   // 냉장고 높이 + 이만큼이 자리 높이의 최소 (약 180cm ← 178.7cm)
   /**
-   * 냉장고(tag fridge)가 '냉장고 자리'(kind fridge-spot) 안·바로 옆에 놓였는데 자리 긴 변이 냉장고 폭 + 약 0.6cm 보다 짧으면 주의,
-   * 권장(+약 3.6cm)보다 짧으면 참고. 스탠드·2in1 에어컨이 가장 가까운 배관구(aircon-port)에서 약 60cm 넘게 떨어지면 참고.
+   * 냉장고 it 가 냉장고 자리 sp = { width, height, depth, measured, guess, name } 에 들어가는지 → { level: 'warn'|'info', text } 또는 null(말할 것 없음)
+   * 실측 전(추정 자리): 폭이 냉장고 + 약 0.6cm 보다 좁으면 주의, 권장(+약 3.6cm)보다 좁으면 참고 (예전 문구 그대로)
+   * 실측 뒤: 냉장고보다 좁으면 '안 들어가요'(주의), + 0.6cm 미만이면 '거의 같아요'(주의), 권장 미만이면 '빠듯해요'(참고), 그 위는 '들어가요'(참고).
+   *          높이를 쟀으면 냉장고 높이보다 낮거나 1.3cm 미만으로 남으면 주의
+   */
+  function fridgeVerdict(it, sp) {
+    const fw = num(it && it.w, 0);
+    if (!(fw > 0) || !sp || !(sp.width > 0)) return null;
+    const fh = num(it.h, 0);
+    const sw = sp.width;
+    const need = Math.ceil(r1(fw + FRIDGE_MIN_GAP)), rec = Math.ceil(r1(fw + FRIDGE_REC_GAP));
+    const nm = sp.name || '냉장고 자리';
+    const hTxt = fridgeHeightTxt(fh);
+    if (!sp.measured) {
+      const est = sp.guess ? ', 추정' : '';
+      if (sw < fw + FRIDGE_MIN_GAP - 0.05) return { level: 'warn', text: '냉장고(' + cm1(fw) + 'cm)가 ' + nm + '(' + cm1(sw) + 'cm' + est + ')보다 넓어요 — 폭 최소 약 ' + need + 'cm(권장 ' + rec + 'cm)' + (hTxt ? ', ' + hTxt : '') + ' 필요, 사전방문 때 실측하세요' };
+      if (sw < fw + FRIDGE_REC_GAP - 0.05) return { level: 'info', text: '냉장고(' + cm1(fw) + 'cm)가 ' + nm + '(' + cm1(sw) + 'cm' + est + ')에 빠듯해요 — 권장 폭 약 ' + rec + 'cm' + (hTxt ? ', ' + hTxt : '') + ' · 옆 틈과 문 열림을 사전방문 때 실측하세요' };
+      return null;
+    }
+    // ---- 실측한 자리 ----
+    const at = nm + '(실측 ' + cm1(sw) + 'cm)';
+    const gap = r1(sw - fw);
+    let wLv, wTxt, wShort;
+    if (sw < fw - 0.05) {
+      wLv = 'bad';
+      wTxt = '냉장고(' + cm1(fw) + 'cm)가 ' + at + '보다 ' + cm1(r1(fw - sw)) + 'cm 넓어서 안 들어가요 — 식당 쪽 등 다른 자리와 콘센트를 정하세요';
+    } else if (sw < fw + FRIDGE_MIN_GAP - 0.05) {
+      wLv = 'bad';
+      wTxt = at + jo(nm, '이', '가') + ' 냉장고(' + cm1(fw) + 'cm)와 거의 같아요 — 양옆 틈이 합쳐 ' + cm1(gap) + 'cm뿐이라 넣기 어려워요(최소 약 ' + need + 'cm). 벽 마감·몰딩까지 다시 재 보세요';
+    } else if (sw < fw + FRIDGE_REC_GAP - 0.05) {
+      wLv = 'tight';
+      wTxt = '냉장고(' + cm1(fw) + 'cm)가 ' + at + '에 빠듯하게 들어가요 — 양옆 틈 합쳐 약 ' + cm1(gap) + 'cm(권장 폭 ' + rec + 'cm). 넣을 때 벽·문 모서리를 조심하세요';
+      wShort = '폭 실측 ' + cm1(sw) + 'cm는 빠듯하게 들어가요';
+    } else {
+      wLv = 'ok';
+      wTxt = '냉장고(' + cm1(fw) + 'cm)가 ' + at + '에 들어가요 — 양옆 틈 합쳐 약 ' + cm1(gap) + 'cm';
+      wShort = '폭 실측 ' + cm1(sw) + 'cm는 넉넉해요';
+    }
+    // 높이
+    let hLv = '', hTxt2 = '';
+    if (sp.height > 0 && fh > 0) {
+      if (sp.height < fh - 0.05) { hLv = 'bad'; hTxt2 = '냉장고(높이 ' + cm1(fh) + 'cm)가 ' + nm + ' 높이(실측 ' + cm1(sp.height) + 'cm)보다 높아서 안 들어가요 — 위 수납장·천장까지 다시 재 보세요'; }
+      else if (sp.height < fh + FRIDGE_TOP_GAP - 0.05) { hLv = 'bad'; hTxt2 = nm + ' 높이(실측 ' + cm1(sp.height) + 'cm)가 냉장고(' + cm1(fh) + 'cm)와 거의 같아요 — 위 틈이 ' + cm1(r1(sp.height - fh)) + 'cm뿐이라 넣기 어려워요(약 ' + Math.ceil(r1(fh + FRIDGE_TOP_GAP)) + 'cm 이상 필요)'; }
+      else { hLv = 'ok'; hTxt2 = '높이 실측 ' + cm1(sp.height) + 'cm도 충분해요'; }
+    } else if (hTxt) hTxt2 = '높이는 아직 안 쟀어요 — ' + hTxt.replace(/^높이\s*/, '') + ' 필요';
+    if (wLv === 'bad') return { level: 'warn', text: wTxt + (hLv === 'bad' ? ' · ' + hTxt2 : '') };
+    if (hLv === 'bad') return { level: 'warn', text: hTxt2 + ' · ' + wShort };
+    return { level: 'info', text: wTxt + (hTxt2 ? ' · ' + hTxt2 : '') };
+  }
+  /** 도면의 냉장고 자리 → fridgeVerdict 에 넘길 값 */
+  function spotInfo(plan, f, r) {
+    const rr = r || fxRect(f);
+    return { width: f._meas ? f._meas.width : Math.max(rr.w, rr.h), height: f._meas ? f._meas.height : null, depth: f._meas ? f._meas.depth : null,
+      measured: !!f._measured, guess: !f._measured && fxGuess(plan, f), name: fxShortName(f) };
+  }
+  /**
+   * 냉장고(tag fridge)가 '냉장고 자리'(kind fridge-spot) 안·바로 옆에 놓였으면 fridgeVerdict 로 폭·높이 점검 (실측 입력 단추는 m.act).
+   * 스탠드·2in1 에어컨이 가장 가까운 배관구(aircon-port)에서 약 60cm 넘게 떨어지면 참고.
    */
   function fixtureChecks(plan, list, add) {
     const fx = plan.fixtures.map((f) => ({ f, r: fxRect(f) })).filter((x) => x.r.w > 0 && x.r.h > 0);
@@ -967,27 +1091,17 @@
       if (spots.length && isFridge(it)) {
         let best = null;
         spots.forEach((s) => {
-          const vert = s.r.h >= s.r.w;
+          // 자리 긴 쪽 방향은 원래 도면 기준 (깊이를 길게 재도 방향이 바뀌지 않게)
+          const vert = s.f._axis ? s.f._axis === 'v' : s.r.h >= s.r.w;
           // 자리 긴 변을 따라 냉장고와 겹치는 길이가 자리의 30% 이상이고, 둘 사이가 FRIDGE_NEAR 이내면 '그 자리에 놓은 것'
           const ov = vert ? spanOv(r.y, r.y + r.h, s.r.y, s.r.y + s.r.h) : spanOv(r.x, r.x + r.w, s.r.x, s.r.x + s.r.w);
-          const long = Math.max(s.r.w, s.r.h);
+          const long = vert ? s.r.h : s.r.w;
           const gap = rectGap(r, s.r);
           if (gap > FRIDGE_NEAR || ov < long * 0.3) return;
           if (!best || gap < best.gap || (gap === best.gap && ov > best.ov)) best = { s, gap, ov, long };
         });
-        const fw = num(it.w, 0);
-        if (best && fw > 0) {
-          const need = Math.ceil(r1(fw + FRIDGE_MIN_GAP)), rec = Math.ceil(r1(fw + FRIDGE_REC_GAP));
-          const sw = best.long;
-          const est = fxGuess(plan, best.s.f) ? ', 추정' : '';
-          const spotNm = String(best.s.f.name || '냉장고 자리').replace(/\s*\(추정\)\s*$/, '');
-          const hTxt = fridgeHeightTxt(num(it.h, 0));
-          if (sw < fw + FRIDGE_MIN_GAP - 0.05) {
-            add('warn', '냉장고(' + cm1(fw) + 'cm)가 ' + spotNm + '(' + cm1(sw) + 'cm' + est + ')보다 넓어요 — 폭 최소 약 ' + need + 'cm(권장 ' + rec + 'cm)' + (hTxt ? ', ' + hTxt : '') + ' 필요, 사전방문 때 실측하세요', p.id);
-          } else if (sw < fw + FRIDGE_REC_GAP - 0.05) {
-            add('info', '냉장고(' + cm1(fw) + 'cm)가 ' + spotNm + '(' + cm1(sw) + 'cm' + est + ')에 빠듯해요 — 권장 폭 약 ' + rec + 'cm' + (hTxt ? ', ' + hTxt : '') + ' · 옆 틈과 문 열림을 사전방문 때 실측하세요', p.id);
-          }
-        }
+        const vd = best ? fridgeVerdict(it, spotInfo(plan, best.s.f, best.s.r)) : null;
+        if (vd) add(vd.level, vd.text, p.id).act = { type: 'fxmeasure', fk: best.s.f._fk, again: !!best.s.f._measured };
       }
       if (ports.length && it.cat === 'aircon' && (it.ac === 'stand' || it.ac === '2in1')) {
         // 스탠드는 '스탠드' 배관구를 먼저 (없으면 아무 배관구나) — 가장 가까운 것까지 거리
@@ -1279,9 +1393,18 @@
     plan.fixtures.forEach((f) => {
       const r = fxRect(f);
       if (r.w <= 0 || r.h <= 0) return;
-      deco.appendChild(svg('rect', Object.assign({ x: r.x, y: r.y, width: r.w, height: r.h, rx: Math.min(4, r.w / 4, r.h / 4), fill: 'var(--bg-3)', stroke: 'var(--line-2)', 'stroke-width': 1 }, NS), svg('title', String(f.name || '고정물'))));
+      // 실측한 자리(냉장고 자리)는 초록 테두리 + 잰 폭을 이름표에
+      const ms = !!f._measured;
+      deco.appendChild(svg('rect', Object.assign({ class: ms ? 'fp-fx is-measured' : 'fp-fx', x: r.x, y: r.y, width: r.w, height: r.h, rx: Math.min(4, r.w / 4, r.h / 4), fill: 'var(--bg-3)', stroke: ms ? 'var(--good)' : 'var(--line-2)', 'stroke-width': ms ? 1.6 : 1 }, NS),
+        svg('title', ms ? fxShortName(f) + ' 실측 폭 ' + cm1(f._meas.width) + 'cm' : String(f.name || '고정물'))));
       const vert = r.h > r.w * 1.4;
-      const t = fitText(String(f.name || ''), (vert ? r.h : r.w) - fz(2), fz(8.5), fz(7));
+      const fitL = (vert ? r.h : r.w) - fz(2);
+      let t = null;
+      if (ms) {
+        // 잰 폭이 보이게: '냉장고 자리 93cm' → 안 들어가면 '냉장고 93cm' → '93cm'
+        const wt = cm1(f._meas.width) + 'cm', nm0 = fxShortName(f);
+        [nm0 + ' ' + wt, nm0.split(/\s+/)[0] + ' ' + wt, wt].some((c) => { const t2 = fitText(c, fitL, fz(8.5), fz(7)); if (t2 && !t2.text.endsWith('…')) { t = t2; return true; } return false; });
+      } else t = fitText(String(f.name || ''), fitL, fz(8.5), fz(7));
       if (t && t.fs < (vert ? r.w : r.h) * 1.05) {
         const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
         deco.appendChild(T(cx, cy, t.text, t.fs, { 'data-fit': r1((vert ? r.h : r.w) - fz(2)), fill: 'var(--ink-3)', transform: vert ? 'rotate(-90 ' + r1(cx) + ' ' + r1(cy) + ')' : null }));
@@ -1406,6 +1529,22 @@
       deco.appendChild(T(sx + 100 + fz(5), sbY, '1m', fz(10), { fill: 'var(--ink-2)', 'font-weight': 700, 'text-anchor': 'start' }));
     }
 
+    // 9-0) 치수 수정(방 고치기) 중: 냉장고 자리를 누르면 잰 크기를 넣는 창 — 손가락으로 누르기 쉽게 화면에서 36px 이상인 투명 칸 + 보이는 점선 칸
+    if (tool === 'room') {
+      const ge = svg('g', { class: 'fp-fxedits' });
+      const minS = 36 / s;
+      plan.fixtures.filter(fxMeasurable).forEach((f) => {
+        const r = fxRect(f);
+        if (r.w <= 0 || r.h <= 0) return;
+        const w = Math.max(r.w, minS), h = Math.max(r.h, minS);
+        const nm = fxShortName(f);
+        ge.appendChild(svg('rect', { class: 'fp-fxeditpad', 'data-fxk': f._fk, x: r1(r.x + r.w / 2 - w / 2), y: r1(r.y + r.h / 2 - h / 2), width: r1(w), height: r1(h), fill: 'transparent' }));
+        ge.appendChild(svg('rect', Object.assign({ class: 'fp-fxedit' + (f._measured ? ' is-measured' : ''), 'data-fxk': f._fk, x: r1(r.x), y: r1(r.y), width: r1(r.w), height: r1(r.h), rx: 3,
+          tabindex: '0', role: 'button', 'aria-label': nm + (f._measured ? ' 실측 고치기 (지금 폭 ' + cm1(f._meas.width) + 'cm)' : ' 실측 입력 (폭·깊이·높이)') }, NS),
+        svg('title', nm + ' — 눌러서 잰 폭·깊이·높이 넣기')));
+      });
+      if (ge.childNodes.length) root.appendChild(ge);
+    }
     // 9-1) 설비 자리(냉장고 자리·배관구·수전 등) 누르는 칸 — 짐을 놓는 화면에서만. 누르거나(터치) 마우스를 올리면 설명(note)이 보여요.
     //      작은 것도 손가락으로 누를 수 있게 화면에서 FX_TAP px 이상, 큰 것부터 깔아 작은 것이 위로 (짐은 이 위에 그려져 짐 누르기가 먼저)
     if (live) {
@@ -1625,6 +1764,21 @@
 .fp-fxtip-h .chip { font-size: .7rem; padding: 0 7px; }
 .fp-fxtip-h .btn { flex: none; width: 36px; min-height: 36px; padding: 0; }
 .fp-fxtip-b { color: var(--ink-2); overflow-wrap: anywhere; }
+.fp-fxtip-m { color: var(--good); }
+.fp-fxtip-a { display: flex; justify-content: flex-end; }
+.fp-fxtip-a .btn { min-height: 36px; }
+.fp-svg .fp-fxedit { fill: var(--brand); fill-opacity: .14; stroke: var(--brand); stroke-width: 1.8px; stroke-dasharray: 4 3; cursor: pointer; }
+.fp-svg .fp-fxedit.is-measured { fill: var(--good); stroke: var(--good); stroke-dasharray: none; }
+.fp-svg .fp-fxeditpad { cursor: pointer; }
+.fp-svg .fp-fxedit:hover, .fp-svg .fp-fxedit:focus { fill-opacity: .34; outline: none; }
+.fp-svg .fp-fxedit:focus-visible { stroke-width: 3px; }
+.fp-selfx { display: flex; flex-direction: column; gap: 2px; padding-top: 4px; border-top: 1px dashed var(--line); min-width: 0; }
+.fp-selfxb { display: block; width: 100%; max-width: 100%; min-height: 36px; padding: 0 8px; border: 0; border-radius: 8px; background: var(--kid-bg); color: var(--ink);
+  font: inherit; font-size: .8rem; font-weight: 650; text-align: left; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fp-selfxb:hover { filter: brightness(.97); }
+.fp-selfxb:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+.fp-fxm-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 600px) { .fp-fxm-grid { grid-template-columns: minmax(0, 1fr); } }
 .fp-fxlist li { overflow-wrap: anywhere; }
 .fp-fxlist .fp-fxn { font-weight: 700; }
 .fp-selbar { position: absolute; z-index: 5; display: flex; flex-direction: column; gap: 4px; padding: 6px; background: var(--bg-2); color: var(--ink); border: 1px solid var(--line-2); border-radius: 12px; box-shadow: var(--shadow-lg); width: max-content; max-width: min(360px, 100%); }
@@ -1639,6 +1793,7 @@
   .fp-selbtns { flex-wrap: nowrap; gap: 3px; }
   .fp-selbtns .btn { padding: 0; width: 38px; min-width: 38px; font-size: 1rem; }
   .fp-selbtns .btn .fp-bl { display: none; }
+  .fp-selfxb { font-size: .72rem; padding: 0 4px; }
 }
 .fp-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: .75rem; color: var(--ink-3); margin: 8px 4px 0; align-items: center; }
 .fp-legend span { display: inline-flex; align-items: center; gap: 5px; }
@@ -1708,13 +1863,15 @@
 .fp-kv dt { color: var(--ink-3); }
 .fp-kv dd { margin: 0; overflow-wrap: anywhere; }
 .fp-cmp-plans { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
-@media (max-width: 700px) { .fp-cmp-plans { grid-template-columns: 1fr; } }
+@media (max-width: 700px) { .fp-cmp-plans { grid-template-columns: minmax(0, 1fr); } }
 .fp-cmp-cell { min-width: 0; }
 .fp-cmp-cell h3 { margin: 0 0 2px; font-size: 1rem; }
 .fp-cmp-svg { margin-top: 6px; overflow: hidden; }
 .fp-cmp-grid { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 12px; align-items: start; }
-.fp-cmp-grid > .card { margin-top: 0; }
-@media (max-width: 900px) { .fp-cmp-grid { grid-template-columns: 1fr; } }
+.fp-cmp-grid > .card { margin-top: 0; min-width: 0; }
+/* 좁은 화면: 한 줄로 — 1fr 대신 minmax(0, 1fr) 이라야 넓은 표가 칸을 밀어내지 않고 표 칸(.table-wrap) 안에서 옆으로 굴러요 */
+@media (max-width: 900px) { .fp-cmp-grid { grid-template-columns: minmax(0, 1fr); } }
+.fp-cmp .table-wrap { max-width: 100%; }
 .fp-up { color: var(--good); font-weight: 700; }
 .fp-down { color: var(--bad); font-weight: 700; }
 .fp-bars { display: flex; flex-direction: column; gap: 10px; margin: 10px 0; }
@@ -1728,6 +1885,7 @@
 .fp-miss .fp-mname { flex: 1 1 160px; min-width: 0; font-weight: 650; }
 .fp-area-prev { font-size: .9rem; margin-top: 10px; padding: 8px 10px; border-radius: 10px; background: var(--bg-3); }
 .fp-area-prev.is-bad { background: var(--bad-bg); color: var(--ink); border: 1px solid color-mix(in srgb, var(--bad) 35%, var(--line)); }
+.fp-area-prev.is-good { background: var(--good-bg); color: var(--ink); border: 1px solid color-mix(in srgb, var(--good) 30%, var(--line)); }
 .fp-prev-warn { margin-top: 6px; font-size: .84rem; color: var(--ink-2); display: flex; flex-direction: column; gap: 2px; }
 .fp-err { min-width: 0; }
 .fp-err.card { margin: 0 0 8px; box-shadow: none; }
@@ -2014,6 +2172,7 @@
       const ae = document.activeElement;
       const focusPid = ae && svgEl && svgEl.contains(ae) && ae.getAttribute && ae.getAttribute('data-pid');
       const focusRid = ae && svgEl && svgEl.contains(ae) && ae.getAttribute && ae.getAttribute('data-rid');
+      const focusFxk = ae && svgEl && svgEl.contains(ae) && ae.getAttribute && ae.getAttribute('data-fxk');
       const focusBtn = ae && selBar.contains(ae) && ae.getAttribute && ae.getAttribute('data-act');
       const node = buildSVG(plan, key, { s, vb, interactive: !editMode && !wiz, edit: editMode && !wiz, tool, grid: prefs().grid, sel, issues: v.lv, items,
         bg: showBg ? { bg, href: bgHref(key, bg.src) } : null, bgFade: showBg && bg.fade, wiz: !!wiz });
@@ -2026,6 +2185,7 @@
       stage.style.height = H + 'px';
       if (focusPid) { const g = node.querySelector('[data-pid="' + CSS.escape(focusPid) + '"]'); if (g) g.focus({ preventScroll: true }); }
       if (focusRid) { const g = node.querySelector('[data-rid="' + CSS.escape(focusRid) + '"]'); if (g) g.focus({ preventScroll: true }); }
+      if (focusFxk) { const g = node.querySelector('.fp-fxedit[data-fxk="' + CSS.escape(focusFxk) + '"]'); if (g) g.focus({ preventScroll: true }); }
       drawOverlay();
       drawSelBar();
       drawFxTip();
@@ -2044,6 +2204,8 @@
       const out = !within(o.r, plan.bounds, 1);
       const sb = (act, ico, label, onclick, o2) => el('button', Object.assign({ type: 'button', class: 'btn', 'data-act': act, onclick, 'aria-label': label }, o2 || {}),
         el('span', { 'aria-hidden': 'true' }, ico), el('span', { class: 'fp-bl', 'aria-hidden': 'true' }, ' ' + ((o2 && o2.short) || label)));
+      // 이 짐이 덮어서 누를 수 없게 된 설비 자리(냉장고 자리·세탁 수전·배관구 등) → 같은 설명을 여는 작은 단추
+      const under = fxUnder(o, plan, s);
       selBar.textContent = '';
       put(selBar,
         el('div', { class: 'fp-selinfo' }, el('strong', shortName(o.it.name, 20)),
@@ -2053,7 +2215,13 @@
           sb('rot', '↻', '90도 돌리기', rotateSel, { short: '90°', title: coarse ? '90° 돌리기' : '90° 돌리기 (알 키)' }),
           sb('spec', '✎', '규격 수정', () => editSpec(o.it.id), { short: '규격', title: '가로·깊이·높이 고치기' }),
           sb('del', '🗑', '도면에서 빼기', removeSel, { class: 'btn btn-danger', short: '빼기', title: coarse ? '도면에서 빼기' : '도면에서 빼기 (딜리트 키)' }),
-          el('button', { type: 'button', class: 'btn btn-ghost btn-icon', 'data-act': 'close', onclick: () => { sel = null; refresh(); }, 'aria-label': '선택 해제' }, '✕')));
+          el('button', { type: 'button', class: 'btn btn-ghost btn-icon', 'data-act': 'close', onclick: () => { sel = null; refresh(); }, 'aria-label': '선택 해제' }, '✕')),
+        under.length ? el('div', { class: 'fp-selfx' }, under.map((x) => {
+          const nm = fxShortName(x.f);
+          return el('button', { type: 'button', class: 'fp-selfxb', 'data-act': 'fx' + x.i, title: nm + ' 설명 보기', 'aria-label': '이 짐 아래 설비 설명 보기: ' + nm, onclick: () => openFxFromSel(x.i) },
+            el('span', { 'aria-hidden': 'true' }, 'ⓘ '), el('span', { class: 'fp-wl', 'aria-hidden': 'true' }, '아래 설비: '), el('span', { class: 'fp-ws', 'aria-hidden': 'true' }, '아래: '),
+            el('span', { 'aria-hidden': 'true' }, nm));
+        })) : null);
       selBar.hidden = false;
       selBar.style.opacity = '0';   // 자리 잡기 전 한 프레임 숨김 (visibility 와 달리 초점은 받을 수 있음)
       const vb = cur.vb || plan.vb;
@@ -2075,9 +2243,27 @@
       });
     }
     /* ---- 설비 자리 설명 (누르거나 마우스를 올리면) ---- */
-    const fxKeyOf = (f) => String(f.name || '') + '|' + Math.round(num(f.x, 0)) + '|' + Math.round(num(f.y, 0));
+    const fxKeyOf = (f) => f._fk || (String(f.name || '') + '|' + Math.round(num(f.x, 0)) + '|' + Math.round(num(f.y, 0)));
     let fxRaf = 0;
     ctx.onCleanup(() => cancelAnimationFrame(fxRaf));
+    /** 고른 짐(o)이 덮은 설비 자리 (화면에서 누르는 칸 기준): 설비 가운데가 짐의 누르는 칸 안이거나, 설비 누르는 칸이 절반 넘게 가려지면 → 작은 것부터 2개 */
+    function fxUnder(o, plan, s) {
+      const hw = Math.max(o.r.w, 26 / s), hh = Math.max(o.r.h, 26 / s);
+      const hitR = { x: o.r.x + (o.r.w - hw) / 2, y: o.r.y + (o.r.h - hh) / 2, w: hw, h: hh };
+      const minS = FX_TAP / s;
+      return plan.fixtures.map((f, i) => ({ f, i, r: fxRect(f) })).filter((x) => x.r.w > 0 && x.r.h > 0 && (x.f.note || x.f.name)).filter((x) => {
+        const cx = x.r.x + x.r.w / 2, cy = x.r.y + x.r.h / 2;
+        if (hasPt(hitR, cx, cy)) return true;
+        const pw = Math.max(x.r.w, minS), ph = Math.max(x.r.h, minS);
+        const i2 = inter(hitR, { x: cx - pw / 2, y: cy - ph / 2, w: pw, h: ph });
+        return !!i2 && i2.w * i2.h >= 0.5 * pw * ph;
+      }).sort((a, b) => a.r.w * a.r.h - b.r.w * b.r.h).slice(0, 2);
+    }
+    /** 선택 도구 줄의 'ⓘ 아래 설비' → 그 설비 설명을 열고 키보드 초점도 설명으로 */
+    function openFxFromSel(idx) {
+      showFx(idx);
+      requestAnimationFrame(() => { const b = fxTip.querySelector('[data-act="fxclose"]'); if (b && !fxTip.hidden) b.focus({ preventScroll: true }); });
+    }
     function showFx(idx) {
       const f = cur && cur.plan.fixtures[+idx];
       if (!f) return;
@@ -2106,10 +2292,14 @@
         el('div', { class: 'fp-fxtip-h' },
           el('span', { 'aria-hidden': 'true' }, '🔌'),
           el('strong', String(f.name || '설비 자리')),
-          fxGuess(plan, f) ? el('span', { class: 'chip warn' }, '추정') : null,
+          f._measured ? el('span', { class: 'chip good' }, '실측') : fxGuess(plan, f) ? el('span', { class: 'chip warn' }, '추정') : null,
           el('button', { type: 'button', class: 'btn btn-ghost btn-icon fp-b', 'data-act': 'fxclose', 'aria-label': '설명 닫기', onclick: hideFx }, '✕')),
         el('div', { class: 'fp-fxtip-b' }, f.note ? MV.linkify(String(f.note)) : '도면에 표시한 자리예요. 사전방문 때 실제 위치를 확인하세요.'),
-        el('div', { class: 'tiny muted num' }, '도면 표시 ' + Math.round(r.w) + '×' + Math.round(r.h) + 'cm'));
+        f._measured ? el('div', { class: 'small strong num fp-fxtip-m' }, '📏 ' + measTxt(f._meas))
+          : el('div', { class: 'tiny muted num' }, '도면 표시 ' + Math.round(r.w) + '×' + Math.round(r.h) + 'cm'),
+        // 냉장고 자리: 사전방문 때 잰 크기를 바로 넣을 수 있게
+        fxMeasurable(f) ? el('div', { class: 'fp-fxtip-a' }, el('button', { type: 'button', class: 'btn btn-sm fp-b', 'data-act': 'fxmeasure', onclick: () => openFxMeasure(f._fk) },
+          f._measured ? '📏 실측 고치기' : '📏 실측 입력')) : null);
       fxTip.hidden = false;
       fxTip.style.opacity = '0';
       if (hadFocus) { const b2 = fxTip.querySelector('[data-act="fxclose"]'); if (b2) b2.focus({ preventScroll: true }); }
@@ -2174,7 +2364,8 @@
         el('button', { type: 'button', class: 'btn btn-sm fp-b fp-sizebtn', 'data-tool': 'size', onclick: openSizeEditor, title: '도면 전체 가로·세로 (cm)' },
           '📐 ', el('span', { class: 'fp-wl' }, '전체 '), '크기 ' + Math.round(plan.width) + '×' + Math.round(plan.depth)),
         el('span', { class: 'fp-break', 'aria-hidden': 'true' }),
-        el('div', { class: 'fp-edittip', 'aria-live': 'polite' }, TOOL_TIPS[tool] + ' 짐은 잠시 잠겨요.'),
+        el('div', { class: 'fp-edittip', 'aria-live': 'polite' }, TOOL_TIPS[tool]
+          + (tool === 'room' && plan.fixtures.some(fxMeasurable) ? ' 냉장고 자리를 누르면 사전방문 때 잰 폭·높이를 넣어요.' : '') + ' 짐은 잠시 잠겨요.'),
         tool === 'draw' ? el('button', { type: 'button', class: 'btn btn-sm fp-b fp-ebtn', 'data-act': 'typed', onclick: () => openRoomEditor(null, typedRoomRect(), true), title: '끌지 않고 크기·위치를 숫자로 넣어 방 추가' }, '🔢 숫자로 넣기') : null,
         plan.edited ? el('button', { type: 'button', class: 'btn btn-sm btn-danger fp-b fp-ebtn', onclick: resetAllRooms, title: '도면 전체 원래대로' }, el('span', { class: 'fp-wl' }, '도면 전체 '), '원래대로') : null,
         el('button', { type: 'button', class: 'btn btn-sm btn-primary fp-b fp-ebtn fp-done', onclick: finishEdit }, '완료'));
@@ -2749,7 +2940,11 @@
           el('button', { type: 'button', class: 'fp-msg is-' + m.level, onclick: () => { sel = m.pid; editMode = false; refresh(); revealSel(); } },
             el('span', { 'aria-hidden': 'true' }, ICON[m.level] || '⚠️'), el('span', m.level === 'info' ? [el('span', { class: 'fp-sr' }, '참고: '), m.text] : m.text)),
           m.fix && FIX[m.fix] ? el('button', { type: 'button', class: 'btn btn-sm fp-b fp-fix', title: FIX[m.fix][1], 'aria-label': FIX[m.fix][1],
-            onclick: () => { sel = m.pid; editMode = false; fixPlacement(m.pid, m.fix); revealSel(); } }, FIX[m.fix][0]) : null))));
+            onclick: () => { sel = m.pid; editMode = false; fixPlacement(m.pid, m.fix); revealSel(); } }, FIX[m.fix][0]) : null,
+          // 냉장고 자리: 사전방문 때 잰 크기를 넣는 단추 (넣으면 '빠듯해요·들어가요'로 바뀌거나, 정말 좁으면 그대로 알려 줌)
+          m.act && m.act.type === 'fxmeasure' ? el('button', { type: 'button', class: 'btn btn-sm fp-b fp-fix', 'data-act': 'fxmeasure',
+            title: m.act.again ? '잰 크기 고치기' : '사전방문 때 잰 냉장고 자리 폭·깊이·높이 넣기', 'aria-label': m.act.again ? '냉장고 자리 실측 고치기' : '냉장고 자리 실측 입력',
+            onclick: () => openFxMeasure(m.act.fk) }, m.act.again ? '📏 실측 고치기' : '📏 실측 입력') : null))));
         if (v.msgs.length > LIMIT) checks.appendChild(el('p', { class: 'tiny muted' }, '외 ' + (v.msgs.length - LIMIT) + '개'));
       }
       checks.appendChild(el('p', { class: 'tiny muted mt-8 mb-0' }, '도면은 추정치라 벽·문 위치가 실제와 다를 수 있어요. 사전방문 때 재고 “✏️ 치수 수정”으로 고치면 점검이 정확해져요.'));
@@ -2873,7 +3068,7 @@
       // 설비 자리 메모: 자료의 fixtures[].note (냉장고 자리 조건·배관구·실외기 안내 등) — 도면에서 그 자리를 눌러도 같은 설명이 떠요
       const fxNotes = plan.fixtures.filter((f) => f && String(f.note || '').trim());
       if (!changed('info', [plan.name, plan.confidence, plan.rooms.filter((r) => r.edited || r.added).map((r) => [r.id, r.name, r.kind, r.w, r.h]),
-        plan.removed.map((r) => [r.id, r.name]), editSummary(plan), fxNotes.map((f) => [f.name, f.note])]) && !force) return;
+        plan.removed.map((r) => [r.id, r.name]), editSummary(plan), fxNotes.map((f) => [f.name, f.note]), plan.fixtures.filter((f) => f._measured).map((f) => [f._fk, f._meas])]) && !force) return;
       info.textContent = '';
       const det = el('details', { class: 'fp-details', open: prefs().infoOpen });
       det.addEventListener('toggle', () => { if (prefs().infoOpen !== det.open) setPref('infoOpen', det.open); });
@@ -2891,6 +3086,7 @@
       pushObj(plan.complex, ''); pushObj(plan.unit, '');
       const edited = plan.rooms.filter((r) => r.edited);
       const addedRooms = plan.rooms.filter((r) => r.added);
+      const measuredFx = plan.fixtures.filter((f) => f._measured);
       put(det, 
         el('summary', el('strong', '📄 도면 정보 · 현장에서 잴 것'), confidenceChip(plan), measure.length ? el('span', { class: 'chip' }, '실측 ' + measure.length) : null),
         el('div', { class: 'mt-8' },
@@ -2922,6 +3118,11 @@
           el('p', { class: 'tiny muted mb-0' }, '지운 방에만 붙어 있던 문·창·고정물은 도면에서 숨겨져요.'
             + (plan.doors.some((d) => d._flipped) ? ' 지운 방 쪽으로 열리던 문 ' + plan.doors.filter((d) => d._flipped).length + '개는 남은 방 쪽으로 열리게 그렸어요 — 실제 방향은 현장에서 확인하세요.' : ''))] : null,
           plan.sizeEdited ? [el('h3', '📐 전체 크기'), el('p', { class: 'small mb-0' }, Math.round(plan.baseSize.width) + '×' + Math.round(plan.baseSize.depth) + ' → ' + Math.round(plan.width) + '×' + Math.round(plan.depth) + 'cm')] : null,
+          measuredFx.length ? [el('h3', '📏 실측한 설비 자리'), el('ul', { class: 'fp-del-list' }, measuredFx.map((f) => {
+            const o0 = f._orig || fxRect(f);
+            return el('li', el('span', fxShortName(f) + ': 도면 추정 폭 ' + cm1(f._axis === 'h' ? o0.w : o0.h) + 'cm → ' + measTxt(f._meas)),
+              el('button', { type: 'button', class: 'btn btn-sm fp-b', onclick: () => openFxMeasure(f._fk), 'aria-label': fxShortName(f) + ' 실측 고치기' }, '📏 고치기'));
+          }))] : null,
           plan.edits.doorsAdded || plan.edits.doorsDeleted ? [el('h3', '🚪 문'), el('p', { class: 'small mb-0' }, [plan.edits.doorsAdded ? '추가 ' + plan.edits.doorsAdded + '개' : '', plan.edits.doorsDeleted ? '삭제 ' + plan.edits.doorsDeleted + '개' : ''].filter(Boolean).join(' · '))] : null,
           plan.edited ? el('button', { type: 'button', class: 'btn btn-sm btn-danger fp-b mt-8', onclick: resetAllRooms }, '도면 전체 원래대로') : null));
       info.appendChild(det);
@@ -3457,6 +3658,95 @@
       });
     }
 
+    // ---- 설비 자리 실측 (냉장고 자리) ----
+    /** 이 자리에 맞춰 볼 냉장고: 그 자리에 가장 가까이 놓인 냉장고 → 짐 목록의 냉장고 (이 도면에 놓을 수 있는 것) */
+    function fridgeFor(f) {
+      const r = fxRect(f);
+      const near = cur ? cur.items.filter((o) => isFridge(o.it)).sort((a, b) => rectGap(a.r, r) - rectGap(b.r, r))[0] : null;
+      if (near) return near.it;
+      return MV.inv.list((it) => isFridge(it) && eligible(key, it))[0] || null;
+    }
+    /** 냉장고 자리 실측 창: 폭(필수)·깊이·높이(선택) cm → planEdits[key].fixtures[fk] = { w, h, measured, width, depth?, height? } */
+    function openFxMeasure(fk) {
+      const plan = getPlan(key);
+      const f = plan && plan.fixtures.find((x) => x._fk === fk && fxMeasurable(x));
+      if (!f) { toast('그 설비 자리를 도면에서 찾지 못했어요'); return; }
+      const nm = fxShortName(f);
+      const o0 = f._orig || fxRect(f);
+      const origW = f._axis === 'h' ? o0.w : o0.h;
+      const m0 = f._meas || null;
+      const fridge = fridgeFor(f);
+      const numIn = (v, label, lo, hi, ph) => el('input', { class: 'input num', type: 'number', inputmode: 'decimal', min: String(lo), max: String(hi), step: '0.1',
+        value: v != null ? String(v) : '', placeholder: ph || '', 'aria-label': label });
+      const fW = numIn(m0 ? m0.width : null, '폭 (cm)', FXM.wMin, FXM.wMax, '예: ' + Math.round(origW + 3));
+      const fD = numIn(m0 ? m0.depth : null, '깊이 (cm, 선택)', FXM.dMin, FXM.dMax, '비워도 돼요');
+      const fH = numIn(m0 ? m0.height : null, '높이 (cm, 선택)', FXM.hMin, FXM.hMax, '비워도 돼요');
+      const prev = el('div', { class: 'fp-area-prev', 'aria-live': 'polite' });
+      const val = (i) => { const t = String(i.value).trim(); return t === '' ? null : parseFloat(t); };
+      const read = () => ({ w: val(fW), d: val(fD), h: val(fH) });
+      const bad = (x, lo, hi) => x != null && !(x >= lo && x <= hi);
+      const errorsOf = (x) => {
+        const out = [];
+        if (x.w == null || !isFinite(x.w)) out.push([fW, '폭을 넣어 주세요 (양옆 벽·장 사이, cm)']);
+        else if (bad(x.w, FXM.wMin, FXM.wMax)) out.push([fW, '폭 ' + cm1(x.w) + 'cm — ' + FXM.wMin + '~' + FXM.wMax + 'cm 사이로 넣어 주세요']);
+        if (bad(x.d, FXM.dMin, FXM.dMax) || (x.d != null && !isFinite(x.d))) out.push([fD, '깊이는 ' + FXM.dMin + '~' + FXM.dMax + 'cm 사이로 넣거나 비워 두세요']);
+        if (bad(x.h, FXM.hMin, FXM.hMax) || (x.h != null && !isFinite(x.h))) out.push([fH, '높이는 ' + FXM.hMin + '~' + FXM.hMax + 'cm 사이로 넣거나 비워 두세요']);
+        return out;
+      };
+      const upd = () => {
+        const x = read();
+        const errs = errorsOf(x);
+        [fW, fD, fH].forEach((i) => { if (errs.some(([j]) => j === i)) i.setAttribute('aria-invalid', 'true'); else i.removeAttribute('aria-invalid'); });
+        prev.textContent = '';
+        prev.className = 'fp-area-prev' + (errs.length ? ' is-bad' : '');
+        if (errs.length) { put(prev, errs.map(([, msg]) => el('div', '⛔ ' + msg))); return; }
+        const vd = fridge ? fridgeVerdict(fridge, { width: x.w, height: x.h, depth: x.d, measured: true, name: nm }) : null;
+        prev.className = 'fp-area-prev' + (vd && vd.level === 'warn' ? ' is-bad' : vd ? ' is-good' : '');
+        put(prev, el('strong', { class: 'num' }, measTxt({ width: x.w, depth: x.d, height: x.h })),
+          el('span', { class: 'muted' }, ' · 도면 추정 폭 ' + cm1(origW) + 'cm'),
+          vd ? el('div', { class: 'fp-prev-warn' }, el('div', (vd.level === 'warn' ? '⚠️ ' : '✅ ') + vd.text))
+            : !fridge ? el('div', { class: 'fp-prev-warn' }, el('div', '짐 목록에 냉장고가 없어 잰 크기만 저장해요')) : null);
+      };
+      [fW, fD, fH].forEach((i) => i.addEventListener('input', upd));
+      upd();
+      const save = () => {
+        const x = read();
+        const errs = errorsOf(x);
+        if (errs.length) { upd(); try { errs[0][0].focus(); } catch (e) { /* 무시 */ } return false; }
+        const m = { width: r1(x.w), depth: x.d != null ? r1(x.d) : null, height: x.h != null ? r1(x.h) : null };
+        if (m0 && m0.width === m.width && m0.depth === m.depth && m0.height === m.height) return true;   // 바뀐 게 없으면 그대로
+        const base = MV.plans && MV.plans[key];
+        const bf = (base && Array.isArray(base.fixtures) ? base.fixtures : []).find((z) => z && typeof z === 'object' && fxStoreKey(z) === fk) || f;
+        const rr = fxMeasRect(bf, m, baseRoomsOf(base));
+        const entry = { w: rr.w, h: rr.h, measured: true, width: m.width };
+        if (m.depth != null) entry.depth = m.depth;
+        if (m.height != null) entry.height = m.height;
+        MV.store.update((st) => { editsOf(st)[key].fixtures[fk] = entry; }, { log: '📏 ' + PLAN_LABEL[key] + ' ' + nm + ' ' + measTxt(m) });
+        const vd = fridge ? fridgeVerdict(fridge, Object.assign({ measured: true, name: nm }, m)) : null;
+        toast(nm + ' 실측을 넣었어요 (' + measTxt(m).replace(/^실측 /, '') + ')' + (vd ? (vd.level === 'warn' ? ' — 배치 점검의 주의를 확인하세요' : ' — 냉장고가 들어가요 👍') : ''), { ms: 4500 });
+        return true;
+      };
+      let mdl = null;
+      [fW, fD, fH].forEach((i) => i.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); if (save() && mdl) mdl.close(); } }));
+      const field = (label, input, hint2) => el('label', { class: 'field' }, el('span', label), input, hint2 ? el('small', { class: 'hint' }, hint2) : null);
+      const actions = [];
+      if (m0) actions.push({ label: '실측 지우기', kind: 'danger', onClick: () => {
+        MV.store.update((st) => { delete editsOf(st)[key].fixtures[fk]; }, { log: '📏 ' + PLAN_LABEL[key] + ' ' + nm + ' 실측 지움' });
+        toast(nm + ' 실측을 지웠어요 — 도면 추정값으로 돌아갔어요');
+      } });
+      actions.push({ label: '취소', kind: 'ghost' });
+      actions.push({ label: '저장', kind: 'primary', onClick: () => save() });
+      mdl = ui.modal({
+        title: '📏 ' + nm + ' 실측',
+        body: el('div', { class: 'stack' },
+          el('p', { class: 'small muted mb-0' }, '사전방문 때 줄자로 잰 크기(cm)를 넣으세요. 폭은 냉장고가 들어갈 양옆 벽(또는 장) 사이, 깊이는 뒷벽에서 앞쪽 장 끝까지, 높이는 바닥에서 위 수납장(없으면 천장)까지예요. 가장 좁은 곳을 재세요.'),
+          fridge ? el('p', { class: 'small mb-0' }, '우리 냉장고: ', el('strong', shortName(fridge.name, 26)), el('span', { class: 'num' }, ' ' + cm1(num(fridge.w, 0)) + '×' + cm1(num(fridge.d, 0)) + '×' + cm1(num(fridge.h, 0)) + 'cm')) : null,
+          el('div', { class: 'form-grid fp-fxm-grid' }, field('폭 (cm)', fW, '도면 추정 ' + cm1(origW) + 'cm'), field('깊이 (cm, 선택)', fD), field('높이 (cm, 선택)', fH)),
+          prev),
+        actions,
+      });
+    }
+
     // ---- 문 추가 · 삭제 ----
     function addDoorAt(P) {
       const plan = cur.plan;
@@ -3520,7 +3810,7 @@
       });
     }
     function resetAllRooms() {
-      ui.confirm(PLAN_LABEL[key] + ' 도면에서 고친 것(방 치수·이름·종류, 그린 방, 지운 방, 전체 크기, 문 추가·삭제)을 모두 지우고 원래 도면으로 되돌릴까요? 평면도 사진은 그대로 둬요.', { danger: true, okLabel: '원래대로', title: '도면 전체 원래대로' }).then((ok) => {
+      ui.confirm(PLAN_LABEL[key] + ' 도면에서 고친 것(방 치수·이름·종류, 그린 방, 지운 방, 전체 크기, 문 추가·삭제, 냉장고 자리 실측)을 모두 지우고 원래 도면으로 되돌릴까요? 평면도 사진은 그대로 둬요.', { danger: true, okLabel: '원래대로', title: '도면 전체 원래대로' }).then((ok) => {
         if (!ok) return;
         const plan = getPlan(key);
         // 짐의 '위치' 이름 되돌리기: 이름을 바꾼 원래 방(지운 방 포함) → 원래 이름, 직접 그린 방 → 그 자리의 원래 방 이름
@@ -3539,7 +3829,7 @@
         let moved = 0;
         MV.store.update((st) => {
           const E = editsOf(st)[key];
-          E.rooms = {}; E.added = []; E.deleted = []; E.doorsAdded = []; E.doorsDeleted = [];
+          E.rooms = {}; E.added = []; E.deleted = []; E.doorsAdded = []; E.doorsDeleted = []; E.fixtures = {};
           delete E.size;
           // 모든 이름을 '바꾸기 전' 기준으로 한꺼번에 되돌림 (작은방1→서재, 서재→옷방 같은 연쇄도 안전하게)
           if (plan && changes.length) moved = remapRoomRefs(st, key, plan, changes);
@@ -3840,6 +4130,8 @@
           return;
         }
         if (tool === 'draw') return;
+        const fe = e.target.closest && e.target.closest('[data-fxk]');
+        if (fe) { openFxMeasure(fe.getAttribute('data-fxk')); return; }
         const rr = e.target.closest && e.target.closest('[data-rid]');
         if (rr) openRoomEditor(rr.getAttribute('data-rid'));
         return;
@@ -3915,6 +4207,8 @@
       if (inSvg && (e.key === 'Enter' || e.key === ' ')) {
         const rid = editMode && ae.getAttribute('data-rid');
         const dk = editMode && ae.getAttribute('data-door');
+        const fk = editMode && ae.getAttribute('data-fxk');
+        if (fk) { e.preventDefault(); openFxMeasure(fk); return; }
         const pid = !editMode && ae.getAttribute('data-pid');
         if (dk) { e.preventDefault(); askDeleteDoor(dk); return; }
         if (rid) { e.preventDefault(); openRoomEditor(rid); return; }

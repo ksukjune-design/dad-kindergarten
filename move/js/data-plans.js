@@ -33,12 +33,14 @@
      unit:    { exclusive_m2, supply_m2, rooms, baths, bays, ceiling_cm } // 숫자 (bays·ceiling_cm 은 추정)
    }
    MV.planLabels = { <complex/unit 키>: '한국어 이름' }  — 도면 정보 표에서 키 대신 보여 줄 이름
-   MV.catalog = [{ name, cat, tag, w, d, h, ac }]  — 규격 프리셋 (cm, 가로 W × 깊이 D × 높이 H)
+   MV.catalog = [{ name, cat, tag, w, d, h, ac, assumed }]  — 규격 프리셋 (cm, 가로 W × 깊이 D × 높이 H)
                // cat: MV.inv.CATS id (appliance|aircon|bed|storage|table|sofa|shelf|electronics|kids|misc)
                // tag: fridge|kimchi|washer|dryer|styler|dishwasher|aircon|tv|sofa|table|chair|desk|shelf|
                //      drawer|wardrobe|bedding|hanger|vanity|bed|mattress|toybox|shoe|bike|stroller|scooter|
                //      piano|treadmill|purifier|box|kitchen
                // ac: 에어컨일 때만 'wall'|'stand'|'2in1'|'window'
+               // assumed: 프리셋은 흔한 제품의 근사값이라 고르면 짐이 '추정 규격'이 됨. 우리 집 실제 모델의
+               //          제조사 규격(모델을 확인한 것)만 assumed: false → 골라도 '추정' 표시가 붙지 않음
                // 세탁기 이름에는 '통돌이' 또는 '드럼'을 넣음 (다용도실 점검이 종류를 이름으로 구분)
                // 우리 집 실제 가전(LG 870L 냉장고·삼성 20kg 건조기·삼성 2in1 스탠드·새 통돌이 17kg급)은
                // 같은 종류의 일반 규격 뒤에 둠 — 붙여넣기 '냉장고'처럼 짧은 이름은 일반 규격이 먼저 맞음
@@ -272,7 +274,7 @@
     { name: '4도어 냉장고', cat: 'appliance', tag: 'fridge', w: 91, d: 93, h: 186 },
     { name: '일반 냉장고 (2도어)', cat: 'appliance', tag: 'fridge', w: 60, d: 68, h: 170 },
     // 우리 집 냉장고 (메탈 도어 기준 146kg — 글라스 도어면 높이 186.0cm·156kg, 옆면 라벨로 확인)
-    { name: 'LG 오브제 4도어 870L 냉장고', cat: 'appliance', tag: 'fridge', w: 91.4, d: 91.8, h: 178.7 },
+    { name: 'LG 오브제 4도어 870L 냉장고', cat: 'appliance', tag: 'fridge', w: 91.4, d: 91.8, h: 178.7, assumed: false },
     { name: '김치냉장고 스탠드형', cat: 'appliance', tag: 'kimchi', w: 70, d: 80, h: 185 },
     { name: '김치냉장고 뚜껑형', cat: 'appliance', tag: 'kimchi', w: 94, d: 66, h: 86 },
     // 세탁·건조·의류
@@ -285,7 +287,7 @@
     { name: '건조기 20kg (히트펌프)', cat: 'appliance', tag: 'dryer', w: 70, d: 80, h: 99 },
     { name: '건조기 소형 10kg', cat: 'appliance', tag: 'dryer', w: 60, d: 66, h: 85 },
     // 우리 집 건조기 (77kg, 히트펌프 — 눕히지 말고 세워서 운반)
-    { name: '삼성 그랑데 건조기 AI 20kg', cat: 'appliance', tag: 'dryer', w: 68.6, d: 87.2, h: 98.4 },
+    { name: '삼성 그랑데 건조기 AI 20kg', cat: 'appliance', tag: 'dryer', w: 68.6, d: 87.2, h: 98.4, assumed: false },
     { name: '워시타워 (드럼+건조 일체형)', cat: 'appliance', tag: 'washer', w: 70, d: 83, h: 189 },
     { name: '워시타워 컴팩트 (드럼)', cat: 'appliance', tag: 'washer', w: 60, d: 66, h: 172 },
     { name: '스타일러', cat: 'appliance', tag: 'styler', w: 45, d: 59, h: 185 },
@@ -378,7 +380,7 @@
     },
     {
       level: 'warn', title: '붙박이장(3칸)은 두고 가요 → 이사 전에 비우고, 옷장은 이사 뒤에',
-      detail: '지금 안방 붙박이장(3칸: 아이 옷·양말·속옷·이불 / 아내 외투·바지 / 아내 하의)은 두고 가요. 이사 전에 모두 비워서 아내 옷은 가져가는 캐비닛장(3칸)으로, 캐비닛장에 있던 내 옷·잡화와 아이 옷은 간이옷장으로 옮기고(모자라면 간이옷장 추가), 여름옷·얇은 옷은 박스에 담아 이사 뒤 옷장이 올 때까지 보관해요. 붙박이장(추정 약 3.4m)만큼 걸려면 120cm 옷장 3개 정도인 셈이라, 이사 뒤 새 집 벽 길이를 재고 모자란 만큼만 간이 옷장(약 20만원, 선택)으로 사세요.',
+      detail: '지금 안방 붙박이장(3칸: 아이 옷·양말·속옷·이불 / 아내 외투·바지 / 아내 하의)은 두고 가요. 이사 전에 모두 비우고 옷 자리를 이렇게 바꿔요(10/6 결정): 아내 옷 → 가져가는 캐비닛장(3칸) / \'나\' 옷 → 지금 있는 간이옷장 / \'나\' 잡화 → 잡화정리 때 \'나-잡화\' 리빙박스 / 아이 옷 → 간이옷장과 아이 방 서랍 / 여름옷·얇은 옷 → 리빙박스에 담아 봄까지 보관. 이동식 행거는 걸 자리가 모자랄 때만 사요. 옷장은 이사 전에 사지 않아요. 붙박이장(추정 약 3.4m)만큼 걸려면 120cm 옷장 3개 정도인 셈이라, 이사 뒤 새 집 벽 길이를 재고 모자란 만큼만 간이 옷장(이케아 등, 약 20만원 추정, 선택·나중에)으로 사세요.',
     },
     {
       level: 'warn', title: '천장고 약 230cm(추정) → 옷장은 216cm 이하로',

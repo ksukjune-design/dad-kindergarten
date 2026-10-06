@@ -26,6 +26,7 @@
    짐목록   MV.inv.list(filterFn) / get / add / update / remove / volume(item) m³
             MV.inv.CATS / MV.inv.FATES / MV.inv.cat(id) / MV.inv.fate(id)
             MV.inv.editor(idOrNull, {preset, defaults, onSave}) 편집 모달
+                     ('추정 규격'은 가로·깊이·높이를 고치면 꺼지고, 프리셋을 고르면 켜짐 — catalog assumed:false 는 제외)
    계산     MV.calc.* — 모듈이 등록 (moveEstimate, financeSummary 등). 없을 수 있으니 ?.() 로 호출.
    라우팅   MV.view(name, {title, icon, order, nav, badge(), render(root, params, ctx)})
             ctx.onCleanup(fn) / ctx.subscribe(fn) (뷰를 떠날 때 자동 해제)
@@ -320,6 +321,18 @@
         state.items.splice(idx, 1);
         state.meta.deletedSeed = state.meta.deletedSeed || [];
         if (state.meta.deletedSeed.indexOf(iid) < 0) state.meta.deletedSeed.push(iid);
+        n++;
+      });
+      // 기본 짐 목록 항목의 글이 바뀐 경우: { inventory: { id: { from: { note: 옛 글 } } } }
+      // 지금 값이 from 과 모두 같을 때만(사용자가 고치지 않았을 때만) from 에 적은 칸을 새 기본값으로 바꿔요
+      Object.keys(m.inventory || {}).forEach((iid) => {
+        const it = state.inventory.find((x) => x.id === iid);
+        const sp = (seed.inventory || []).find((x) => x.id === iid);
+        const f = (m.inventory[iid] && m.inventory[iid].from) || {};
+        const keys = Object.keys(f);
+        if (!it || !sp || !keys.length || !keys.every((k) => it[k] === f[k])) return;
+        if (keys.every((k) => it[k] === sp[k])) return;
+        keys.forEach((k) => { it[k] = MV.clone(sp[k]); });
         n++;
       });
       // 묶음 이름이 바뀐 경우: 사용자가 만들거나 이름을 고친 파트도 같은 새 묶음으로 옮겨요
@@ -660,6 +673,18 @@
     f.lg = el('input', { type: 'checkbox', checked: !!draft.lg });
     f.ac = el('select', { class: 'select' }, el('option', { value: '' }, '해당 없음'), V.AC.map((a) => el('option', { value: a.id, selected: a.id === draft.ac }, a.label)));
     f.note = el('textarea', { class: 'textarea', placeholder: '모델명, 상태, 분해 필요 여부 등' }, draft.note || '');
+    /* '추정 규격' 표시: 이름·메모·위치·처리만 고치면 그대로 두고, 가로·깊이·높이를 고치면 꺼짐(실측값).
+       프리셋을 고르면 일반 규격이라 켜짐. 사용자가 직접 켜고 끌 수도 있음 (그때는 지금 크기를 기준으로) */
+    f.assumed = el('input', { type: 'checkbox', checked: !!draft.assumed });
+    const dimVals = () => [f.w, f.d, f.h].map((x) => Math.max(0, +x.value || 0));
+    let dimsBase = dimVals();
+    let assumedBase = !!draft.assumed;
+    const syncAssumed = () => {
+      const changed = dimVals().some((v, i) => v !== dimsBase[i]);
+      f.assumed.checked = changed ? false : assumedBase;
+    };
+    [f.w, f.d, f.h].forEach((x) => x.addEventListener('input', syncAssumed));
+    f.assumed.addEventListener('change', () => { assumedBase = f.assumed.checked; dimsBase = dimVals(); });
     const acRow = field('에어컨 종류', f.ac, '에어컨이면 견적에 이전설치비가 붙습니다');
     const syncAc = () => { acRow.hidden = f.cat.value !== 'aircon'; };
     f.cat.addEventListener('change', syncAc);
@@ -670,6 +695,8 @@
       f.cat.value = c.cat; f.w.value = c.w; f.d.value = c.d; f.h.value = c.h;
       if (c.ac) f.ac.value = c.ac;
       if (c.tag) draft.tag = c.tag;
+      // 프리셋 = 흔한 제품의 근사값(추정). 우리 집 실제 모델 규격(catalog 의 assumed: false)만 추정 아님
+      dimsBase = dimVals(); assumedBase = c.assumed !== false; f.assumed.checked = assumedBase;
       syncAc();
     });
     if (opts.preset != null && catalog[opts.preset]) { f.preset.value = String(opts.preset); f.preset.dispatchEvent(new Event('change')); }
@@ -680,6 +707,7 @@
         field('이름', f.name), field('분류', f.cat), field('처리', f.fate), field('수량', f.qty)),
       el('div', { class: 'form-grid' },
         field('가로 (cm)', f.w), field('깊이 (cm)', f.d), field('높이 (cm)', f.h)),
+      el('label', { class: 'check' }, f.assumed, '추정 규격 — 아직 재지 않은 예시 크기 (가로·깊이·높이를 고치면 저절로 꺼져요)'),
       el('div', { class: 'form-grid' },
         field('지금 집 위치', f.room), field('새 집 위치', f.roomNew), field('제조사', f.brand), acRow),
       field('제품 링크 (URL)', f.url, '인터넷에서 찾은 제품 페이지를 붙여 두면 규격 확인이 쉽습니다'),
@@ -692,7 +720,7 @@
       w: Math.max(0, +f.w.value || 0), d: Math.max(0, +f.d.value || 0), h: Math.max(0, +f.h.value || 0),
       room: f.room.value.trim(), roomNew: f.roomNew.value.trim(), url: f.url.value.trim(),
       brand: f.brand.value, lg: f.lg.checked, ac: f.cat.value === 'aircon' ? (f.ac.value || null) : null,
-      tag: draft.tag || '', note: f.note.value, assumed: false,
+      tag: draft.tag || '', note: f.note.value, assumed: !!f.assumed.checked,
     });
     const actions = [];
     if (existing) {

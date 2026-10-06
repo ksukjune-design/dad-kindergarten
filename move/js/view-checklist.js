@@ -69,6 +69,10 @@
     winAnchor: {},      // 폰 화면 키 → 맨 위에 보이던 줄 { id, off }
   };
 
+  /* 체크 토스트: { done: {ids, toast} 되돌릴 수 있는 '완료' 토스트, reopen: {id, toast} '다시 열었어요' 토스트 }
+     토스트는 화면보다 오래 남으므로(5초) 뷰 밖에 둠 */
+  const TOASTS = { done: null, reopen: null };
+
   /* ---------------- 작은 도우미 ---------------- */
   /* MediaQueryList 는 한 번만 만들어 둠 (.matches 는 늘 최신) — 크기를 재지 않고 화면 종류를 앎 */
   const mqCache = {};
@@ -1275,14 +1279,14 @@
         lingering.set(id, setTimeout(() => { lingering.delete(id); if (alive) { rowCache.delete(id); scheduleRefresh(); } }, 1300));
       }
       MV.items.toggle(id);
-      if (willDone) toastDone(id);
-      else {
-        if (doneBatch) doneBatch.ids = doneBatch.ids.filter((x) => x !== id);
-        MV.ui.toast('다시 열었어요');
-      }
+      if (willDone) { dropReopenToast(id); toastDone(id); }
+      else { dropFromDoneToast(id); toastReopen(id); }
     }
-    /* 연달아 체크하면 토스트를 하나로 합침 ('3개 완료했어요 · 모두 되돌리기') → 폰에서 목록을 덮지 않게 */
-    let doneBatch = null;
+    /* 토스트는 항목마다 하나만: 연달아 체크하면 '완료' 토스트를 하나로 합치고('3개 완료했어요 · 모두 되돌리기'),
+       다시 열면 그 항목은 '완료' 토스트에서 빼고(남은 게 없으면 닫음) '다시 열었어요'는 늘 하나만 → 목록을 덮지 않게 */
+    // 상태는 모듈의 TOASTS 에 둠 (뒤로·앞으로로 화면을 다시 그려도 떠 있는 토스트를 이어서 고침)
+    const DONE_LABEL = (n) => (n > 1 ? n + '개 완료했어요' : '완료했어요');
+    const UNDO_LABEL = (n) => (n > 1 ? '모두 되돌리기' : '되돌리기');
     function undoDone(id) {
       const x = MV.items.get(id);
       if (!x || !x.done) return;
@@ -1290,15 +1294,55 @@
       MV.items.toggle(id);
     }
     function toastDone(id) {
-      if (doneBatch && doneBatch.toast && doneBatch.toast.isConnected) {
-        doneBatch.toast.remove();
-        if (!doneBatch.ids.includes(id)) doneBatch.ids.push(id);
-      } else doneBatch = { ids: [id], toast: null };
-      const batch = doneBatch;
+      if (TOASTS.done && TOASTS.done.toast && TOASTS.done.toast.isConnected) {
+        TOASTS.done.toast.remove();
+        if (!TOASTS.done.ids.includes(id)) TOASTS.done.ids.push(id);
+      } else TOASTS.done = { ids: [id], toast: null };
+      const batch = TOASTS.done;
       const n = batch.ids.length;
-      batch.toast = MV.ui.toast(n > 1 ? n + '개 완료했어요' : '완료했어요', {
-        action: { label: n > 1 ? '모두 되돌리기' : '되돌리기', onClick: () => { const ids = batch.ids.slice(); if (doneBatch === batch) doneBatch = null; ids.forEach(undoDone); } },
+      batch.toast = MV.ui.toast(DONE_LABEL(n), {
+        action: { label: UNDO_LABEL(n), onClick: () => { const ids = batch.ids.slice(); if (TOASTS.done === batch) TOASTS.done = null; ids.forEach(undoDone); } },
       });
+    }
+    /* '완료' 토스트의 글만 고침 (닫히는 시각은 그대로) */
+    function paintDoneToast(batch) {
+      const t = batch && batch.toast;
+      if (!t || !t.isConnected) return;
+      const n = batch.ids.length;
+      const msg = t.querySelector('span'); const btn = t.querySelector('button');
+      if (msg) msg.textContent = DONE_LABEL(n);
+      if (btn) btn.textContent = UNDO_LABEL(n);
+    }
+    function setDoneIds(ids) {
+      if (!TOASTS.done) return;
+      TOASTS.done.ids = ids;
+      if (!ids.length) { if (TOASTS.done.toast) TOASTS.done.toast.remove(); TOASTS.done = null; }
+      else paintDoneToast(TOASTS.done);
+    }
+    function dropFromDoneToast(id) {
+      if (TOASTS.done && TOASTS.done.ids.includes(id)) setDoneIds(TOASTS.done.ids.filter((x) => x !== id));
+    }
+    function dropReopenToast(id) {
+      if (!TOASTS.reopen || (id != null && TOASTS.reopen.id !== id)) return;
+      if (TOASTS.reopen.toast) TOASTS.reopen.toast.remove();
+      TOASTS.reopen = null;
+    }
+    function toastReopen(id) {
+      dropReopenToast();
+      TOASTS.reopen = { id, toast: MV.ui.toast('다시 열었어요') };
+    }
+    /* 다른 곳(스레드·다른 기기·AI 비서)에서 다시 열거나 지운 항목은 토스트에서 뺌 */
+    function pruneToasts() {
+      if (TOASTS.done && !(TOASTS.done.toast && TOASTS.done.toast.isConnected)) TOASTS.done = null;   // 이미 닫힘
+      if (TOASTS.done) {
+        const keep = TOASTS.done.ids.filter((x) => { const it = MV.items.get(x); return !!(it && it.done); });
+        if (keep.length !== TOASTS.done.ids.length) setDoneIds(keep);
+      }
+      if (TOASTS.reopen) {
+        const it = MV.items.get(TOASTS.reopen.id);
+        if (!TOASTS.reopen.toast || !TOASTS.reopen.toast.isConnected) TOASTS.reopen = null;
+        else if (!it || it.done) dropReopenToast();
+      }
     }
 
     /* ---------- 입력창 (composer) ---------- */
@@ -1858,6 +1902,7 @@
       renderList();
       updateComposer();
       syncThread();
+      pruneToasts();
     }
     /* 누르는 중(mousedown/터치 ~ click)에는 다시 그리지 않고 click 이 끝난 뒤에 그림.
        스레드의 제목·설명 칸은 blur 때 저장되는데, blur 는 다른 곳을 누르는 mousedown 순간에 일어남 →
@@ -2285,6 +2330,9 @@
   .ck-addlink, .ck-del, .ck-guide-link, .ck-link { min-height: 36px; }
   .ck-x { width: 36px; height: 36px; }
   .ck-note-del { width: 36px; height: 36px; }
+  /* 태블릿(700px 이상)에서도: 마감 바로가기, 중요도·담당, 목록의 담당 거르기 */
+  .ck-quick, .ck-seg-b { min-height: 36px; }
+  .ck-search-clear { width: 36px; height: 36px; }
 }
 /* 체크리스트가 열려 있으면 토스트를 아래 입력창 위로 (입력창을 가리지 않게) */
 body:has(.ck) .toast button { white-space: nowrap; flex: none; }
