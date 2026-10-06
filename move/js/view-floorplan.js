@@ -2011,16 +2011,16 @@
       const inOld = interior(oldP), inNew = interior(newP);
       const bOld = balconyArea(oldP), bNew = balconyArea(newP);
       const areaCard = el('section', { class: 'card' },
-        el('div', { class: 'fp-card-head' }, el('h2', '방별 면적'), el('span', { class: 'chip ' + (inNew < inOld ? 'warn' : 'good') }, '실내 ' + fmtD(inNew - inOld))),
+        el('div', { class: 'fp-card-head' }, el('h2', '방별 면적'), el('span', { class: 'chip ' + (inNew < inOld ? 'warn' : 'good') }, '실내 ' + fmtD(r1(inNew) - r1(inOld)))),
         el('div', { class: 'table-wrap' }, el('table', { class: 'tbl' },
           el('thead', el('tr', el('th', '공간'), el('th', { class: 'num' }, '지금 집'), el('th', { class: 'num' }, '새 집'), el('th', { class: 'num' }, '차이'))),
           el('tbody', rows.map(({ o, n }) => el('tr',
             el('td', o && n ? (norm(o.name) === norm(n.name) ? o.name : o.name + ' → ' + n.name) : (o ? o.name : n.name), o && !n ? el('div', { class: 'tiny muted' }, '새 집엔 없음') : null, !o && n ? el('div', { class: 'tiny muted' }, '새 집에만 있음') : null),
-            roomCell(o), roomCell(n), dCell((n ? area(n) : 0) - (o ? area(o) : 0))))),
+            roomCell(o), roomCell(n), dCell(r1(n ? area(n) : 0) - r1(o ? area(o) : 0))))),
           el('tfoot',
-            el('tr', el('td', '실내 합계 (발코니 제외)'), el('td', { class: 'num' }, fmtA(inOld)), el('td', { class: 'num' }, fmtA(inNew)), dCell(inNew - inOld)),
-            el('tr', el('td', '발코니'), el('td', { class: 'num' }, fmtA(bOld)), el('td', { class: 'num' }, fmtA(bNew)), dCell(bNew - bOld)),
-            oldP.exclusive_m2 && newP.exclusive_m2 ? el('tr', el('td', '전용면적 (공부상)'), el('td', { class: 'num' }, (+oldP.exclusive_m2).toFixed(2) + '㎡'), el('td', { class: 'num' }, (+newP.exclusive_m2).toFixed(2) + '㎡'), dCell(newP.exclusive_m2 - oldP.exclusive_m2)) : null))),
+            el('tr', el('td', '실내 합계 (발코니 제외)'), el('td', { class: 'num' }, fmtA(inOld)), el('td', { class: 'num' }, fmtA(inNew)), dCell(r1(inNew) - r1(inOld))),
+            el('tr', el('td', '발코니'), el('td', { class: 'num' }, fmtA(bOld)), el('td', { class: 'num' }, fmtA(bNew)), dCell(r1(bNew) - r1(bOld))),
+            oldP.exclusive_m2 && newP.exclusive_m2 ? el('tr', el('td', '전용면적 (공부상)'), el('td', { class: 'num' }, (+oldP.exclusive_m2).toFixed(2) + '㎡'), el('td', { class: 'num' }, (+newP.exclusive_m2).toFixed(2) + '㎡'), dCell(r2(newP.exclusive_m2) - r2(oldP.exclusive_m2))) : null))),
         el('p', { class: 'tiny muted mt-8 mb-0' }, '도면에서 계산한 값이라 실제와 다를 수 있어요. 이름이 같은 방끼리, 없으면 같은 종류의 큰 방끼리 짝지었어요.'));
 
       // (3) 옷 수납 길이
