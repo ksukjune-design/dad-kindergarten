@@ -113,8 +113,8 @@
   }
 
   /** 화면 오류 카드: 쉬운 한국어 안내 + 접힌 '자세히'(오류 원문은 여기와 콘솔에만) */
-  function errCard(title, e, small) {
-    if (MV.ui.errorBox) return MV.ui.errorBox(title, e, { small, cls: 'es-err' });
+  function errCard(title, e, small, retry) {
+    if (MV.ui.errorBox) return MV.ui.errorBox(title, e, { small, retry, cls: 'es-err' });
     return el('div', { class: 'card tint-bad es-err', role: 'alert' }, small ? el('p', { class: 'strong mb-0' }, title) : el('h2', title),
       el('p', { class: 'small mb-0' }, '저장된 기록은 그대로예요. 새로고침하거나 다른 화면에 갔다가 다시 와 보세요.'));
   }
@@ -2292,7 +2292,7 @@
       el('p', { class: 'small es-muted mb-0' }, '방문견적 업체 3곳에 똑같이 보내세요. 버릴 짐과 제조사 서비스(LG·삼성)가 옮길 가전은 따로 표시돼요. 메모는 앱 안내 문구(‘~해 주세요’ 등)를 빼고 짐 설명만 넣었어요.'),
       el('div', { class: 'row' },
         el('button', { type: 'button', class: 'btn btn-primary', onclick: () => copyText(ta.value, ta) }, '📋 복사'),
-        el('button', { type: 'button', class: 'btn', onclick: () => { Promise.resolve(MV.ui.download('이사-짐목록-' + D.today() + '.csv', '﻿' + data.csv, 'text/csv;charset=utf-8')).then((ok) => { if (ok !== false) toast('CSV 파일을 저장했어요.'); }); } }, '⬇ CSV 저장')),
+        el('button', { type: 'button', class: 'btn', onclick: () => { Promise.resolve(MV.ui.download('move-inventory-' + D.today() + '.csv', '﻿' + data.csv, 'text/csv;charset=utf-8')).then((ok) => { if (ok !== false) toast('CSV 파일을 저장했어요.'); }); } }, '⬇ CSV 저장')),
       ta);
     MV.ui.modal({ title: '업체에 보낼 짐 목록', wide: true, body, actions: [{ label: '닫기', kind: 'ghost' }] });
   }
@@ -3518,7 +3518,7 @@
     root.appendChild(body);
     try { TAB_RENDER[tabId](body); } catch (e) {
       console.error('[estimate]', e);
-      body.appendChild(errCard('이 화면을 그리다 문제가 생겼어요', e, false));
+      body.appendChild(errCard('이 화면을 그리다 문제가 생겼어요', e, false, () => MV.rerender(true)));
     }
     ctx.subscribe((e) => { if (R !== myR) return; if (e && e.reset) return; requestRefresh(); });
     document.addEventListener('pointerdown', onPtrDown, true);

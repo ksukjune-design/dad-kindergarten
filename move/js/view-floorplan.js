@@ -1977,32 +1977,28 @@
     function refresh() {
       if (drag || pinch || gest) { pending = true; return; }
       pending = false;
-      const plan = getPlan(key);
-      if (!plan) return;
-      const inv = invMap();
-      const items = pls(key).map((p) => ({ p, it: inv.get(p.invId) })).filter((o) => o.it);
-      items.forEach((o) => { o.r = rectOf(o.p, o.it); });
-      if (sel && !items.some((o) => o.p.id === sel)) sel = null;
-      cur = { plan, inv, items, v: validate(plan, key, inv), bg: bgOf(key) };
+      // 도면·짐·점검 계산에서 오류가 나면 도면 칸에 쉬운 안내 (다음 변경 때 다시 시도)
+      try {
+        const plan = getPlan(key);
+        if (!plan) return;
+        const inv = invMap();
+        const items = pls(key).map((p) => ({ p, it: inv.get(p.invId) })).filter((o) => o.it);
+        items.forEach((o) => { o.r = rectOf(o.p, o.it); });
+        if (sel && !items.some((o) => o.p.id === sel)) sel = null;
+        cur = { plan, inv, items, v: validate(plan, key, inv), bg: bgOf(key) };
+      } catch (e) {
+        console.error('[plan]', e);
+        planErr.hidden = false;
+        planErr.replaceChildren(errBox(e, { retry: () => refresh() }));
+        return;
+      }
       // 다른 창에서 사진을 지웠으면 맞추기 안내를 닫음
       if (wiz && !cur.bg) { wiz = null; drawWizBar(); syncStageMode(); }
-      // 칸마다 따로 그려서, 한 칸에서 오류가 나도 나머지는 보이게 — 오류 난 칸엔 쉬운 안내 (다음 다시 그리기 때 다시 시도)
-      [[drawPlan, planErr], [drawChips, chips], [syncToolbar, null], [() => drawBgBar(false), bgBar, 'bgbar'], [() => drawSide(false), side, 'side'],
-        [drawChecks, checks], [() => drawLaundry(false), laundry, 'laundry'], [() => drawInfo(false), info, 'info']]
-        .forEach(([fn, box, sk]) => {
-          try {
-            fn();
-            if (box === planErr && !planErr.hidden) { planErr.hidden = true; planErr.textContent = ''; }
-          } catch (e) {
-            console.error('[plan]', e);
-            if (!box) return;
-            if (sk) delete sigs[sk];
-            box.hidden = false;
-            box.replaceChildren(errBox(e));
-          }
-        });
+      // 칸마다 따로 그려서, 한 칸에서 오류가 나도 나머지는 보이게 (각 draw* 는 아래 guard 로 감싼 것 — 오류 난 칸엔 쉬운 안내)
+      [drawPlan, drawChips, syncToolbar, () => drawBgBar(false), () => drawSide(false), drawChecks, () => drawLaundry(false), () => drawInfo(false)]
+        .forEach((fn) => { try { fn(); } catch (e) { console.error('[plan]', e); } });
     }
-    function drawPlan() {
+    function drawPlanRaw() {
       const { plan, items, v } = cur;
       if (!lastW) lastW = scroll.clientWidth;
       const cw = lastW || planCard.clientWidth || 340;
@@ -2135,7 +2131,7 @@
         fxTip.style.opacity = '';
       });
     }
-    function drawChips() {
+    function drawChipsRaw() {
       const { plan, items, v } = cur;
       chips.textContent = '';
       put(chips, 
@@ -2270,7 +2266,7 @@
       d.addEventListener('toggle', () => { helpOpen = d.open; });
       return d;
     }
-    function drawBgBar(force) {
+    function drawBgBarRaw(force) {
       const bg = cur.bg;
       const open = prefs().bgPanel;
       // 사진 도구 펼침: 직접 펼치거나 접기 전까지는 '축척을 아직 안 맞췄으면 펼침'
@@ -2667,7 +2663,7 @@
     // ---- 짐 목록 ----
     let sideTop = 0;   // 목록 스크롤 위치 (읽기로 레이아웃을 강제하지 않도록 이벤트로 추적)
     side.addEventListener('scroll', () => { sideTop = side.scrollTop; }, { passive: true });
-    function drawSide(force) {
+    function drawSideRaw(force) {
       const cnt = {};
       cur.items.forEach((o) => { cnt[o.it.id] = (cnt[o.it.id] || 0) + 1; });
       const all = MV.inv.list((it) => eligible(key, it));
@@ -2731,7 +2727,7 @@
     }
 
     // ---- 배치 점검 ----
-    function drawChecks() {
+    function drawChecksRaw() {
       const v = cur.v;
       checks.textContent = '';
       checks.appendChild(el('div', { class: 'fp-card-head' }, el('h2', '배치 점검'),
@@ -2760,7 +2756,7 @@
     }
 
     // ---- 다용도실 세탁기·건조기 ----
-    function drawLaundry(force) {
+    function drawLaundryRaw(force) {
       if (!laundry) return;
       const plan = cur.plan;
       const cands = laundryRooms(plan);
@@ -2872,7 +2868,7 @@
     }
 
     // ---- 도면 정보 ----
-    function drawInfo(force) {
+    function drawInfoRaw(force) {
       const plan = cur.plan;
       // 설비 자리 메모: 자료의 fixtures[].note (냉장고 자리 조건·배관구·실외기 안내 등) — 도면에서 그 자리를 눌러도 같은 설명이 떠요
       const fxNotes = plan.fixtures.filter((f) => f && String(f.note || '').trim());
@@ -3986,6 +3982,33 @@
     const onResize = () => { if (Math.abs(window.innerHeight - lastH) > 40) { lastH = window.innerHeight; relayout(); } };
     window.addEventListener('resize', onResize);
     ctx.onCleanup(() => { if (ro) ro.disconnect(); window.removeEventListener('resize', onResize); });
+
+    /* ---- 칸별 오류 경계: 다시 그리기(refresh)뿐 아니라 단추·확대 등에서 바로 부를 때도 같은 보호.
+       오류가 나면 그 칸에만 쉬운 안내(기술 내용은 '자세히' 안), 다음에 그릴 때 다시 시도 (칸 서명을 지워 둠) ---- */
+    function guard(fn, boxOf, sk) {
+      return function guarded() {
+        try {
+          const r = fn.apply(this, arguments);
+          if (boxOf() === planErr && !planErr.hidden) { planErr.hidden = true; planErr.textContent = ''; }
+          return r;
+        } catch (e) {
+          console.error('[plan]', e);
+          const box = boxOf();
+          if (!box) return undefined;
+          if (sk) delete sigs[sk];
+          box.hidden = false;
+          box.replaceChildren(errBox(e));
+          return undefined;
+        }
+      };
+    }
+    const drawPlan = guard(drawPlanRaw, () => planErr);
+    const drawChips = guard(drawChipsRaw, () => chips);
+    const drawBgBar = guard(drawBgBarRaw, () => bgBar, 'bgbar');
+    const drawSide = guard(drawSideRaw, () => side, 'side');
+    const drawChecks = guard(drawChecksRaw, () => checks);
+    const drawLaundry = guard(drawLaundryRaw, () => laundry, 'laundry');
+    const drawInfo = guard(drawInfoRaw, () => info, 'info');
 
     ctx.subscribe(() => refresh());
     refresh();

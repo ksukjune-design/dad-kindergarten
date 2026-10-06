@@ -2001,7 +2001,22 @@ div.fn-alert { cursor: default; }
       if (!root.isConnected) return;
       if (e && e.reset) return; // app.js 가 화면 전체를 다시 그림
       try { ensureState(); } catch (err) { /* 무시 */ }
-      if (structNext || !e || e.source !== SRC) { structNext = false; rebuildAll(); } else refresh();
+      // 계산(compute)이나 다시 그리기에서 오류가 나면 낡은 숫자를 그대로 두지 않고 쉬운 안내로 바꿈.
+      // 다음 변경 때 계산이 다시 되면 화면을 새로 그림
+      if (P.broken) {
+        try { compute(MV.store.get()); } catch (err) { return; }
+        P.broken = false;
+        MV.rerender(true);
+        return;
+      }
+      try {
+        if (structNext || !e || e.source !== SRC) { structNext = false; rebuildAll(); } else refresh();
+      } catch (err) {
+        console.error('[money]', err);
+        structNext = false;
+        P.broken = true;
+        root.replaceChildren(el('div', { class: 'fn-page' }, errBox(err, { full: true, retry: () => MV.rerender(true) })));
+      }
     });
     ctx.onCleanup(() => {
       if (P.sheet) { try { P.sheet.close(); } catch (e) { /* 무시 */ } }

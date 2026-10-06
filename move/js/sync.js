@@ -375,7 +375,7 @@
       if (!/^(blob:|data:)/.test(href)) return;
       e.preventDefault();
       e.stopPropagation();
-      const name = a.getAttribute('download') || '이사관리-파일.txt';
+      const name = a.getAttribute('download') || 'move-file.txt';
       fetch(href).then((r) => r.blob()).then((blob) => dl.save({ filename: name, data: blob })).catch((err) => {
         const code = err && err.code;
         if (code === 'declined' || !MV.ui) return;

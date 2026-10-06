@@ -73,7 +73,7 @@
     const theme = document.documentElement.dataset.theme || '';
     const stamp = new Date();
     const pad = (n) => String(n).padStart(2, '0');
-    const fname = '이사관리-백업-' + stamp.getFullYear() + pad(stamp.getMonth() + 1) + pad(stamp.getDate()) + '-' + pad(stamp.getHours()) + pad(stamp.getMinutes()) + '.json';
+    const fname = 'move-backup-' + stamp.getFullYear() + pad(stamp.getMonth() + 1) + pad(stamp.getDate()) + '-' + pad(stamp.getHours()) + pad(stamp.getMinutes()) + '.json';
     const Y = MV.sync || { mode: 'local', status: 'local' };
     const shared = Y.mode === 'shared';
     const SYNC_TEXT = {
@@ -93,7 +93,7 @@
         });
       } }, '이 기기 기록으로 공유 시작') : null,
       Y.localBackup && Y.localBackup() ? el('button', { class: 'btn btn-sm btn-ghost mt-8', type: 'button', onclick: () => {
-        MV.ui.download('이사관리-공유전-기록.json', Y.localBackup());
+        MV.ui.download('move-before-share.json', Y.localBackup());
       } }, '공유 전 이 기기 기록 받기') : null) : null;
     const body = el('div', { class: 'stack' },
       el('p', { class: 'small muted' }, shared

@@ -2617,8 +2617,8 @@
       body = el('p', { class: 'mb-0' }, '이 화면에서는 클로드 연결이 꺼져 있어요. 받은 공유 링크로 클로드 공유 버전을 직접 열면 쓸 수 있어요.',
         url ? [' ', el('a', { href: url, target: '_blank', rel: 'noopener noreferrer' }, '공유 버전 열기 →')] : null);
     } else {
-      head = 'AI 비서는 클로드 공유 버전에서만 쓸 수 있어요';
-      const why = '클로드 공유 버전(링크로 여는 화면)에서만 쓸 수 있어요. 지금 화면은 깃허브 페이지 버전이라 기록이 이 기기에만 저장되고, AI 기능은 꺼져 있어요.';
+      head = '지금 화면에서는 AI 비서를 쓸 수 없어요';
+      const why = 'AI 비서는 클로드 공유 버전(링크로 여는 화면)에서만 쓸 수 있어요. 지금 화면은 깃허브 페이지 버전이라 기록이 이 기기에만 저장돼요.';
       body = url
         ? el('p', { class: 'mb-0' }, why + ' ',
           el('a', { class: 'btn btn-primary btn-sm ag-open', href: url, target: '_blank', rel: 'noopener noreferrer' }, '공유 버전 열기 →'))

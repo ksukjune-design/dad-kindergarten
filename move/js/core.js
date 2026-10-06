@@ -821,14 +821,17 @@
     o = o || {};
     MV.css('mv-err', `
       .mv-err-more { margin-top: 8px; font-size: .82rem; color: var(--ink-3); }
-      .mv-err-more > summary { cursor: pointer; display: inline-flex; align-items: center; min-height: 36px; font-weight: 700; color: var(--ink-2); }
+      .mv-err-more > summary { cursor: pointer; display: inline-flex; align-items: center; gap: 6px; min-height: 36px; font-weight: 700; color: var(--ink-2); list-style: none; }
+      .mv-err-more > summary::-webkit-details-marker { display: none; }
+      .mv-err-more > summary::before { content: '▸'; display: inline-block; transition: transform .15s; }
+      .mv-err-more[open] > summary::before { transform: rotate(90deg); }
       .mv-err-more > pre { margin: 4px 0 0; padding: 8px 10px; max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: .74rem; background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px; }
       .mv-err .mv-err-act { margin-top: 8px; }
     `);
     const detail = U.errorDetail(err);
     return MV.el('div', { class: 'card tint-bad mv-err' + (o.cls ? ' ' + o.cls : ''), role: 'alert' },
       o.small ? MV.el('p', { class: 'strong mb-0' }, title) : MV.el('h2', title),
-      MV.el('p', { class: 'small mb-0' }, o.hint || '이 부분만 문제가 생겼고, 저장된 기록은 그대로예요. 새로고침하거나 다른 화면에 갔다가 다시 와 보세요.'),
+      MV.el('p', { class: 'small mb-0' }, o.hint || '저장된 기록은 그대로예요. 새로고침하거나 다른 화면에 갔다가 다시 와 보세요.'),
       o.retry ? MV.el('button', { type: 'button', class: 'btn btn-sm mv-err-act', onclick: o.retry }, '다시 시도') : null,
       detail ? MV.el('details', { class: 'mv-err-more' }, MV.el('summary', '자세히 (문제를 알릴 때 보여 주세요)'), MV.el('pre', detail)) : null);
   };
