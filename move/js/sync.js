@@ -15,25 +15,30 @@
 
    규칙: 항목·짐은 문서 하나씩이라 서로 다른 항목을 동시에 고쳐도 덮어쓰지 않습니다.
          한 문서(예: move/finance 의 예산 줄들)를 두 기기가 거의 동시에 고치면 3-방향 합치기를 합니다.
-           기준(base)  = 이 기기가 마지막으로 안 서버 내용 (srv)
-           내 것(local) = 지금 이 기기의 내용 (아직 저장 전·보내는 중 포함)
-           받은 것(remote) = 방금 도착한 서버 내용
-           객체: 키마다 — 나만 고쳤으면 내 것, 아니면 받은 것 (둘 다 고친 객체는 안으로 들어가서 다시 합침)
+           기준(base)  = 두 쪽이 모두 갖고 있는 가장 최근 내용. 쓸 때마다 문서에 '_sa'(이 내용에 이미 들어 있는
+                         예전 내용들의 짧은 해시, 최대 8개)를 함께 적어서 찾음. '_sa' 가 없는 쓰기(예: Claude 가
+                         db 도구로 고친 문서)면 이 기기가 마지막으로 안 서버 내용(srv)
+           내 것(local) = 지금 이 기기의 내용 (아직 저장 전·보내는 중·이미 보낸 것 포함)
+           받은 것(remote) = 방금 도착한 서버 내용 ('_sa' 는 읽을 때 떼어 냄 — 상태에는 들어가지 않음)
+           객체: 키마다 — 한쪽만 고쳤으면 고친 쪽 (둘 다 고친 객체는 안으로 들어가서 다시 합침)
            id 가 있는 객체 배열(예산 줄·배치·견적·메모): id 마다 같은 규칙, 양쪽에서 더한 것은 모두 남김,
              지우기는 상대가 그 요소를 안 고쳤을 때만 이김
            문자열 배열(지운 기본 항목·지운 방 같은 목록): 집합처럼 합침 (양쪽에서 더한 것·지운 것 모두 반영)
-           그 밖의 배열·값: 바뀐 쪽, 둘 다 바뀌었으면 받은 것
-           활동 기록은 둘을 합쳐 시간순 · 평면도 사진은 사진이 다르면 통째로 받은 것
-         합친 결과가 서버와 다르면 곧바로 다시 올립니다.
+           그 밖의 배열·값을 둘 다 다르게 고쳤으면: 어느 기기에서 합쳐도 같은 답이 나오게 정해진 규칙으로 하나
+             (정렬 문자열이 큰 쪽 — '받은 것이 이김' 으로 하면 두 기기가 서로의 값을 골라 엇갈린 채 멈출 수 있음)
+           순서: 한쪽만 기존 요소 순서를 바꿨으면 그 순서, 새로 더한 요소는 그쪽에서 바로 앞에 있던 요소 뒤에
+           활동 기록은 둘을 합쳐 시간순 · 평면도 사진은 사진이 다르면 통째로 하나
+         합친 결과가 서버와 다르면 곧바로 다시 올립니다. 내가 예전에 보낸 내용이 늦게 도착하면(메아리) 무시하고 지금 것을 다시 올림.
    상태: synced(공유 중) · saving · offline(잠시 끊김, 다시 시도) · partial(일부를 공유하지 못함 — 이 기기에만)
-         readonly(보기 전용 — 언제나 이것) · revoked(공유 권한 없음 — 이 기기에만) · empty · connecting
+         readonly(보기 전용 — 언제나 이것) · revoked(공유 권한 없음 — 이 기기에만)
+         unreachable(처음 연결 실패 — 이 기기에만, 새로 열면 다시 연결) · empty · connecting
    ============================================================ */
 (function (global) {
   'use strict';
   const S = MV.store;
   const Y = MV.sync = {
     mode: 'local',          // local | connecting | shared
-    status: 'local',        // local | connecting | synced | saving | empty | readonly | offline | partial | revoked | error
+    status: 'local',        // local | connecting | synced | saving | empty | readonly | offline | partial | revoked | unreachable | error
     readOnly: false,
     empty: false,
     cap: {},                // { db, user, downloads, sample } — 쓸 수 있는 것만
@@ -47,13 +52,14 @@
   const BACKOFF_MAX = 4000;
   const STUCK_MIN = 15000;      // 공유 저장소가 가득 찼을 때 다시 올려 보는 간격
   const STUCK_MAX = 120000;
-  const ANC_MAX = 8;
+  const HIST_MAX = 12;           // 문서마다 기억하는 '이미 들어 있는 내용' 수
+  const SA_MAX = 8;             // 문서에 함께 적는 해시 수
   const REVOKED = ['revoked', 'not_granted', 'capability_disabled', 'capability_removed'];
 
   let db = null;
   const last = new Map();       // 경로 → 이 기기가 보냈거나(보낼 예정) 받아 둔 내용 (정렬된 JSON) — 바뀐 것만 보내는 데 씀
   const srv = new Map();        // 경로 → 이 기기가 마지막으로 안 서버 내용 (합치기의 기준)
-  const anc = new Map();        // 경로 → Set(JSON) 지금 이 기기 내용에 이미 들어 있는 예전 내용 (늦게 온 내 쓰기 메아리 거르기)
+  const hist = new Map();       // 경로 → [{h, j}] 지금 이 기기 내용에 이미 들어 있는 내용들 (오래된 것 → 최근, 합치기 기준·메아리 거르기)
   const seen = new Map();       // 경로 → 받은 스냅샷 수 (쓰기 확인 사이에 새 내용이 왔는지)
   const pending = new Map();    // 경로 → { body | null(삭제) }
   const inflight = new Set();
@@ -95,6 +101,7 @@
     if (MV.ui && MV.ui.toast) MV.ui.toast(msg, { ms: 5000 });
   }
   const isItemPath = (p) => p.startsWith('items/') || p.startsWith('inventory/');
+  const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
   function hasPartial() {
     if (stuck.size) return true;
     for (const p of tooBig.keys()) if (!p.startsWith('planbg/')) return true; // 큰 평면도 사진은 원래 이 기기에만 (안내 토스트로 충분)
@@ -115,13 +122,33 @@
   function settle() {
     if (Y.mode === 'shared' && !pending.size && !running) setStatus(idleStatus());
   }
-  function addAnc(path, j) {
+  /** 짧은 내용 해시 (cyrb53) */
+  function hash(str) {
+    let h1 = 0xdeadbeef;
+    let h2 = 0x41c6ce57;
+    for (let i = 0; i < str.length; i++) {
+      const ch = str.charCodeAt(i);
+      h1 = Math.imul(h1 ^ ch, 2654435761);
+      h2 = Math.imul(h2 ^ ch, 1597334677);
+    }
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+    return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+  }
+  function pushHist(path, j, h) {
     if (j === null || j === undefined) return;
-    let set = anc.get(path);
-    if (!set) { set = new Set(); anc.set(path, set); }
-    set.delete(j);
-    set.add(j);
-    while (set.size > ANC_MAX) set.delete(set.values().next().value);
+    h = h || hash(j);
+    const H = (hist.get(path) || []).filter((e) => e.h !== h);
+    H.push({ h, j });
+    while (H.length > HIST_MAX) H.shift();
+    hist.set(path, H);
+  }
+  /** 문서에서 동기화용 표시('_sa')를 뗀 내용 */
+  function strip(d) {
+    if (!isObj(d) || !Object.prototype.hasOwnProperty.call(d, '_sa')) return d;
+    const o = Object.assign({}, d);
+    delete o._sa;
+    return o;
   }
 
   /* ---------- 상태 ↔ 문서 ---------- */
@@ -206,7 +233,6 @@
   }
 
   /* ---------- 3-방향 합치기 ---------- */
-  const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
   const has = (o, k) => isObj(o) && Object.prototype.hasOwnProperty.call(o, k) && o[k] !== undefined;
   function uniq(keys) { return new Set(keys).size === keys.length; }
   function idArr(a) {
@@ -230,7 +256,14 @@
       if (idArr(l) && idArr(r) && idArr(ab)) return mergeList(ab, l, r, (x) => typeof x.id + ':' + x.id, true);
       if (strArr(l) && strArr(r) && strArr(ab)) return mergeList(ab, l, r, (x) => x, false);
     }
-    return r;                         // 그 밖: 받은 것이 이김
+    return pick(l, r, cl, cr);        // 그 밖: 정해진 규칙으로 하나
+  }
+  /** 두 기기가 같은 칸을 동시에 다르게 고쳤을 때: 어느 기기에서 합쳐도 같은 답이 나오게 (정렬 문자열이 큰 쪽).
+      — '받은 것이 이김' 으로 하면 두 기기가 서로의 값을 골라 엇갈린 채 멈출 수 있음 */
+  function pick(l, r, cl, cr) {
+    cl = cl === undefined ? canon(l) : cl;
+    cr = cr === undefined ? canon(r) : cr;
+    return cl > cr ? l : r;
   }
   function mergeObj(b, l, r) {
     const out = {};
@@ -275,42 +308,69 @@
       if (inB && (!deep || canon(ml.get(k)) === canon(mb.get(k)))) return;   // 상대가 지움, 나는 안 고침
       keep.set(k, ml.get(k));
     });
-    // 순서: 나만 순서를 바꿨으면 내 순서, 아니면 받은 순서. 다른 쪽에서 더한 것은 그쪽에서 바로 앞에 있던 요소 뒤에 끼움
+    // 순서 (어느 쪽에서 합쳐도 같게): 한쪽만 기존 요소 순서를 바꿨으면 그 순서, 아니면 기준 순서를 뼈대로.
+    // 새로 더한 요소는 그쪽 목록에서 바로 앞에 있던 기존 요소 뒤에 끼우고, 같은 자리에 양쪽이 더했으면 정해진 순서로.
     const kb = b.map(keyOf);
     const kl = l.map(keyOf);
     const kr = r.map(keyOf);
+    const inB = new Set(kb);
     const sameOrder = (a, c) => {
       const sa = new Set(a);
       const sc = new Set(c);
       return a.filter((k) => sc.has(k)).join('\u0001') === c.filter((k) => sa.has(k)).join('\u0001');
     };
-    const localFirst = !sameOrder(kl, kb) && sameOrder(kr, kb);
-    const primary = localFirst ? kl : kr;
-    const secondary = localFirst ? kr : kl;
-    const order = primary.filter((k) => keep.has(k));
-    const placed = new Set(order);
-    let prev = null;
-    secondary.forEach((k) => {
-      if (placed.has(k)) { prev = k; return; }
-      if (!keep.has(k)) return;
-      const at = prev === null ? 0 : order.indexOf(prev) + 1;
-      order.splice(at, 0, k);
-      placed.add(k);
-      prev = k;
-    });
+    const reL = !sameOrder(kl, kb);
+    const reR = !sameOrder(kr, kb);
+    const skL = kl.filter((k) => inB.has(k));
+    const skR = kr.filter((k) => inB.has(k));
+    let skel = kb;
+    if (reL && !reR) skel = skL;
+    else if (reR && !reL) skel = skR;
+    else if (reL && reR) skel = skL.join('\u0001') > skR.join('\u0001') ? skL : skR;
+    skel = skel.concat(kb.filter((k) => skel.indexOf(k) < 0)); // 한쪽에서 지운 기존 요소도 자리 잡기용으로
+    const runs = new Map();
+    const collect = (list, side) => {
+      let anchor = null;
+      list.forEach((k) => {
+        if (inB.has(k)) { anchor = k; return; }
+        if (!runs.has(anchor)) runs.set(anchor, { l: [], r: [] });
+        runs.get(anchor)[side].push(k);
+      });
+    };
+    collect(kl, 'l');
+    collect(kr, 'r');
+    const order = [];
+    const done = new Set();
+    const put = (k) => { if (keep.has(k) && !done.has(k)) { done.add(k); order.push(k); } };
+    const emitRuns = (anchor) => {
+      const g = runs.get(anchor);
+      if (!g) return;
+      let a = g.l;
+      let c = g.r;
+      if (c.join('\u0001') < a.join('\u0001')) { const t = a; a = c; c = t; }
+      a.forEach(put);
+      c.forEach(put);
+    };
+    emitRuns(null);
+    skel.forEach((k) => { put(k); emitRuns(k); });
+    keep.forEach((v, k) => put(k));   // 혹시 빠진 것
     return order.map((k) => keep.get(k));
   }
   function mergeActivity(b, l, r) {
     const key = (a) => (a && a.at ? String(a.at) : '') + '\u0001' + (a && a.text ? String(a.text) : '');
     const base = new Set(((b && b.list) || []).map(key));
+    const ll = ((l && l.list) || []).filter(Boolean);
+    const rl = ((r && r.list) || []).filter(Boolean);
+    const inL = new Set(ll.map(key));
+    const inR = new Set(rl.map(key));
     const out = new Map();
-    ((r && r.list) || []).forEach((a) => { if (a) out.set(key(a), a); });
-    ((l && l.list) || []).forEach((a) => { if (a) { const k = key(a); if (!out.has(k) && !base.has(k)) out.set(k, a); } });
-    const list = Array.from(out.values()).sort((x, y) => {
-      const ax = String(x.at || '');
-      const ay = String(y.at || '');
-      return ax < ay ? 1 : ax > ay ? -1 : 0;
+    ll.concat(rl).forEach((a) => {
+      const k = key(a);
+      if (out.has(k)) return;
+      if (base.has(k) && !(inL.has(k) && inR.has(k))) return; // 한쪽에서 밀려난(오래된) 기록은 빼기
+      out.set(k, a);
     });
+    const list = Array.from(out.entries()).sort((x, y) => (x[0] < y[0] ? 1 : x[0] > y[0] ? -1 : 0)).map((e) => e[1]);
     return { list: list.slice(0, 150) };
   }
   /** 문서 종류에 맞춰 합치기 */
@@ -320,7 +380,9 @@
       const src = (x) => (x && isObj(x.v) ? x.v.src : undefined);
       if (src(l) !== src(r)) {        // 사진 자체가 다르면 섞지 않음
         const cb = b === undefined ? undefined : canon(b);
-        return canon(r) === cb ? l : r;
+        if (canon(r) === cb) return l;
+        if (canon(l) === cb) return r;
+        return pick(l, r);
       }
     }
     return merge3(b, l, r);
@@ -345,8 +407,10 @@
       }
       if (last.get(path) === j) return;
       last.set(path, j);
-      addAnc(path, j);
-      pending.set(path, { body: JSON.parse(j) });
+      const hj = hash(j);
+      const sa = (hist.get(path) || []).map((e) => e.h).filter((h) => h !== hj).slice(-SA_MAX);
+      pushHist(path, j, hj);
+      pending.set(path, { body: JSON.parse(j), sa });
     });
     last.forEach((j, path) => {
       if (isItemPath(path) && !units.has(path)) {
@@ -381,7 +445,7 @@
       let ref;
       try { ref = db.doc(path); } catch (e) { inflight.delete(path); running--; continue; } // 쓸 수 없는 경로 → 버림 (예전과 같음)
       let p;
-      try { p = job.body === null ? ref.delete() : ref.set(job.body); } catch (e) { p = Promise.reject(e); }
+      try { p = job.body === null ? ref.delete() : ref.set(Object.assign({}, job.body, { _sa: job.sa || [] })); } catch (e) { p = Promise.reject(e); }
       Promise.resolve(p).then(() => {
         if (conn !== db) return;
         backoff = 0;                  // 하나라도 되면 바로 다시 빠르게
@@ -466,30 +530,39 @@
 
   /* ---------- 읽기 ---------- */
   /** 받은 문서 하나 처리 → 0 그대로 · 1 이 기기 상태가 바뀜 · 2 상태는 그대로지만 내 내용을 다시 올려야 함 */
-  function onRemote(st, path, data) {
+  function onRemote(st, path, raw) {
+    const sa = isObj(raw) && Array.isArray(raw._sa) ? raw._sa : null;
+    const data = strip(raw);
     const j = canon(data);
-    const base = srv.has(path) ? srv.get(path) : null;
+    const hj = hash(j);
+    const known = srv.has(path) ? srv.get(path) : null;
     srv.set(path, j);
     const lu = unitOf(st, path);
     const lj = lu === undefined ? null : canon(lu);
     if (lj === j) {                    // 이미 같은 내용 (줄 서 있던 예전 내용은 보낼 필요 없음)
       last.set(path, j);
       pending.delete(path);
-      if (!inflight.has(path)) anc.delete(path);
+      pushHist(path, j, hj);
       stuck.delete(path);
       return 0;
     }
-    const a = anc.get(path);
-    if (a && a.has(j)) {               // 예전에 내가 보낸(또는 이미 합친) 내용이 늦게 옴 → 지금 내 것이 더 새것
+    // 기준 찾기: 받은 문서가 '이미 들어 있다'고 적은 내용 중 이 기기도 가진 가장 최근 것
+    const H = hist.get(path) || [];
+    let baseIdx = -1;
+    if (sa) for (let i = H.length - 1; i >= 0; i--) { if (sa.indexOf(H[i].h) >= 0) { baseIdx = i; break; } }
+    const selfIdx = H.findIndex((e) => e.h === hj);
+    if (selfIdx >= 0 && baseIdx <= selfIdx) {
+      // 이미 이 기기 내용에 들어 있는 예전 내용(내가 보낸 것의 메아리 등) → 지금 내 것이 더 새것: 다시 올림
       last.set(path, j);
       return 2;
     }
+    const base = baseIdx >= 0 ? H[baseIdx].j : known;
     const localDeleted = lu === undefined && isItemPath(path) && base !== null;
     const dirty = lu !== undefined ? lj !== base : localDeleted;
+    pushHist(path, j, hj);             // 이제 이 기기 내용에 받은 내용이 들어감
     if (!dirty) {                      // 이 기기에서 안 고친 문서 → 받은 내용 그대로
       last.set(path, j);
       pending.delete(path);
-      if (!inflight.has(path)) anc.delete(path);
       stuck.delete(path);
       applyUnit(st, path, data);
       return 1;
@@ -498,15 +571,12 @@
       if (j === base) return 0;        // 상대는 안 고침 → 내 지우기가 이김 (보내는 중)
       pending.delete(path);            // 상대가 고친 것을 내가 지웠음 → 고친 쪽이 이김
       last.set(path, j);
-      anc.delete(path);
       applyUnit(st, path, data);
       return 1;
     }
     // 둘 다 고침 → 합치기
     const merged = mergeDoc(path, base === null ? undefined : JSON.parse(base), MV.clone(lu), data);
     last.set(path, j);
-    if (base !== null) addAnc(path, base);
-    addAnc(path, j);
     if (canon(merged) === lj) return 2; // 받은 내용이 이미 내 쪽에 다 들어 있음 → 내 것을 올리기만
     applyUnit(st, path, merged);
     return 1;
@@ -520,19 +590,19 @@
       last.delete(path);
       const pj = pending.get(path);
       if (pj && pj.body === null) pending.delete(path);
-      anc.delete(path);
+      hist.delete(path);
       stuck.delete(path);
       return 0;
     }
     if (base === null || canon(lu) !== base) {
       // 상대가 지웠지만 이 기기에서 고친(또는 아직 안 올린) 항목 → 고친 쪽이 이김: 다시 올림
       last.delete(path);
-      anc.delete(path);
+      hist.delete(path);
       return 2;
     }
     last.delete(path);
     pending.delete(path);
-    anc.delete(path);
+    hist.delete(path);
     stuck.delete(path);
     tooBig.delete(path);
     applyUnit(st, path, null);
@@ -590,7 +660,7 @@
   async function readAll() {
     const snaps = await Promise.all(COLS.map((c) => db.collection(c).get()));
     const remote = new Map();
-    snaps.forEach((qs, i) => qs.docs.forEach((d) => { if (d.exists) remote.set(COLS[i] + '/' + d.id, d.data()); }));
+    snaps.forEach((qs, i) => qs.docs.forEach((d) => { if (d.exists) remote.set(COLS[i] + '/' + d.id, strip(d.data())); }));
     return remote;
   }
   function adopt(remote) {
@@ -601,13 +671,14 @@
     });
     last.clear();
     srv.clear();
-    anc.clear();
+    hist.clear();
     stuck.clear();
     remote.forEach((data, path) => {
       applyUnit(st, path, data);
       const j = canon(data);
       last.set(path, j);
       srv.set(path, j);
+      pushHist(path, j);
     });
     S.mergeSeed(st);          // 새 기본 항목이 생겼으면 추가 (지운 항목은 그대로 지운 채)
     S.persist();              // → diffAndWrite: 이 기기에만 있던 부분(예: 평면도 사진)과 새 기본 항목을 올림
@@ -640,7 +711,7 @@
     Y.empty = false;
     last.clear();
     srv.clear();
-    anc.clear();
+    hist.clear();
     S.log('이 기기의 기록으로 공유를 시작했어요.', true);
     S.persist();
     S.emit('change', { source: 'local' });
@@ -661,6 +732,7 @@
     offline: ['⚠', '공유 저장소와 잠시 연결이 끊겼어요 — 다시 시도하는 중'],
     partial: ['⚠', '일부 기록을 공유하지 못했어요 — 이 기기에만 남아요'],
     revoked: ['🔒', '공유 권한이 없어요 — 이 기기에만 저장돼요'],
+    unreachable: ['⚠', '공유 저장소에 연결하지 못했어요 — 지금은 이 기기에만 저장돼요'],
     error: ['⚠', '공유 저장소 오류'],
   };
   /** ⋯ 메뉴 '함께 쓰기' 칸에 쓸 긴 설명 (app.js 에 아직 없는 상태만) */
@@ -671,6 +743,7 @@
         + (stuck.size ? '공유 저장소가 가득 찼어요 — 필요 없는 항목이나 사진을 지우면 잠시 뒤 자동으로 다시 올려요.' : '내용이 너무 커요 — 줄이면 다시 공유돼요.');
     }
     if (st === 'revoked') return '🔒 공유 권한이 없어요. 지금부터 바꾼 내용은 이 기기에만 저장돼요.';
+    if (st === 'unreachable') return '⚠ 공유 저장소에 연결하지 못했어요. 지금 바꾼 내용은 이 기기에만 남아요. 페이지를 새로 열면 다시 연결하고, 그때는 공유된 기록으로 맞춰져요.';
     return null;
   };
   function renderChip() {
@@ -732,9 +805,11 @@
     }
     let remote;
     try { remote = await readAll(); } catch (e) {
+      // 처음 읽기 실패: 저절로 다시 붙지 않으므로 '다시 시도하는 중' 이라고 하지 않음 (새로 열면 다시 연결)
       Y.lastError = e && e.code;
       Y.mode = 'local';
-      setStatus('offline');
+      db = null;
+      setStatus(REVOKED.indexOf(Y.lastError) >= 0 ? 'revoked' : 'unreachable');
       return;
     }
     Y.mode = 'shared';
@@ -759,7 +834,7 @@
       if (!/^(blob:|data:)/.test(href)) return;
       e.preventDefault();
       e.stopPropagation();
-      const name = a.getAttribute('download') || 'move-file.txt';
+      const name = a.getAttribute('download') || '이사관리-파일.txt';
       fetch(href).then((r) => r.blob()).then((blob) => dl.save({ filename: name, data: blob })).catch((err) => {
         const code = err && err.code;
         if (code === 'declined' || !MV.ui) return;
@@ -784,11 +859,12 @@
   S.afterPersist.push(diffAndWrite);
   MV.css('sync', `
     .sync-chip { flex: 0 0 auto; padding: 0 8px; font-size: 1rem; }
-    .sync-chip[data-status="offline"], .sync-chip[data-status="error"], .sync-chip[data-status="partial"], .sync-chip[data-status="revoked"] { color: var(--warn); }
+    .sync-chip[data-status="offline"], .sync-chip[data-status="error"], .sync-chip[data-status="partial"],
+    .sync-chip[data-status="revoked"], .sync-chip[data-status="unreachable"] { color: var(--warn); }
   `);
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => { connect(); });
   else setTimeout(connect, 0);
 
   // 테스트·디버깅용
-  Y._debug = { canon, unitsOf, unitOf, docId, last, srv, anc, pending, inflight, stuck, tooBig, applyUnit, merge3, mergeDoc, get backoff() { return backoff; } };
+  Y._debug = { canon, hash, unitsOf, unitOf, docId, last, srv, hist, pending, inflight, stuck, tooBig, applyUnit, merge3, mergeDoc, get backoff() { return backoff; } };
 })(window);
