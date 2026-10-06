@@ -32,7 +32,10 @@
     const dd = MV.date.dday(MV.date.moveDate());
     const box = document.getElementById('topbar-dday');
     if (box) {
-      box.textContent = (dd.n > 0 ? '이사 ' + dd.label : dd.n === 0 ? '오늘 이사!' : '이사 ' + dd.label) + ' · ' + MV.date.fmt(MV.date.moveDate());
+      box.innerHTML = '';
+      box.appendChild(el('span', { class: 'dday-n' }, dd.n === 0 ? '오늘 이사!' : '이사 ' + dd.label));
+      box.appendChild(el('span', { class: 'dday-date' }, ' · ' + MV.date.fmt(MV.date.moveDate())));
+      box.title = '이사일 ' + MV.date.fmtLong(MV.date.moveDate());
     }
   }
 

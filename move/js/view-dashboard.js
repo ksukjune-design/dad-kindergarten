@@ -25,6 +25,7 @@
     moreGroups: new Set(),    // '+n개 더' 를 펼친 (주|파트)
   };
   let sessionDone = new Set(); // 이 화면에서 방금 완료한 항목 — 목록에서 바로 사라지지 않게
+  let persistUi = () => {};    // render 가 연결: 펼침 상태가 바뀌면 지금 기록(history)에 저장
 
   /* ---------- 작은 도우미 ---------- */
   const isNum = (n) => typeof n === 'number' && isFinite(n);
@@ -48,15 +49,51 @@
     return m;
   }
   const partOf = (pm, id) => pm.get(id) || { id: id || '', name: '기타', emoji: '📌', group: '기타' };
+  // 이사일 (백업 복원 등으로 값이 깨져 있으면 null)
+  const moveDay = () => normDate(D.moveDate());
   function milestones() {
-    const move = D.moveDate();
-    return [
-      { date: D.add(move, -1), label: '가전 선이동(예정)', icon: '🔌' },
-      { date: normDate(move), label: '이사·잔금·전입신고', icon: '🚚', main: true },
-      { date: LEASE_END, label: '원래 전세 만기', icon: '📄' },
-    ].sort((a, b) => (a.date < b.date ? -1 : 1));
+    const move = moveDay();
+    const list = [{ date: LEASE_END, label: '원래 전세 만기', icon: '📄' }];
+    if (move) {
+      list.push({ date: D.add(move, -1), label: '가전 선이동(예정)', icon: '🔌' });
+      list.push({ date: move, label: '이사·잔금·전입신고', icon: '🚚', main: true });
+    }
+    return list.sort((a, b) => (a.date < b.date ? -1 : 1));
+  }
+  // 바로가기용: 가이드 id → 파트의 guide 필드 → partIds 로 찾고, 없으면 그 파트 체크리스트로
+  function guideLink(key) {
+    const guides = (Array.isArray(MV.guides) ? MV.guides : []).filter((g) => g && g.id != null && g.id !== '');
+    const byId = (id) => guides.find((g) => String(g.id) === String(id));
+    const part = MV.parts.get(key);
+    let g = byId(key), anchor = '';
+    if (!g && part && part.guide) {
+      const k = String(part.guide).split('#');
+      g = byId(k[0]); anchor = k[1] || '';
+    }
+    if (!g) g = guides.find((x) => Array.isArray(x.partIds) && x.partIds.map(String).includes(key));
+    if (g) return { href: '#/guide/' + encodeURIComponent(g.id) + (anchor ? '/' + encodeURIComponent(anchor) : ''), guide: true };
+    if (part) return { href: partHref(key), guide: false };
+    return { href: '#/guide', guide: false };
+  }
+  /* 뒤로 가기로 돌아왔을 때 스크롤·펼친 주를 되살리기 위해, 지금 대시보드 기록(history entry)에 화면 상태를 적어 둡니다.
+     새로 들어온 기록(메뉴 클릭 등)엔 상태가 없으니 맨 위·기본 펼침으로 시작합니다. */
+  const HS_KEY = 'mvDash';
+  function readHS() {
+    try {
+      const s = history.state;
+      const v = s && typeof s === 'object' ? s[HS_KEY] : null;
+      return v && typeof v === 'object' ? v : null;
+    } catch (e) { return null; }
+  }
+  function writeHS(v) {
+    try {
+      const s = history.state;
+      const base = s && typeof s === 'object' && !Array.isArray(s) ? s : {};
+      history.replaceState(Object.assign({}, base, { [HS_KEY]: v }), '');
+    } catch (e) { /* 무시 */ }
   }
   function relWeek(ws, moveW) {
+    if (!moveW) return '';
     const k = Math.round(D.diff(ws, moveW) / 7);
     if (k > 0) return '이사 ' + k + '주 전';
     if (k === 0) return '이사 주간';
@@ -119,6 +156,7 @@
 .db-counters { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
 .db-counter { display:inline-flex; align-items:center; gap:7px; min-height:36px; padding:4px 13px; border-radius:999px; text-decoration:none; font-weight:700; font-size:.86rem; background:var(--bg-2); color:var(--ink-2); border:1px solid var(--line); }
 .db-counter b { font-size:1.02rem; font-variant-numeric:tabular-nums; }
+.db-counter-note { font-size:.72rem; font-weight:650; opacity:.8; }
 .db-counter:hover { border-color:var(--line-2); }
 .db-counter.is-bad { background:var(--bad-bg); color:var(--bad); border-color:color-mix(in srgb, var(--bad) 30%, transparent); }
 .db-counter.is-warn { background:var(--warn-bg); color:var(--warn); border-color:color-mix(in srgb, var(--warn) 30%, transparent); }
@@ -134,14 +172,23 @@
 .db-check:hover { background:var(--bg-3); }
 .db-check input { width:20px; height:20px; margin:0; accent-color:var(--good); cursor:pointer; }
 .db-task-main { flex:1; min-width:0; padding-top:6px; }
-.db-task-title { display:block; color:var(--ink); font-weight:650; text-decoration:none; line-height:1.4; }
+.db-task-title { display:block; color:var(--ink); font-weight:650; text-decoration:none; line-height:1.4; padding:7px 0; margin:-7px 0; }
 .db-task-title:hover { color:var(--brand); text-decoration:underline; }
 .db-task.is-done .db-task-title { color:var(--ink-3); text-decoration:line-through; }
 .db-meta { display:flex; flex-wrap:wrap; gap:4px; margin-top:4px; }
 .db-meta .chip { max-width:100%; overflow:hidden; text-overflow:ellipsis; }
 .db-empty { padding:14px 4px; color:var(--ink-3); font-size:.92rem; }
 .db-empty b { color:var(--ink); }
-.db-subhead { font-size:.78rem; font-weight:800; color:var(--ink-3); margin:4px 0 4px; }
+.db-subhead { display:flex; align-items:center; gap:6px; font-size:.76rem; font-weight:800; color:var(--ink-3); margin:12px 0 2px; letter-spacing:.02em; }
+.db-subhead:first-child { margin-top:0; }
+.db-subhead::before { content:''; width:7px; height:7px; border-radius:50%; background:var(--ink-3); flex:none; }
+.db-subhead.is-today { color:var(--warn); }
+.db-subhead.is-today::before { background:var(--warn); }
+.db-subhead.is-overdue { color:var(--bad); }
+.db-subhead.is-overdue::before { background:var(--bad); }
+.db-subhead-n { font-variant-numeric:tabular-nums; font-weight:700; opacity:.85; }
+.db-subhead + .db-task { border-top:0; padding-top:0; }
+.db-more-rest { margin-left:0; margin-top:4px; }
 
 /* 돈 흐름 */
 .db-ledger { display:flex; flex-direction:column; }
@@ -172,6 +219,7 @@
 .db-notes { margin:8px 0 0; padding-left:1.1em; font-size:.78rem; color:var(--ink-3); }
 .db-notes li + li { margin-top:2px; }
 .db-cta { margin-top:10px; }
+.db-cta .btn { min-height:40px; }
 
 /* 주간 워크플랜 */
 .db-road-ctrl { margin-left:auto; display:flex; gap:4px; }
@@ -276,6 +324,7 @@ button.db-wk-head:hover { background:var(--bg-3); }
 .db-acts { list-style:none; margin:0; padding:0; }
 .db-act { display:flex; gap:10px; padding:6px 0; border-top:1px solid var(--line); font-size:.86rem; line-height:1.45; }
 .db-act:first-child { border-top:0; padding-top:0; }
+.db-grid > .db-activity { align-self:start; }
 .db-act time { flex:none; min-width:74px; color:var(--ink-3); font-size:.76rem; font-variant-numeric:tabular-nums; padding-top:2px; }
 .db-act span { min-width:0; }
 .db-qlinks { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px; }
@@ -293,19 +342,21 @@ button.db-wk-head:hover { background:var(--bg-3); }
 `);
 
   /* ======================= 섹션: 히어로 ======================= */
-  function counter(label, n, cls, href) {
-    return el('a', { class: 'db-counter' + (n ? ' is-' + cls : ''), href, 'aria-label': label + ' ' + n + '개' },
-      el('span', label), el('b', String(n)));
+  function counter(label, n, cls, href, note) {
+    return el('a', { class: 'db-counter' + (n ? ' is-' + cls : ''), href, 'aria-label': label + (note ? '(' + note + ')' : '') + ' ' + n + '개', title: note ? label + ' — ' + note : null },
+      el('span', label), el('b', String(n)), note ? el('small', { class: 'db-counter-note' }, note) : null);
   }
   function heroCard() {
-    const move = D.moveDate();
+    const move = moveDay();
     const dd = D.dday(move);
     const st = MV.parts.stats();
+    // 7일 이내 = 체크리스트 '7일 이내' 채널과 같은 기준 (지난 것 포함, 앞으로 7일 안 마감)
     let nOver = 0, nToday = 0, n7 = 0;
     MV.items.list().forEach((i) => {
       const s = MV.items.status(i);
       if (s === 'overdue') nOver++;
-      else if (s === 'today') { nToday++; n7++; } else if (s === 'soon' || s === 'week') n7++;
+      if (s === 'today') nToday++;
+      if (s === 'overdue' || s === 'today' || s === 'soon' || s === 'week') n7++;
     });
     const plans = MV.plans || {};
     const area = (p) => (p && +p.exclusive_m2 > 0 ? (+p.exclusive_m2) + '㎡' : null);
@@ -322,13 +373,14 @@ button.db-wk-head:hover { background:var(--bg-3); }
     }
     const today = D.today();
     const next = milestones().filter((m) => D.diff(today, m.date) >= 0)[0];
+    const whenText = move ? D.fmtLong(move) : '이사일 정보가 올바르지 않아요 (백업 데이터 확인)';
 
     return el('section', { class: 'card db-hero db-span-12', 'aria-label': '이사 개요' },
       el('div', { class: 'db-hero-grid' },
         el('div', { class: 'db-hero-left' },
           el('div', { class: 'db-eyebrow' }, eyebrow),
           big,
-          el('div', { class: 'db-when' }, D.fmtLong(move), dd.n > 0 ? el('span', { class: 'nowrap' }, ' · ' + dd.label) : null),
+          el('div', { class: 'db-when' }, whenText, dd.n > 0 ? el('span', { class: 'nowrap' }, ' · ' + dd.label) : null),
           el('div', { class: 'db-route' },
             el('span', '등촌우성 2층'), el('span', { class: 'db-route-arrow', 'aria-hidden': 'true' }, '→'), el('span', '서광등촌마을 14층'),
             aOld && aNew ? el('span', { class: 'db-route-area' }, '전용 ' + aOld + ' → ' + aNew) : null)),
@@ -341,7 +393,7 @@ button.db-wk-head:hover { background:var(--bg-3); }
           el('div', { class: 'db-counters' },
             counter('지연', nOver, 'bad', '#/checklist/~focus'),
             counter('오늘', nToday, 'warn', '#/checklist/~focus'),
-            counter('7일 이내', n7, 'brand', '#/checklist/~week')),
+            counter('7일 이내', n7, 'brand', '#/checklist/~week', nOver ? '지연 포함' : null)),
           next ? el('div', { class: 'db-next' }, '🚩 다음 이정표 · ',
             el('b', D.fmt(next.date) + ' ' + next.label), el('span', { class: 'nowrap' }, ' · ' + D.dday(next.date).label)) : null)));
   }
@@ -372,21 +424,59 @@ button.db-wk-head:hover { background:var(--bg-3); }
       action: { label: '되돌리기', onClick: () => { const cur = MV.items.get(id); if (cur && cur.done === willDone) MV.items.toggle(id); } },
     });
   }
+  const NOW_MAX = 8;
+  // 화면에 보이는 묶음 순서: 오늘 마감(이사 당일 일 포함) → 기한 지남 → 3일 안 → 7일 안
+  const NOW_SLOTS = [
+    { id: 'today', label: '오늘 마감', cls: 'is-today' },
+    { id: 'overdue', label: '기한 지남', cls: 'is-overdue' },
+    { id: 'soon', label: '3일 안에', cls: '' },
+    { id: 'week', label: '7일 안에', cls: '' },
+  ];
+  // 방금 완료해서 status 가 'done' 이 된 항목도 원래 자리에 남도록 기한으로 칸을 정합니다
+  function nowSlot(i, today) {
+    if (!D.valid(i.due)) return 'later';
+    const n = D.diff(today, normDate(i.due));
+    return n < 0 ? 'overdue' : n === 0 ? 'today' : n <= 3 ? 'soon' : n <= 7 ? 'week' : 'later';
+  }
   function nowCard(pm) {
+    const today = D.today();
     const all = MV.items.list();
-    const status = new Map(all.map((i) => [i.id, MV.items.status(i)]));
     const open = all.filter((i) => !i.done);
-    let pick = open.filter((i) => ['overdue', 'today', 'soon'].includes(status.get(i.id)));
-    if (pick.length < 5) pick = pick.concat(open.filter((i) => status.get(i.id) === 'week'));
-    const kept = all.filter((i) => i.done && sessionDone.has(i.id));
-    const list = pick.concat(kept).sort(byDue).slice(0, 8);
-    const nLate = pick.filter((i) => status.get(i.id) === 'overdue').length;
-    const sub = pick.length ? (nLate ? '지연 ' + nLate + ' · ' : '') + '가까운 순' : '';
+    const slot = new Map(all.map((i) => [i.id, nowSlot(i, today)]));
+    const urgent = open.filter((i) => ['overdue', 'today', 'soon'].includes(slot.get(i.id)));
+    const weekOpen = open.filter((i) => slot.get(i.id) === 'week');
+    const topped = urgent.length < 5 && weekOpen.length > 0;     // 급한 일이 적으면 7일 안 일로 채움
+    const pick = topped ? urgent.concat(weekOpen) : urgent;
+    const kept = all.filter((i) => i.done && sessionDone.has(i.id) && slot.get(i.id) !== 'later' && (topped || slot.get(i.id) !== 'week'));
+    // 고르는 순서: 오늘 마감 → 중요한 지연 → 중요한 3일 안 → 나머지 지연 → 3일 안 → 7일 안 (같은 칸 안에서는 기한·중요도 순)
+    const rank = (i) => {
+      const sl = slot.get(i.id), hi = i.priority === 'high';
+      if (sl === 'today') return 0;
+      if (sl === 'overdue') return hi ? 1 : 3;
+      if (sl === 'soon') return hi ? 2 : 4;
+      return 5;
+    };
+    const chosen = pick.concat(kept).sort((a, b) => (rank(a) - rank(b)) || byDue(a, b)).slice(0, NOW_MAX);
+    const nLate = urgent.filter((i) => slot.get(i.id) === 'overdue').length;
+    const nToday = urgent.filter((i) => slot.get(i.id) === 'today').length;
+    const showsWeek = chosen.some((i) => slot.get(i.id) === 'week');
+    // '전체 보기' 는 카드에 보이는 항목이 모두 들어 있는 목록으로
+    const allHref = !pick.length && open.length ? '#/checklist/~all' : showsWeek ? '#/checklist/~week' : '#/checklist/~focus';
+    const subBits = [];
+    if (nToday) subBits.push('오늘 ' + nToday);
+    if (nLate) subBits.push('지연 ' + nLate);
+    const sub = pick.length ? (subBits.length ? subBits.join(' · ') : (topped ? '7일 안에 마감' : '3일 안에 마감')) : '';
     const body = el('div', { class: 'db-tasks' });
-    if (list.length) {
-      list.forEach((i) => body.appendChild(taskRow(i, pm)));
-      const rest = pick.length - list.filter((i) => !i.done).length;
-      if (rest > 0) body.appendChild(el('a', { class: 'db-more', href: '#/checklist/~week', style: { marginLeft: 0 } }, '그 외 ' + rest + '개 더 보기 →'));
+    if (chosen.length) {
+      NOW_SLOTS.forEach((g) => {
+        const rows = chosen.filter((i) => slot.get(i.id) === g.id).sort(byDue);
+        if (!rows.length) return;
+        const left = rows.filter((i) => !i.done).length;
+        body.appendChild(el('div', { class: 'db-subhead ' + g.cls }, g.label, el('span', { class: 'db-subhead-n' }, String(left))));
+        rows.forEach((i) => body.appendChild(taskRow(i, pm)));
+      });
+      const rest = pick.length - chosen.filter((i) => !i.done).length;
+      if (rest > 0) body.appendChild(el('a', { class: 'db-more db-more-rest', href: allHref }, '그 외 ' + rest + '개 더 보기 →'));
     } else if (!all.length) {
       body.appendChild(el('div', { class: 'db-empty' }, '아직 체크 항목이 없어요. ', el('a', { href: '#/checklist' }, '체크리스트에서 추가하기 →')));
     } else if (!open.length) {
@@ -397,7 +487,7 @@ button.db-wk-head:hover { background:var(--bg-3); }
       upcoming.forEach((i) => body.appendChild(taskRow(i, pm)));
     }
     return el('section', { class: 'card db-now db-span-7', 'aria-label': '지금 할 일' },
-      head('✅', '지금 할 일', sub ? el('span', { class: 'db-now-sub' }, sub) : null, moreLink('전체 보기 →', '#/checklist/~focus')),
+      head('✅', '지금 할 일', sub ? el('span', { class: 'db-now-sub' }, sub) : null, moreLink('전체 보기 →', allHref)),
       body);
   }
 
@@ -441,7 +531,7 @@ button.db-wk-head:hover { background:var(--bg-3); }
       if (warns.length) {
         const box = el('div', { class: 'db-warns' });
         warns.slice(0, 3).forEach((w) => box.appendChild(el('div', { class: 'callout warn' }, w)));
-        if (warns.length > 3) box.appendChild(el('a', { class: 'small', href: '#/money' }, '주의사항 ' + (warns.length - 3) + '개 더 →'));
+        if (warns.length > 3) box.appendChild(el('a', { class: 'db-more db-more-rest', href: '#/money' }, '주의사항 ' + (warns.length - 3) + '개 더 →'));
         body.appendChild(box);
       }
       body.appendChild(el('div', { class: 'db-basis' }, '자금흐름 화면에 입력한 값 기준'));
@@ -465,7 +555,7 @@ button.db-wk-head:hover { background:var(--bg-3); }
       body.appendChild(el('div', { class: 'db-basis' }, '계획값 기준 · 이사비·가전 이전비는 아직 빠져 있어요. 자금흐름 화면에서 실제 금액을 넣으면 자동으로 바뀝니다.'));
     }
     return el('section', { class: 'card db-money', 'aria-label': '11월 3일 돈 흐름' },
-      head('💸', D.fmt(D.moveDate()).replace(/\(.\)$/, '') + ' 돈 흐름', null, moreLink('자금흐름 자세히 →', '#/money')),
+      head('💸', (moveDay() ? md(moveDay()) : '이사일') + ' 돈 흐름', null, moreLink('자금흐름 자세히 →', '#/money')),
       body);
   }
 
@@ -528,9 +618,9 @@ button.db-wk-head:hover { background:var(--bg-3); }
   function roadModel() {
     const today = D.today();
     const curW = D.weekStart(today);
-    const move = normDate(D.moveDate()) || today;
-    const moveW = D.weekStart(move);
-    let endW = D.add(moveW, 14);                         // 이사 다음 주 + 한 주 더
+    const move = moveDay();                              // 깨진 값이면 null → 오늘 기준으로 그림
+    const moveW = move ? D.weekStart(move) : null;
+    let endW = D.add(moveW || curW, 14);                 // 이사 다음 주 + 한 주 더
     const minEnd = D.add(curW, 35);                      // 최소 6주
     if (D.diff(endW, minEnd) > 0) endW = minEnd;
     const weeks = new Map();
@@ -592,6 +682,7 @@ button.db-wk-head:hover { background:var(--bg-3); }
           expanded ? '접기' : '+ ' + (list.length - GROUP_LIMIT) + '개 더 보기');
         btn.addEventListener('click', () => {
           if (expanded) ui.moreGroups.delete(gk); else ui.moreGroups.add(gk);
+          persistUi();
           const nb = groupsEl(groups.get(k), pm, key, markHi)[0];
           box.replaceWith(nb);
           const f = nb.querySelector('.db-grp-more');
@@ -613,7 +704,7 @@ button.db-wk-head:hover { background:var(--bg-3); }
       if (date === m.today) cls.push('is-today');
       else if (date < m.today) cls.push('is-past');
       if (dms.length) cls.push('is-ms');
-      if (date === m.move) cls.push('is-move');
+      if (m.move && date === m.move) cls.push('is-move');
       if (wd === '토' || wd === '일') cls.push('is-we');
       const label = D.fmt(date) + (date === m.today ? ' 오늘' : '') + dms.map((x) => ' · ' + x.label).join('') + (dayItems.length ? ' · 할 일 ' + dayItems.length + '개' : '');
       const dots = dayItems.slice(0, 3).map((i) => el('i', { class: 'db-dot' + (i.done ? ' is-done' : date < m.today ? ' is-late' : '') }));
@@ -632,7 +723,7 @@ button.db-wk-head:hover { background:var(--bg-3); }
       el('span', x.label));
   }
   function weekCol(w, m, acc, pm) {
-    const isCur = w.start === m.curW, isMove = w.start === m.moveW;
+    const isCur = w.start === m.curW, isMove = !!m.moveW && w.start === m.moveW;
     const items = w.items.slice().sort(byDue);
     const done = items.filter((i) => i.done).length;
     const late = items.filter((i) => !i.done && normDate(i.due) < m.today).length;
@@ -657,6 +748,7 @@ button.db-wk-head:hover { background:var(--bg-3); }
         headKids, el('span', { class: 'db-chev', 'aria-hidden': 'true' }, '▼'));
       btn.addEventListener('click', () => {
         if (ui.openWeeks.has(w.key)) ui.openWeeks.delete(w.key); else ui.openWeeks.add(w.key);
+        persistUi();
         const nc = weekCol(w, m, acc, pm);
         col.replaceWith(nc);
         const h = nc.querySelector('.db-wk-head');
@@ -691,6 +783,7 @@ button.db-wk-head:hover { background:var(--bg-3); }
       const btn = el('button', { type: 'button', class: 'db-wk-head', 'aria-expanded': String(open) }, headKids, el('span', { class: 'db-chev', 'aria-hidden': 'true' }, '▼'));
       btn.addEventListener('click', () => {
         if (ui.openWeeks.has('past')) ui.openWeeks.delete('past'); else ui.openWeeks.add('past');
+        persistUi();
         const nc = pastCol(m, acc, pm);
         col.replaceWith(nc);
         const h = nc.querySelector('.db-wk-head');
@@ -793,10 +886,12 @@ button.db-wk-head:hover { background:var(--bg-3); }
         : el('div', { class: 'db-empty' }, '아직 기록이 없어요.'));
   }
   function linksCard() {
+    const mover = guideLink('mover');
+    const lg = guideLink('appliance');
     const items = [
       { ico: '📐', label: '도면 배치', sub: '두 집 도면에 가구 놓아보기', href: '#/plan' },
-      { ico: '🚚', label: '이사업체 가이드', sub: '견적·계약 체크포인트', href: '#/guide/mover' },
-      { ico: '🔌', label: 'LG 가전이사', sub: '이전설치·선입주 양해', href: '#/guide/appliance' },
+      { ico: '🚚', label: '이사업체 가이드', sub: mover.guide ? '견적·계약 체크포인트' : '체크리스트 (가이드 준비 중)', href: mover.href },
+      { ico: '🔌', label: 'LG 가전이사', sub: lg.guide ? '이전설치·선입주 양해' : '체크리스트 (가이드 준비 중)', href: lg.href },
       { ico: '📖', label: '모든 가이드', sub: '파트별 정리 노트', href: '#/guide' },
       { ico: '💾', label: '백업', sub: '파일로 저장·복원', onClick: () => { const b = document.getElementById('topbar-menu'); if (b) b.click(); } },
     ];
@@ -830,11 +925,42 @@ button.db-wk-head:hover { background:var(--bg-3); }
     render(root, params, ctx) {
       let alive = true;
       sessionDone = new Set();
-      ui.openWeeks = null;
-      ui.roadScroll = 0;
-      ui.moreGroups = new Set();
+      // 뒤로 가기·새로고침으로 같은 기록에 돌아온 경우: 펼친 주·가로 스크롤·세로 스크롤을 되살림 (날짜가 바뀌었으면 처음부터)
+      const saved = readHS();
+      const restore = saved && saved.today === D.today() ? saved : null;
+      ui.openWeeks = restore && Array.isArray(restore.open) ? new Set(restore.open.map(String)) : null;
+      ui.moreGroups = restore && Array.isArray(restore.more) ? new Set(restore.more.map(String)) : new Set();
+      ui.roadScroll = restore && isNum(restore.left) ? restore.left : 0;
       const mq = window.matchMedia ? window.matchMedia(ACC_MQ) : null;
       const isAcc = () => !!(mq && mq.matches);
+
+      /* 화면 상태를 지금 기록(history entry)에 저장 — 링크를 누르는 순간·스크롤이 멈출 때·펼침을 바꿀 때 */
+      const onDashboard = () => alive && MV.parseHash().name === 'dashboard' && root.dataset.view === 'dashboard';
+      const saveNow = () => {
+        if (!onDashboard()) return;
+        const sc = root.querySelector('.db-road-scroll');
+        if (sc && !isAcc()) ui.roadScroll = sc.scrollLeft;
+        writeHS({
+          today: D.today(),
+          y: Math.round(window.scrollY),
+          left: Math.round(ui.roadScroll || 0),
+          open: ui.openWeeks ? Array.from(ui.openWeeks) : null,
+          more: Array.from(ui.moreGroups),
+        });
+      };
+      let saveT = 0;
+      const saveSoon = () => { clearTimeout(saveT); saveT = setTimeout(saveNow, 180); };
+      const flush = () => { clearTimeout(saveT); saveNow(); };
+      window.addEventListener('scroll', saveSoon, { passive: true });
+      document.addEventListener('click', flush, true);          // 링크 이동(해시 변경) 전에 먼저 실행됨
+      root.addEventListener('scroll', (e) => { if (e.target && e.target.classList && e.target.classList.contains('db-road-scroll')) saveSoon(); }, { capture: true, passive: true });
+      persistUi = saveSoon;
+      ctx.onCleanup(() => {
+        persistUi = () => {};
+        clearTimeout(saveT);
+        window.removeEventListener('scroll', saveSoon);
+        document.removeEventListener('click', flush, true);
+      });
 
       const draw = () => {
         if (!alive) return;
@@ -861,12 +987,21 @@ button.db-wk-head:hover { background:var(--bg-3); }
       };
       ctx.subscribe(schedule);
       if (mq) {
-        const onMq = () => { ui.roadScroll = 0; schedule(); };
+        const onMq = () => { ui.roadScroll = 0; schedule(); saveSoon(); };
         if (mq.addEventListener) mq.addEventListener('change', onMq); else if (mq.addListener) mq.addListener(onMq);
         ctx.onCleanup(() => { if (mq.removeEventListener) mq.removeEventListener('change', onMq); else if (mq.removeListener) mq.removeListener(onMq); });
       }
       ctx.onCleanup(() => { alive = false; });
       root.appendChild(build(isAcc()));
+      const sc0 = root.querySelector('.db-road-scroll');
+      if (sc0 && ui.roadScroll && !isAcc()) sc0.scrollLeft = ui.roadScroll;
+      if (restore && isNum(restore.y) && restore.y > 0) {
+        // MV.rerender 가 화면을 바꾸면서 맨 위로 올린 다음에 제자리로
+        const y = restore.y;
+        const put = () => { if (alive && Math.abs(window.scrollY - y) > 1) window.scrollTo(0, y); };
+        Promise.resolve().then(put);
+        requestAnimationFrame(put);
+      }
     },
   });
 })();

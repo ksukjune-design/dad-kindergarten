@@ -67,6 +67,13 @@
     if (c >= 0xac00 && c <= 0xd7a3) return ((c - 0xac00) % 28) ? withBatchim : without;
     return withBatchim + '(' + without + ')';
   }
+  /** '(으)로': 받침이 있으면 '으로' (단, ㄹ 받침은 '로') */
+  function joRo(word) {
+    const a = Array.from(String(word || '').replace(/[\s)\]」』"'…]+$/, ''));
+    const c = a.length ? a[a.length - 1].codePointAt(0) : 0;
+    if (c >= 0xac00 && c <= 0xd7a3) { const j = (c - 0xac00) % 28; return j && j !== 8 ? '으로' : '로'; }
+    return '(으)로';
+  }
   const q = (it) => '「' + shortName(it.name, 14) + '」';
   /** null/false 를 건너뛰는 append (Element.append 는 null 을 "null" 글자로 넣음) */
   const put = (node, ...kids) => { kids.flat(Infinity).forEach((k) => { if (k !== null && k !== undefined && k !== false) node.append(k); }); return node; };
@@ -113,6 +120,11 @@
   }
   const hasPt = (r, x, y) => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
   const fxRect = (f) => ({ x: num(f.x, 0), y: num(f.y, 0), w: Math.max(0, num(f.w, 0)), h: Math.max(0, num(f.h, 0)) });
+  /** 한 축에서 길이 size 인 것을 [lo, lo+span] 안으로 (더 크면 가운데 정렬) */
+  const clampAxis = (v, size, lo, span) => (size <= span ? MV.clamp(v, lo, lo + span - size) : lo + (span - size) / 2);
+  /** 사각형 r(x,y,w,h)을 region 안으로 밀어 넣은 좌상단 {x,y} */
+  const clampInto = (r, region) => ({ x: clampAxis(r.x, r.w, region.x, region.w), y: clampAxis(r.y, r.h, region.y, region.h) });
+  const fitsIn = (f, region) => f.w <= region.w + 0.5 && f.h <= region.h + 0.5;
 
   /** 문: 개구부(gap) · 문짝이 쓸고 가는 영역(swing) · 경첩/닫힌 끝/열린 끝 좌표 */
   function doorGeom(d) {
@@ -221,7 +233,29 @@
     if (y1 - y0 < 50) y1 = y0 + 100;
     p.bounds = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
     p.vb = { x: x0 - MARGIN, y: y0 - MARGIN, w: x1 - x0 + 2 * MARGIN, h: y1 - y0 + 2 * MARGIN };
+    p.openings = arr(base.openings);
     return p;
+  }
+  /** 그림 범위: 도면 + (예전 자료 등으로) 도면 밖에 놓인 짐까지 보이게 넓힘 → 보이지 않는 짐이 생기지 않도록 */
+  function viewBoxFor(plan, items) {
+    const vb = plan.vb;
+    let x0 = vb.x, y0 = vb.y, x1 = vb.x + vb.w, y1 = vb.y + vb.h;
+    (items || []).forEach(({ r }) => {
+      if (!r) return;
+      x0 = Math.min(x0, r.x - 24); y0 = Math.min(y0, r.y - 24);
+      x1 = Math.max(x1, r.x + r.w + 24); y1 = Math.max(y1, r.y + r.h + 24);
+    });
+    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  }
+  /** 이름이 바뀐 방을 가리키던 짐의 room/roomNew 도 함께 바꿈 (st 안에서 호출). 바꾼 개수 */
+  function renameRoomRefs(st, key, from, to) {
+    const f = norm(from);
+    if (!f || !to || f === norm(to)) return 0;
+    let n = 0;
+    (st.inventory || []).forEach((it) => {
+      if (it && norm(it[roomField(key)]) === f) { it[roomField(key)] = to; n++; }
+    });
+    return n;
   }
   const validRooms = (plan) => plan.rooms.filter((r) => r.w > 0 && r.h > 0);
   function roomAt(plan, x, y) {
@@ -377,8 +411,10 @@
     const lv = {};
     const msgs = [];
     const add = (level, text, ...pids) => {
-      msgs.push({ pid: pids[0], level, text });
+      const m = { pid: pids[0], level, text };
+      msgs.push(m);
       pids.forEach((id) => { if (id && lv[id] !== 'bad') lv[id] = level; });
+      return m;
     };
     const b = plan.bounds;
     const stat = statics(plan);
@@ -389,12 +425,21 @@
       const nm = q(it);
       count[it.id] = (count[it.id] || 0) + 1;
       if (count[it.id] > qtyOf(it)) add('warn', nm + ' 수량(' + qtyOf(it) + '개)보다 많이 놓였어요', p.id);
-      if (key === 'new' && (it.fate === 'discard' || it.fate === 'sell')) add('warn', nm + jo(it.name, '은', '는') + ' “' + MV.inv.fate(it.fate).label + '”로 정한 짐이에요', p.id);
+      if (key === 'new' && (it.fate === 'discard' || it.fate === 'sell')) add('warn', nm + jo(it.name, '은', '는') + ' “' + MV.inv.fate(it.fate).label + '”' + joRo(MV.inv.fate(it.fate).label) + ' 정한 짐이에요', p.id);
       if (key === 'old' && it.fate === 'buy') add('warn', nm + jo(it.name, '은', '는') + ' 새로 살 물건이라 지금 집엔 없어요', p.id);
-      if (!within(r, b, 1)) { add('bad', nm + jo(it.name, '이', '가') + ' 도면 밖으로 나갔어요', p.id); o.out = true; return; }
+      if (!within(r, b, 1)) {
+        const big = !fitsIn(r, b) && !fitsIn({ w: r.h, h: r.w }, b);
+        add('bad', nm + jo(it.name, '이', '가') + (big ? ' 도면 전체보다 커요 — 규격을 확인하세요' : ' 도면 밖으로 나갔어요'), p.id).fix = big ? null : 'in';
+        o.out = true;
+        return;
+      }
       if (!rooms.some((rm) => within(r, rm, 1))) {
         const c = roomAt(plan, r.x + r.w / 2, r.y + r.h / 2);
-        add('warn', c ? nm + jo(it.name, '이', '가') + ' 벽/방 경계를 넘어요 (' + c.name + ')' : nm + jo(it.name, '이', '가') + ' 방이 아닌 곳에 놓였어요', p.id);
+        const S = nm + jo(it.name, '이', '가') + ' ';
+        if (c && !fitsIn(r, c)) {
+          const turn = fitsIn({ w: r.h, h: r.w }, c);
+          add('warn', S + c.name + '(' + Math.round(c.w) + '×' + Math.round(c.h) + 'cm)보다 커요' + (turn ? ' — 돌리면 들어가요' : ''), p.id).fix = turn ? 'turn' : null;
+        } else add('warn', c ? S + '벽/방 경계를 넘어요 (' + c.name + ')' : S + '방이 아닌 곳에 놓였어요', p.id).fix = c ? 'room' : null;
       }
       if (!wallMounted(it)) {
         if (stat.some((s) => s.type === 'door' && hit(r, s.r, 1))) add('warn', nm + jo(it.name, '이', '가') + ' 문 열림 범위를 막아요', p.id);
@@ -533,7 +578,7 @@
     const s = o.s;
     const k = (o.fontScale || 1) / s;            // 화면 px → cm
     const fz = (pxv) => pxv * k;
-    const vb = plan.vb, b = plan.bounds;
+    const vb = o.vb || plan.vb, b = plan.bounds;
     const uid = 'fpsvg' + (++svgSeq);
     const W = Math.max(1, Math.floor(vb.w * s)), H = Math.max(1, Math.floor(vb.h * s));
     const live = !!o.interactive;
@@ -604,6 +649,15 @@
       const x = num(w.x, 0), y = num(w.y, 0);
       const rect = w.orientation === 'v' ? { x: x - WALL / 2, y, width: WALL, height: L } : { x, y: y - WALL / 2, width: L, height: WALL };
       deco.appendChild(svg('rect', Object.assign(rect, { fill: 'var(--plan-floor)', stroke: 'var(--kid)', 'stroke-width': 1.2 }, NS)));
+    });
+    // 6-1) 트인 곳 (문짝 없는 개구부: 벽을 비우고 점선으로 경계만)
+    plan.openings.forEach((op) => {
+      const L = Math.max(0, num(op.width, 0));
+      if (!L) return;
+      const x = num(op.x, 0), y = num(op.y, 0), v = op.orientation === 'v';
+      deco.appendChild(svg('rect', v ? { x: r1(x - WALL / 2 - 1), y: r1(y), width: WALL + 2, height: r1(L), fill: 'var(--plan-floor)' }
+        : { x: r1(x), y: r1(y - WALL / 2 - 1), width: r1(L), height: WALL + 2, fill: 'var(--plan-floor)' }, svg('title', String(op.note || '트인 곳'))));
+      deco.appendChild(line(x, y, v ? x : x + L, v ? y + L : y, { stroke: 'var(--ink-3)', 'stroke-width': 1, 'stroke-dasharray': '2 4', 'stroke-opacity': 0.7 }));
     });
     // 7) 문 (개구부 + 문짝 + 열림 호)
     plan.doors.forEach((d) => {
@@ -768,8 +822,9 @@
   }
   function exportPlanPNG(plan, key, o) {
     return new Promise((resolve, reject) => {
-      const scale = MV.clamp(2400 / plan.vb.w, 1.2, 3);
-      const node = buildSVG(plan, key, { s: scale, interactive: false, edit: false, grid: o.grid, sel: null, issues: o.issues, items: o.items, fontScale: 1.9 });
+      const vb = viewBoxFor(plan, o.items);
+      const scale = MV.clamp(2400 / vb.w, 1.2, 3);
+      const node = buildSVG(plan, key, { s: scale, vb, interactive: false, edit: false, grid: o.grid, sel: null, issues: o.issues, items: o.items, fontScale: 1.9 });
       const holder = el('div', { 'aria-hidden': 'true', style: { position: 'fixed', left: '-30000px', top: '0', pointerEvents: 'none' } }, node);
       document.body.appendChild(holder);
       let xml;
@@ -863,7 +918,7 @@
 .fp-side-actions { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0 10px; }
 .fp-side-actions .btn { flex: 1 1 auto; }
 .fp-filter { margin-bottom: 8px; width: fit-content; max-width: 100%; }
-.fp-filter button { min-height: 34px; padding: 4px 12px; }
+.fp-filter button { min-height: 36px; padding: 4px 12px; }
 .fp-group + .fp-group { margin-top: 12px; }
 .fp-group-h { display: flex; align-items: center; gap: 6px; font-size: .8rem; font-weight: 800; color: var(--ink-2); padding: 4px 0; border-bottom: 1px solid var(--line); }
 .fp-dot { width: 11px; height: 11px; border-radius: 3px; display: inline-block; flex: none; border: 1.5px solid; }
@@ -936,6 +991,13 @@
 `);
 
   /* ---------------- 공용 조각 ---------------- */
+  /** 이 화면의 알림은 쌓지 않고 바꿔 끼움 (여러 번 눌러도 알림이 화면을 덮지 않도록) */
+  let lastToast = null;
+  function toast(msg, o) {
+    if (lastToast && lastToast.isConnected) lastToast.remove();
+    lastToast = MV.ui.toast(msg, o);
+    return lastToast;
+  }
   const btn = (label, onClick, o) => el('button', Object.assign({ type: 'button', class: 'btn fp-b', onclick: onClick }, o || {}), label);
   const verdictIcon = (lv) => (lv === 'ok' ? '✅' : lv === 'warn' ? '⚠️' : lv === 'bad' ? '❌' : '📏');
   function confidenceChip(plan) {
@@ -961,15 +1023,17 @@
   /* ============================================================
      편집 화면 (#/plan/new · #/plan/old)
      ============================================================ */
-  function renderEditor(root, key, ctx) {
+  function renderEditor(root, key, ctx, headRow) {
     let sel = null;           // 선택된 배치 id
     let editMode = false;     // ✏️ 치수 수정
     let drag = null;
+    let pinch = null;         // 두 손가락 확대·축소
     let pending = false;
     let lastUp = 0;
-    let cur = null;           // { plan, inv, items, v, s }
+    let cur = null;           // { plan, inv, items, v, s, vb }
     let svgEl = null;
     let lastW = 0;
+    let lastPtr = null;       // 마지막 마우스 위치 (키보드 단축키가 도면 위에서만 동작하도록)
 
     // ---- 뼈대 ----
     const zoomV = el('span', { class: 'fp-zoomv', 'aria-live': 'polite' }, '100%');
@@ -984,26 +1048,33 @@
         btn('+', () => setZoom(curZoom() * 1.25), { class: 'btn fp-b btn-icon', 'aria-label': '확대' }),
         zoomV),
       bGrid, bSnap, bEdit, bExport);
+    if (headRow) headRow.appendChild(tb);
     const chips = el('div', { class: 'fp-chips' });
     const editBar = el('div', { class: 'callout fp-editbar', hidden: true });
     const stage = el('div', { class: 'fp-stage' });
     const selBar = el('div', { class: 'fp-selbar', hidden: true, role: 'toolbar', 'aria-label': '선택한 짐' });
     stage.appendChild(selBar);
     const scroll = el('div', { class: 'fp-scroll' }, stage);
-    const coarse = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+    const mm = (qq) => !!(window.matchMedia && window.matchMedia(qq).matches);
+    const coarse = mm('(pointer: coarse)') || (navigator.maxTouchPoints > 0 && !mm('(hover: hover)'));
     const hint = el('p', { class: 'fp-hint' }, coarse
-      ? '짐을 손가락으로 끌어 옮기고, 톡 누르면 돌리기·빼기 메뉴가 나와요. 빈 곳을 끌면 화면이 움직여요.'
-      : '짐을 끌어서 옮기고, 눌러서 선택하면 돌리기·빼기를 할 수 있어요. 키보드: 방향키 1cm(Shift 10cm) · R 회전 · Delete 빼기 · Esc 해제 · Ctrl+휠 확대');
+      ? '짐을 손가락으로 끌어 옮기고, 톡 누르면 돌리기·빼기 메뉴가 나와요. 빈 곳을 끌면 화면이 움직이고, 두 손가락으로 벌리면 도면이 커져요.'
+      : '짐을 끌어서 옮기고, 눌러서 선택하면 돌리기·빼기를 할 수 있어요. 키보드(도면 위에서): 방향키 1cm(Shift 10cm) · R 회전 · Delete 빼기 · Esc 해제 · Ctrl+휠 확대');
     const planCard = el('section', { class: 'card fp-plan', 'aria-label': PLAN_LABEL[key] + ' 도면' }, chips, editBar, scroll, legend(), hint);
     const side = el('aside', { class: 'card fp-side', 'aria-label': '배치할 짐 목록' });
     const checks = el('section', { class: 'card fp-checks', 'aria-label': '배치 점검' });
     const laundry = key === 'new' ? el('section', { class: 'card fp-laundry', 'aria-label': '다용도실 세탁기·건조기 점검' }) : null;
     const info = el('section', { class: 'card fp-info' });
     root.appendChild(el('div', { class: 'fp-wrap' },
-      el('div', { class: 'fp-main' }, tb, planCard), side, el('div', { class: 'fp-more' }, checks, laundry, info)));
+      el('div', { class: 'fp-main' }, headRow ? null : tb, planCard), side, el('div', { class: 'fp-more' }, checks, laundry, info)));
 
     const curZoom = () => MV.clamp(num(prefs().zoom[key], 1), 0.5, 5);
     const curSel = () => (sel && cur ? cur.items.find((o) => o.p.id === sel) : null) || null;
+    // 입력이 바뀐 카드만 다시 그리기 (짐을 끌 때마다 목록·점검 카드를 새로 만들지 않도록)
+    const sigs = {};
+    const changed = (k, val) => { const sg = JSON.stringify(val); if (sigs[k] === sg) return false; sigs[k] = sg; return true; };
+    let selRaf = 0;
+    ctx.onCleanup(() => cancelAnimationFrame(selRaf));
 
     // ---- 다시 그리기 ----
     function refresh() {
@@ -1016,61 +1087,82 @@
       items.forEach((o) => { o.r = rectOf(o.p, o.it); });
       if (sel && !items.some((o) => o.p.id === sel)) sel = null;
       cur = { plan, inv, items, v: validate(plan, key, inv) };
-      [drawPlan, drawChips, syncToolbar, drawSide, drawChecks, drawLaundry, drawInfo]
+      [drawPlan, drawChips, syncToolbar, () => drawSide(false), drawChecks, () => drawLaundry(false), () => drawInfo(false)]
         .forEach((fn) => { try { fn(); } catch (e) { console.error('[plan]', e); } });
     }
     function drawPlan() {
       const { plan, items, v } = cur;
-      const cw = scroll.clientWidth || planCard.clientWidth || 340;
+      if (!lastW) lastW = scroll.clientWidth;
+      const cw = lastW || planCard.clientWidth || 340;
       const maxH = Math.max(300, window.innerHeight - 190);
-      const fitS = Math.max(0.08, Math.min(cw / plan.vb.w, maxH / plan.vb.h));
+      const vb = viewBoxFor(plan, items);
+      const fitS = Math.max(0.08, Math.min(cw / vb.w, maxH / vb.h));
       const s = fitS * curZoom();
       const ae = document.activeElement;
       const focusPid = ae && svgEl && svgEl.contains(ae) && ae.getAttribute && ae.getAttribute('data-pid');
       const focusRid = ae && svgEl && svgEl.contains(ae) && ae.getAttribute && ae.getAttribute('data-rid');
-      const node = buildSVG(plan, key, { s, interactive: !editMode, edit: editMode, grid: prefs().grid, sel, issues: v.lv, items });
+      const focusBtn = ae && selBar.contains(ae) && ae.getAttribute && ae.getAttribute('data-act');
+      const node = buildSVG(plan, key, { s, vb, interactive: !editMode, edit: editMode, grid: prefs().grid, sel, issues: v.lv, items });
       if (svgEl && svgEl.parentNode === stage) stage.replaceChild(node, svgEl); else stage.insertBefore(node, stage.firstChild);
       svgEl = node;
       const W = +node.getAttribute('width'), H = +node.getAttribute('height');
-      cur.s = Math.min(W / plan.vb.w, H / plan.vb.h);
+      cur.s = Math.min(W / vb.w, H / vb.h);
+      cur.vb = vb;
       stage.style.width = W + 'px';
       stage.style.height = H + 'px';
       if (focusPid) { const g = node.querySelector('[data-pid="' + CSS.escape(focusPid) + '"]'); if (g) g.focus({ preventScroll: true }); }
       if (focusRid) { const g = node.querySelector('[data-rid="' + CSS.escape(focusRid) + '"]'); if (g) g.focus({ preventScroll: true }); }
-      lastW = scroll.clientWidth;
       drawSelBar();
+      // 선택 도구 단추를 누른 뒤 다시 그려져도 키보드 초점이 사라지지 않게
+      if (focusBtn) {
+        const b2 = selBar.querySelector('[data-act="' + focusBtn + '"]');
+        const g = sel && node.querySelector('[data-pid="' + CSS.escape(sel) + '"]');
+        if (b2 && !selBar.hidden) b2.focus({ preventScroll: true }); else if (g) g.focus({ preventScroll: true });
+      }
     }
     function drawSelBar() {
       const o = curSel();
       if (!o || editMode || !cur) { selBar.hidden = true; selBar.textContent = ''; return; }
       const { plan, s } = cur;
       const room = roomAt(plan, o.r.x + o.r.w / 2, o.r.y + o.r.h / 2);
+      const out = !within(o.r, plan.bounds, 1);
+      const sb = (act, ico, label, onclick, o2) => el('button', Object.assign({ type: 'button', class: 'btn', 'data-act': act, onclick, 'aria-label': label }, o2 || {}),
+        el('span', { 'aria-hidden': 'true' }, ico), el('span', { class: 'fp-bl', 'aria-hidden': 'true' }, (o2 && o2.short) || label));
       selBar.textContent = '';
-      put(selBar, 
+      put(selBar,
         el('div', { class: 'fp-selinfo' }, el('strong', shortName(o.it.name, 20)),
-          el('span', { class: 'muted num' }, Math.round(o.r.w) + '×' + Math.round(o.r.h) + 'cm' + (room ? ' · ' + room.name : ' · 방 밖'))),
+          el('span', { class: 'muted num' }, Math.round(o.r.w) + '×' + Math.round(o.r.h) + 'cm' + (out ? ' · 도면 밖' : room ? ' · ' + room.name : ' · 방 밖'))),
         el('div', { class: 'fp-selbtns' },
-          el('button', { type: 'button', class: 'btn', onclick: rotateSel, 'aria-label': '90도 돌리기', title: '90° 돌리기 (R)' }, '↻ 90°'),
-          el('button', { type: 'button', class: 'btn', onclick: () => MV.inv.editor(o.it.id), 'aria-label': '규격 수정', title: '가로·깊이·높이 고치기' }, '✎ 규격'),
-          el('button', { type: 'button', class: 'btn btn-danger', onclick: removeSel, 'aria-label': '도면에서 빼기', title: '도면에서 빼기 (Delete)' }, '🗑 빼기'),
-          el('button', { type: 'button', class: 'btn btn-ghost btn-icon', onclick: () => { sel = null; refresh(); }, 'aria-label': '선택 해제' }, '✕')));
+          out ? sb('in', '↩', '도면 안으로', () => fixPlacement(o.p.id, 'in'), { class: 'btn btn-primary', short: '안으로', title: '도면 안으로 가져오기' }) : null,
+          sb('rot', '↻', '90도 돌리기', rotateSel, { short: '90°', title: '90° 돌리기 (R)' }),
+          sb('spec', '✎', '규격 수정', () => editSpec(o.it.id), { short: '규격', title: '가로·깊이·높이 고치기' }),
+          sb('del', '🗑', '도면에서 빼기', removeSel, { class: 'btn btn-danger', short: '빼기', title: '도면에서 빼기 (Delete)' }),
+          el('button', { type: 'button', class: 'btn btn-ghost btn-icon', 'data-act': 'close', onclick: () => { sel = null; refresh(); }, 'aria-label': '선택 해제' }, '✕')));
       selBar.hidden = false;
-      const vb = plan.vb;
+      selBar.style.visibility = 'hidden';
+      const vb = cur.vb || plan.vb;
       const x0 = (o.r.x - vb.x) * s, y0 = (o.r.y - vb.y) * s, w0 = o.r.w * s, h0 = o.r.h * s;
-      const bw = selBar.offsetWidth, bh = selBar.offsetHeight;
-      const sw = stage.offsetWidth, sh = stage.offsetHeight;
-      let top = y0 - bh - 8;
-      if (top < 0) top = y0 + h0 + 8;
-      if (top + bh > sh) top = Math.max(0, y0 - bh - 8);
-      const left = MV.clamp(x0 + w0 / 2 - bw / 2, 0, Math.max(0, sw - bw));
-      selBar.style.left = Math.round(left) + 'px';
-      selBar.style.top = Math.round(top) + 'px';
+      const pid = o.p.id;
+      // 크기 측정은 다음 프레임에 한 번만 (강제 레이아웃 방지)
+      cancelAnimationFrame(selRaf);
+      selRaf = requestAnimationFrame(() => {
+        if (selBar.hidden || sel !== pid) return;
+        const bw = selBar.offsetWidth, bh = selBar.offsetHeight;
+        const sw = stage.offsetWidth, sh = stage.offsetHeight;
+        let top = y0 - bh - 8;
+        if (top < 0) top = y0 + h0 + 8;
+        if (top + bh > sh) top = Math.max(0, y0 - bh - 8);
+        const left = MV.clamp(x0 + w0 / 2 - bw / 2, 0, Math.max(0, sw - bw));
+        selBar.style.left = Math.round(left) + 'px';
+        selBar.style.top = Math.round(top) + 'px';
+        selBar.style.visibility = '';
+      });
     }
     function drawChips() {
       const { plan, items, v } = cur;
       chips.textContent = '';
       put(chips, 
-        el('span', { class: 'fp-title' }, plan.short || PLAN_LABEL[key]),
+        el('span', { class: 'fp-title', title: plan.name }, plan.short || PLAN_LABEL[key]),
         plan.exclusive_m2 ? el('span', { class: 'chip' }, '전용 ' + plan.exclusive_m2 + '㎡') : null,
         plan.floor ? el('span', { class: 'chip' }, plan.floor + '층') : null,
         confidenceChip(plan),
@@ -1095,12 +1187,16 @@
     }
 
     // ---- 짐 목록 ----
-    function drawSide() {
-      const listTop = side.scrollTop;
-      side.textContent = '';
+    let sideTop = 0;   // 목록 스크롤 위치 (읽기로 레이아웃을 강제하지 않도록 이벤트로 추적)
+    side.addEventListener('scroll', () => { sideTop = side.scrollTop; }, { passive: true });
+    function drawSide(force) {
       const cnt = {};
       cur.items.forEach((o) => { cnt[o.it.id] = (cnt[o.it.id] || 0) + 1; });
       const all = MV.inv.list((it) => eligible(key, it));
+      const sg = [prefs().filter, all.map((it) => [it.id, it.name, it.fate, it.cat, it.qty, it.w, it.d, it.h, it.assumed, it[roomField(key)], cnt[it.id] || 0])];
+      if (!changed('side', sg) && !force) return;
+      const listTop = sideTop;
+      side.textContent = '';
       const need = all.reduce((s, it) => s + qtyOf(it), 0);
       const placed = all.reduce((s, it) => s + Math.min(qtyOf(it), cnt[it.id] || 0), 0);
       const todo = all.filter((it) => (cnt[it.id] || 0) < qtyOf(it));
@@ -1120,7 +1216,7 @@
       }
       side.appendChild(el('div', { class: 'tabs fp-filter', role: 'group', 'aria-label': '목록 거르기' },
         [['all', '전체', all.length], ['todo', '미배치', todo.length], ['done', '배치됨', done.length]].map(([id, label, n]) =>
-          el('button', { type: 'button', class: f === id ? 'active' : '', 'aria-pressed': String(f === id), onclick: () => { setPref('filter', id); drawSide(); } }, label + ' ' + n))));
+          el('button', { type: 'button', class: f === id ? 'active' : '', 'aria-pressed': String(f === id), onclick: () => { setPref('filter', id); drawSide(true); } }, label + ' ' + n))));
       if (!shown.length) {
         side.appendChild(el('p', { class: 'small muted' }, f === 'todo' ? '모든 짐을 놓았어요 👍' : '아직 놓은 짐이 없어요.'));
         return;
@@ -1153,7 +1249,7 @@
         el('span', { class: 'fp-row-count' + (k > qn ? ' is-over' : ''), title: '놓은 개수 / 수량' }, k + '/' + qn),
         el('div', { class: 'fp-row-btns' },
           el('button', { type: 'button', class: 'btn btn-sm fp-b', disabled: k >= qn, onclick: () => placeOne(it.id), 'aria-label': it.name + ' 도면에 놓기' }, '+ 놓기'),
-          el('button', { type: 'button', class: 'btn btn-ghost btn-sm btn-icon fp-b', onclick: () => MV.inv.editor(it.id), 'aria-label': it.name + ' 규격 수정' }, '✎')));
+          el('button', { type: 'button', class: 'btn btn-ghost btn-sm btn-icon fp-b', onclick: () => editSpec(it.id), 'aria-label': it.name + ' 규격 수정' }, '✎')));
     }
 
     // ---- 배치 점검 ----
@@ -1171,37 +1267,43 @@
         checks.appendChild(el('div', { class: 'callout good mb-0' }, el('strong', '문제 없음 👍'), el('div', { class: 'small' }, '겹치거나 문을 막거나 방 밖으로 나간 짐이 없어요.')));
       } else {
         const LIMIT = 40;
-        checks.appendChild(el('ul', { class: 'fp-msgs' }, v.msgs.slice(0, LIMIT).map((m) => el('li',
+        const FIX = { in: ['↩ 도면 안으로', '도면 안으로 가져오기'], room: ['↩ 방 안으로', '방 안으로 밀어 넣기'], turn: ['↻ 돌려 넣기', '90도 돌려서 방 안에 넣기'] };
+        checks.appendChild(el('ul', { class: 'fp-msgs' }, v.msgs.slice(0, LIMIT).map((m) => el('li', { class: 'fp-msgrow' },
           el('button', { type: 'button', class: 'fp-msg is-' + m.level, onclick: () => { sel = m.pid; editMode = false; refresh(); revealSel(); } },
-            el('span', { 'aria-hidden': 'true' }, m.level === 'bad' ? '⛔' : '⚠️'), el('span', m.text))))));
+            el('span', { 'aria-hidden': 'true' }, m.level === 'bad' ? '⛔' : '⚠️'), el('span', m.text)),
+          m.fix && FIX[m.fix] ? el('button', { type: 'button', class: 'btn btn-sm fp-b fp-fix', title: FIX[m.fix][1], 'aria-label': FIX[m.fix][1],
+            onclick: () => { sel = m.pid; editMode = false; fixPlacement(m.pid, m.fix); revealSel(); } }, FIX[m.fix][0]) : null))));
         if (v.msgs.length > LIMIT) checks.appendChild(el('p', { class: 'tiny muted' }, '외 ' + (v.msgs.length - LIMIT) + '개'));
       }
       checks.appendChild(el('p', { class: 'tiny muted mt-8 mb-0' }, '도면은 추정치라 벽·문 위치가 실제와 다를 수 있어요. 사전방문 때 재고 “✏️ 치수 수정”으로 고치면 점검이 정확해져요.'));
     }
 
     // ---- 다용도실 세탁기·건조기 ----
-    function drawLaundry() {
+    function drawLaundry(force) {
       if (!laundry) return;
       const plan = cur.plan;
-      laundry.textContent = '';
       const cands = laundryRooms(plan);
       const pref = prefs().laundryRoom;
       const room = validRooms(plan).find((r) => r.id === pref) || cands[0] || null;
       const washer = pickWasher(), dryer = pickDryer();
+      const pick = (it) => (it ? [it.id, it.name, it.note, it.w, it.d, it.h, it.fate] : null);
+      const sg = [validRooms(plan).map((r) => [r.id, r.name, r.x, r.y, r.w, r.h]), room && room.id, pick(washer), pick(dryer), cands.map((r) => r.id), plan.fixtures.length];
+      if (!changed('laundry', sg) && !force) return;
+      laundry.textContent = '';
       const res = room && washer && dryer ? laundryCheck(plan, room, washer, dryer) : null;
       laundry.appendChild(el('div', { class: 'fp-card-head' }, el('h2', '🧺 다용도실 세탁기·건조기 점검'),
         res ? el('span', { class: 'chip ' + (res.worst === 'ok' ? 'good' : res.worst === 'warn' ? 'warn' : 'bad') }, res.worst === 'ok' ? '나란히 OK' : res.worst === 'warn' ? '빠듯함' : '안 들어감') : null));
       const roomSel = el('select', { class: 'select', 'aria-label': '세탁기·건조기를 둘 곳' },
         el('option', { value: '' }, '— 둘 곳을 고르세요 —'),
         validRooms(plan).map((r) => el('option', { value: r.id, selected: !!room && r.id === room.id }, r.name + ' (' + Math.round(r.w) + '×' + Math.round(r.h) + ')' + (cands.includes(r) ? ' · 추천' : ''))));
-      roomSel.addEventListener('change', () => { setPref('laundryRoom', roomSel.value); drawLaundry(); const n = laundry.querySelector('select'); if (n) n.focus(); });
+      roomSel.addEventListener('change', () => { setPref('laundryRoom', roomSel.value); drawLaundry(true); const n = laundry.querySelector('select'); if (n) n.focus(); });
       laundry.appendChild(el('div', { class: 'fp-roomsel' }, el('span', { class: 'small strong' }, '둘 곳'), roomSel));
       if (!cands.length && !room) laundry.appendChild(el('p', { class: 'small muted' }, '도면에서 다용도실을 찾지 못했어요. 세탁기를 둘 곳을 직접 골라 주세요.'));
       const appliance = (it, label, preset) => el('div',
         el('div', { class: 'fp-wd-h' }, label),
         it ? [el('div', { class: 'fp-wd-n' }, it.name),
           el('div', { class: 'tiny muted num' }, Math.round(num(it.w, 0)) + '×' + Math.round(num(it.d, 0)) + '×' + Math.round(num(it.h, 0)) + 'cm · ' + MV.inv.fate(fateOf(it)).label),
-          el('button', { type: 'button', class: 'btn btn-sm btn-ghost fp-b', onclick: () => MV.inv.editor(it.id), 'aria-label': label + ' 규격 수정' }, '✎ 규격')]
+          el('button', { type: 'button', class: 'btn btn-sm btn-ghost fp-b', onclick: () => editSpec(it.id), 'aria-label': label + ' 규격 수정' }, '✎ 규격')]
           : [el('div', { class: 'small muted' }, '짐 목록에 없어요'),
             el('button', { type: 'button', class: 'btn btn-sm fp-b', onclick: () => MV.inv.editor(null, { defaults: preset }) }, '+ ' + label + ' 추가')]);
       laundry.appendChild(el('div', { class: 'fp-wd' },
@@ -1266,13 +1368,14 @@
         });
         sel = firstId;
       }, { log: '📐 세탁기·건조기를 ' + room.name + '에 나란히 배치' });
-      MV.ui.toast(room.name + '에 세탁기·건조기를 나란히 놓았어요', { action: window.innerWidth < 1100 ? { label: '보기', onClick: revealSel } : null });
+      toast(room.name + '에 세탁기·건조기를 나란히 놓았어요', { action: window.innerWidth < 1100 ? { label: '보기', onClick: revealSel } : null });
       if (window.innerWidth >= 1100) revealSel();
     }
 
     // ---- 도면 정보 ----
-    function drawInfo() {
+    function drawInfo(force) {
       const plan = cur.plan;
+      if (!changed('info', [plan.name, plan.confidence, plan.rooms.filter((r) => r.edited).map((r) => [r.id, r.name, r.w, r.h])]) && !force) return;
       info.textContent = '';
       const det = el('details', { class: 'fp-details', open: prefs().infoOpen });
       det.addEventListener('toggle', () => { if (prefs().infoOpen !== det.open) setPref('infoOpen', det.open); });
@@ -1340,18 +1443,18 @@
       editMode = false;
       commitPlacement(key, res);
       const narrow = window.innerWidth < 1100;
-      MV.ui.toast(q(res.it) + jo(res.it.name, '을', '를') + ' ' + (res.room ? res.room.name : '도면 가운데') + '에 놓았어요', narrow ? { action: { label: '보기', onClick: revealSel } } : undefined);
+      toast(q(res.it) + jo(res.it.name, '을', '를') + ' ' + (res.room ? res.room.name : '도면 가운데') + '에 놓았어요', narrow ? { action: { label: '보기', onClick: revealSel } } : undefined);
     }
     function addItem() {
       MV.inv.editor(null, { defaults: { fate: 'move' }, onSave: (saved) => {
         if (!saved || !eligible(key, saved)) return;
-        setTimeout(() => MV.ui.toast(q(saved) + jo(saved.name, '을', '를') + ' 짐 목록에 넣었어요', { action: { label: '도면에 놓기', onClick: () => placeOne(saved.id) } }), 50);
+        setTimeout(() => toast(q(saved) + jo(saved.name, '을', '를') + ' 짐 목록에 넣었어요', { action: { label: '도면에 놓기', onClick: () => placeOne(saved.id) } }), 50);
       } });
     }
     function autoLayout() {
       const cnt = placedCount(key);
       const n = MV.inv.list((it) => eligible(key, it)).reduce((s, it) => s + Math.max(0, qtyOf(it) - (cnt[it.id] || 0)), 0);
-      if (!n) { MV.ui.toast('놓을 짐이 없어요 — 모두 배치됐어요'); return; }
+      if (!n) { toast('놓을 짐이 없어요 — 모두 배치됐어요'); return; }
       MV.ui.confirm('아직 놓지 않은 짐 ' + n + '개를 “' + (key === 'new' ? '새 집 위치' : '지금 집 위치') + '”에 적힌 방에 맞춰 벽 쪽으로 자동 배치할까요? 이미 놓은 짐은 그대로 둬요.', { okLabel: '자동 배치', title: '자동 배치 제안' }).then((ok) => {
         if (!ok) return;
         const res = runAutoLayout(key);
@@ -1361,7 +1464,7 @@
           arr.forEach((x) => { const k2 = x.it.id; const e = m.get(k2) || { it: x.it, room: x.room, n: 0 }; e.n++; m.set(k2, e); });
           return Array.from(m.values()).map((e) => e.it.name + (e.n > 1 ? ' ×' + e.n : '') + (e.room ? ' (' + e.room.name + ')' : ''));
         };
-        if (!res.noFit.length && !res.noRoom.length) { MV.ui.toast('짐 ' + res.placed.length + '개를 자동으로 놓았어요 👍'); return; }
+        if (!res.noFit.length && !res.noRoom.length) { toast('짐 ' + res.placed.length + '개를 자동으로 놓았어요 👍'); return; }
         MV.ui.modal({
           title: '자동 배치 결과',
           body: el('div', { class: 'stack' },
@@ -1382,10 +1485,11 @@
       }, opts);
     }
     /** 위치 저장 + 놓인 방 이름을 짐의 room/roomNew 에 조용히 반영 */
-    function commitPos(pid, x, y) {
+    function commitPos(pid, x, y, rot) {
       const plan = cur.plan;
       mutatePl(pid, (p, st) => {
         p.x = r1(x); p.y = r1(y);
+        if (rot === 0 || rot === 90) p.rot = rot;
         const it = (st.inventory || []).find((i) => i.id === p.invId);
         if (!it) return;
         const r = rectOf(p, it);
@@ -1400,7 +1504,79 @@
       const f = foot(o.it, nr);
       let x = o.r.x + o.r.w / 2 - f.w / 2, y = o.r.y + o.r.h / 2 - f.h / 2;
       if (prefs().snap) { x = Math.round(x / SNAP) * SNAP; y = Math.round(y / SNAP) * SNAP; }
+      ({ x, y } = clampInto({ x, y, w: f.w, h: f.h }, cur.plan.bounds));
       mutatePl(o.p.id, (p) => { p.rot = nr; p.x = r1(x); p.y = r1(y); });
+    }
+    function nearestRoom(plan, r) {
+      const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
+      let best = null, bd = Infinity;
+      validRooms(plan).forEach((rm) => {
+        const dx = Math.max(rm.x - cx, 0, cx - rm.x - rm.w), dy = Math.max(rm.y - cy, 0, cy - rm.y - rm.h);
+        const d = Math.hypot(dx, dy);
+        if (d < bd || (d === bd && best && area(rm) < area(best))) { bd = d; best = rm; }
+      });
+      return best;
+    }
+    /** 점검 메시지의 바로잡기: 'in' 도면 안으로 · 'room' 방 안으로 · 'turn' 돌려서 방 안으로 */
+    function fixPlacement(pid, mode) {
+      const o = cur && cur.items.find((x) => x.p.id === pid);
+      if (!o) return;
+      const plan = cur.plan;
+      let rot = o.p.rot === 90 ? 90 : 0;
+      let f = foot(o.it, rot);
+      const cx = o.r.x + o.r.w / 2, cy = o.r.y + o.r.h / 2;
+      if (mode === 'turn') { rot = rot ? 0 : 90; f = foot(o.it, rot); }
+      const r = { x: cx - f.w / 2, y: cy - f.h / 2, w: f.w, h: f.h };
+      if (mode !== 'turn') { r.x = o.r.x; r.y = o.r.y; }
+      Object.assign(r, clampInto(r, plan.bounds));
+      const room = roomAt(plan, r.x + r.w / 2, r.y + r.h / 2) || nearestRoom(plan, r);
+      if (room && fitsIn(r, room)) Object.assign(r, clampInto(r, room));
+      sel = pid;
+      commitPos(pid, r.x, r.y, rot);
+    }
+    /** 짐 크기를 바꾼 뒤: 붙어 있던 벽은 그대로, 아니면 가운데 기준으로 — 방(안 되면 도면) 안에 머물게 */
+    function refit(o, f, room, plan) {
+      const reg = room || plan.bounds;
+      const ax = (p0, s0, s1, lo, span) => {
+        const a = Math.abs(p0 - lo) < 2, z = Math.abs(p0 + s0 - (lo + span)) < 2;
+        if (a && !z) return p0;
+        if (z && !a) return p0 + s0 - s1;
+        return p0 + s0 / 2 - s1 / 2;
+      };
+      const r = { x: ax(o.x, o.w, f.w, reg.x, reg.w), y: ax(o.y, o.h, f.h, reg.y, reg.h), w: f.w, h: f.h };
+      if (room && fitsIn(f, room)) Object.assign(r, clampInto(r, room));
+      Object.assign(r, clampInto(r, plan.bounds));
+      return r;
+    }
+    /** 규격 수정 (도면에 놓인 짐이면 저장 뒤 자리를 다시 맞춤) */
+    function editSpec(invId) {
+      const before = cur ? cur.items.filter((o) => o.it.id === invId).map((o) => ({
+        pid: o.p.id, r: Object.assign({}, o.r), rot: o.p.rot === 90 ? 90 : 0, room: roomAt(cur.plan, o.r.x + o.r.w / 2, o.r.y + o.r.h / 2),
+      })) : [];
+      MV.inv.editor(invId, { onSave: (saved) => {
+        if (!saved || !before.length) return;
+        const plan = getPlan(key);
+        if (!plan) return;
+        const moves = [];
+        let tooBig = null;
+        before.forEach((b) => {
+          const f = foot(saved, b.rot);
+          if (Math.abs(f.w - b.r.w) < 0.5 && Math.abs(f.h - b.r.h) < 0.5) return;
+          const r = refit(b.r, f, b.room, plan);
+          moves.push([b.pid, r.x, r.y]);
+          if (b.room && !fitsIn(f, b.room) && !tooBig) tooBig = { room: b.room, turn: fitsIn({ w: f.h, h: f.w }, b.room) };
+        });
+        if (moves.length) {
+          MV.store.update((st) => {
+            const P = layoutsOf(st)[key].placements;
+            moves.forEach(([pid, x, y]) => { const p = P.find((z) => z.id === pid); if (p) { p.x = r1(x); p.y = r1(y); } });
+          });
+        }
+        if (tooBig) {
+          const rm = tooBig.room;
+          setTimeout(() => toast(q(saved) + jo(saved.name, '이', '가') + ' ' + rm.name + '(' + Math.round(rm.w) + '×' + Math.round(rm.h) + 'cm)보다 커요' + (tooBig.turn ? ' — 돌리면 들어가요' : ''), { ms: 4500 }), 30);
+        }
+      } });
     }
     function removeSel() {
       const o = curSel();
@@ -1409,30 +1585,43 @@
       const name = o.it.name;
       sel = null;
       MV.store.update((st) => { const L = layoutsOf(st)[key]; L.placements = L.placements.filter((x) => x.id !== copy.id); });
-      MV.ui.toast(q({ name }) + jo(name, '을', '를') + ' 도면에서 뺐어요', { action: { label: '되돌리기', onClick: () => { sel = copy.id; MV.store.update((st) => { layoutsOf(st)[key].placements.push(copy); }); } } });
+      toast(q({ name }) + jo(name, '을', '를') + ' 도면에서 뺐어요', { action: { label: '되돌리기', onClick: () => { sel = copy.id; MV.store.update((st) => { layoutsOf(st)[key].placements.push(copy); }); } } });
     }
     function nudge(dx, dy) {
       const o = curSel();
       if (!o) return;
-      commitPos(o.p.id, o.r.x + dx, o.r.y + dy);
+      const p = clampInto({ x: o.r.x + dx, y: o.r.y + dy, w: o.r.w, h: o.r.h }, cur.plan.bounds);
+      if (Math.abs(p.x - o.r.x) < 0.01 && Math.abs(p.y - o.r.y) < 0.01) return;
+      commitPos(o.p.id, p.x, p.y);
     }
-    function setZoom(z) {
+    /** 화면 좌표 → 도면 좌표(cm) */
+    function toPlan(clientX, clientY) {
+      const r = stage.getBoundingClientRect();
+      const vb = cur.vb || cur.plan.vb;
+      return { x: (clientX - r.left) / cur.s + vb.x, y: (clientY - r.top) / cur.s + vb.y };
+    }
+    /** 확대·축소. at = 고정할 화면 위치(없으면 도면 창 가운데), pt = 그 자리에 둘 도면 좌표 */
+    function setZoom(z, at, pt) {
       z = MV.clamp(z, 0.5, 5);
       if (!cur) return;
-      const old = cur.s;
-      const cx = (scroll.scrollLeft + scroll.clientWidth / 2) / old, cy = (scroll.scrollTop + scroll.clientHeight / 2) / old;
+      const sr = scroll.getBoundingClientRect();
+      const ax = at ? MV.clamp(at.x - sr.left, 0, scroll.clientWidth) : scroll.clientWidth / 2;
+      const ay = at ? MV.clamp(at.y - sr.top, 0, scroll.clientHeight) : scroll.clientHeight / 2;
+      const p = pt || toPlan(sr.left + ax, sr.top + ay);
       MV.store.update((st) => { prefsOf(st).zoom[key] = Math.round(z * 1000) / 1000; }, { silent: true });
       drawPlan(); syncToolbar();
-      scroll.scrollLeft = cx * cur.s - scroll.clientWidth / 2;
-      scroll.scrollTop = cy * cur.s - scroll.clientHeight / 2;
+      const r = stage.getBoundingClientRect();
+      const offL = r.left - sr.left + scroll.scrollLeft, offT = r.top - sr.top + scroll.scrollTop;
+      scroll.scrollLeft = offL + (p.x - cur.vb.x) * cur.s - ax;
+      scroll.scrollTop = offT + (p.y - cur.vb.y) * cur.s - ay;
       drawSelBar();
     }
     function doExport() {
       if (!cur) return;
       bExport.disabled = true;
       exportPlanPNG(cur.plan, key, { grid: prefs().grid, items: cur.items, issues: cur.v.lv })
-        .then(() => MV.ui.toast('도면 그림(PNG)을 저장했어요'))
-        .catch((e) => MV.ui.toast('그림 저장 실패: ' + (e && e.message ? e.message : e)))
+        .then(() => toast('도면 그림(PNG)을 저장했어요'))
+        .catch((e) => toast('그림 저장 실패: ' + (e && e.message ? e.message : e)))
         .finally(() => { bExport.disabled = false; });
     }
 
@@ -1460,7 +1649,7 @@
       const field = (label, input, hint2) => el('label', { class: 'field' }, el('span', label), input, hint2 ? el('small', { class: 'hint' }, hint2) : null);
       const save = () => {
         const v = read();
-        if (!(v.w > 0) || !(v.h > 0) || !isFinite(v.x) || !isFinite(v.y)) { MV.ui.toast('숫자를 확인해 주세요 (가로·세로 > 0)'); return false; }
+        if (!(v.w > 0) || !(v.h > 0) || !isFinite(v.x) || !isFinite(v.y)) { toast('숫자를 확인해 주세요 (가로·세로 > 0)'); return false; }
         MV.store.update((st) => {
           editsOf(st)[key].rooms[rid] = { x: r1(v.x), y: r1(v.y), w: r1(v.w), h: r1(v.h), name: v.name || r.orig.name };
         }, { log: '📏 ' + PLAN_LABEL[key] + ' 실측 반영: ' + (v.name || r.name) + ' ' + Math.round(v.w) + '×' + Math.round(v.h) + 'cm' });
@@ -1488,7 +1677,7 @@
       MV.ui.confirm(PLAN_LABEL[key] + ' 도면의 실측 수정을 모두 지우고 원래 도면으로 되돌릴까요?', { danger: true, okLabel: '원래대로' }).then((ok) => {
         if (!ok) return;
         MV.store.update((st) => { editsOf(st)[key].rooms = {}; }, { log: '📏 ' + PLAN_LABEL[key] + ' 도면 전체 원래대로' });
-        MV.ui.toast('원래 도면으로 되돌렸어요');
+        toast('원래 도면으로 되돌렸어요');
       });
     }
 
@@ -1514,15 +1703,72 @@
       });
       return [bx != null ? bx : x, by != null ? by : y];
     }
+    /** 끄는 중인 짐 위치 계산: 화면·도면 창 스크롤까지 반영, 스냅·벽 자석, 도면 밖으로는 못 나가게 */
+    function dragPos() {
+      const d = drag;
+      const dxp = d.cx - d.sx + (scroll.scrollLeft - d.sl0) + (window.scrollX - d.wx0);
+      const dyp = d.cy - d.sy + (scroll.scrollTop - d.st0) + (window.scrollY - d.wy0);
+      let x = d.x0 + dxp / cur.s, y = d.y0 + dyp / cur.s;
+      if (prefs().snap) {
+        x = Math.round(x / SNAP) * SNAP; y = Math.round(y / SNAP) * SNAP;
+        [x, y] = magnet(x, y, d.w, d.h);
+      }
+      ({ x, y } = clampInto({ x, y, w: d.w, h: d.h }, cur.plan.bounds));
+      d.x = r1(x); d.y = r1(y);
+      d.g.setAttribute('transform', 'translate(' + d.x + ' ' + d.y + ')');
+    }
+    // 가장자리 가까이 끌면 도면 창(확대 시)과 화면을 자동으로 굴림
+    let autoRaf = 0;
+    const stopAuto = () => { if (autoRaf) cancelAnimationFrame(autoRaf); autoRaf = 0; };
+    ctx.onCleanup(stopAuto);
+    const pxv = (name, d) => { const v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name)); return isFinite(v) ? v : d; };
+    function autoTick() {
+      autoRaf = 0;
+      if (!drag || !drag.moved || !root.isConnected) return;
+      const E = 44;
+      const sp = (dist) => Math.round(MV.clamp(3 + dist * 0.35, 3, 22));
+      const { cx, cy } = drag;
+      const sr = scroll.getBoundingClientRect();
+      let vx = 0, vy = 0, wy = 0;
+      if (scroll.scrollWidth > scroll.clientWidth + 1) {
+        if (cx < sr.left + E) vx = -sp(sr.left + E - cx); else if (cx > sr.right - E) vx = sp(cx - sr.right + E);
+      }
+      if (scroll.scrollHeight > scroll.clientHeight + 1) {
+        if (cy < sr.top + E) vy = -sp(sr.top + E - cy); else if (cy > sr.bottom - E) vy = sp(cy - sr.bottom + E);
+      }
+      const topLim = pxv('--topbar-h', 56) + E, botLim = window.innerHeight - pxv('--bottom-h', 0) - E;
+      if (cy < topLim && sr.top < topLim - E) wy = -sp(topLim - cy);
+      else if (cy > botLim && sr.bottom > botLim + E) wy = sp(cy - botLim);
+      let moved = false;
+      if (vx || vy) {
+        const l0 = scroll.scrollLeft, t0 = scroll.scrollTop;
+        scroll.scrollLeft = l0 + vx; scroll.scrollTop = t0 + vy;
+        moved = scroll.scrollLeft !== l0 || scroll.scrollTop !== t0;
+      }
+      if (wy) { const y0 = window.scrollY; window.scrollBy(0, wy); moved = moved || window.scrollY !== y0; }
+      if (moved) dragPos();
+      if (moved || vx || vy || wy) autoRaf = requestAnimationFrame(autoTick);
+    }
+    function cancelDrag() {
+      if (!drag) return;
+      const d = drag;
+      drag = null;
+      stopAuto();
+      try { stage.releasePointerCapture(d.id); } catch (err) { /* 무시 */ }
+      if (svgEl) svgEl.classList.remove('is-dragging');
+      lastUp = Date.now();
+      refresh();
+    }
     stage.addEventListener('pointerdown', (e) => {
-      if (editMode || !cur || !svgEl) return;
+      if (editMode || !cur || !svgEl || drag || pinch) return;
       if (e.pointerType === 'mouse' && e.button !== 0) return;
       const g = e.target.closest && e.target.closest('.fp-item');
       if (!g || !svgEl.contains(g)) return;
       const o = cur.items.find((x) => x.p.id === g.getAttribute('data-pid'));
       if (!o) return;
       e.preventDefault();
-      drag = { pid: o.p.id, id: e.pointerId, sx: e.clientX, sy: e.clientY, x0: o.r.x, y0: o.r.y, x: o.r.x, y: o.r.y, w: o.r.w, h: o.r.h, g, moved: false, type: e.pointerType };
+      drag = { pid: o.p.id, id: e.pointerId, sx: e.clientX, sy: e.clientY, cx: e.clientX, cy: e.clientY, x0: o.r.x, y0: o.r.y, x: o.r.x, y: o.r.y, w: o.r.w, h: o.r.h, g, moved: false, type: e.pointerType,
+        sl0: scroll.scrollLeft, st0: scroll.scrollTop, wx0: window.scrollX, wy0: window.scrollY };
       try { stage.setPointerCapture(e.pointerId); } catch (err) { /* 무시 */ }
       svgEl.querySelectorAll('.fp-item.is-sel').forEach((n) => { if (n !== g) n.classList.remove('is-sel'); });
       g.classList.add('is-sel');
@@ -1531,26 +1777,22 @@
     });
     stage.addEventListener('pointermove', (e) => {
       if (!drag || e.pointerId !== drag.id) return;
-      const dxp = e.clientX - drag.sx, dyp = e.clientY - drag.sy;
+      drag.cx = e.clientX; drag.cy = e.clientY;
       if (!drag.moved) {
-        if (Math.hypot(dxp, dyp) < (drag.type === 'mouse' ? 3 : 6)) return;
+        if (Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) < (drag.type === 'mouse' ? 3 : 6)) return;
         drag.moved = true;
         svgEl.classList.add('is-dragging');
         selBar.hidden = true;
       }
       e.preventDefault();
-      let x = drag.x0 + dxp / cur.s, y = drag.y0 + dyp / cur.s;
-      if (prefs().snap) {
-        x = Math.round(x / SNAP) * SNAP; y = Math.round(y / SNAP) * SNAP;
-        [x, y] = magnet(x, y, drag.w, drag.h);
-      }
-      drag.x = r1(x); drag.y = r1(y);
-      drag.g.setAttribute('transform', 'translate(' + drag.x + ' ' + drag.y + ')');
+      dragPos();
+      if (!autoRaf) autoRaf = requestAnimationFrame(autoTick);
     });
     const endDrag = (e) => {
       if (!drag || e.pointerId !== drag.id) return;
       const d = drag;
       drag = null;
+      stopAuto();
       try { stage.releasePointerCapture(e.pointerId); } catch (err) { /* 무시 */ }
       if (svgEl) svgEl.classList.remove('is-dragging');
       lastUp = Date.now();
@@ -1561,7 +1803,7 @@
     stage.addEventListener('pointerup', endDrag);
     stage.addEventListener('pointercancel', endDrag);
     stage.addEventListener('touchstart', (e) => {
-      if (!editMode && e.target.closest && e.target.closest('.fp-item')) e.preventDefault();
+      if (!editMode && e.touches.length === 1 && e.target.closest && e.target.closest('.fp-item')) e.preventDefault();
     }, { passive: false });
     stage.addEventListener('click', (e) => {
       if (Date.now() - lastUp < 350) return;
@@ -1577,8 +1819,45 @@
     scroll.addEventListener('wheel', (e) => {
       if (!e.ctrlKey) return;
       e.preventDefault();
-      setZoom(curZoom() * (e.deltaY < 0 ? 1.1 : 1 / 1.1));
+      setZoom(curZoom() * (e.deltaY < 0 ? 1.1 : 1 / 1.1), { x: e.clientX, y: e.clientY });
     }, { passive: false });
+
+    // ---- 두 손가락으로 확대·축소 (태블릿·폰): 페이지 전체가 아니라 도면만 ----
+    const tDist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+    const tMid = (t) => ({ x: (t[0].clientX + t[1].clientX) / 2, y: (t[0].clientY + t[1].clientY) / 2 });
+    scroll.addEventListener('touchstart', (e) => {
+      if (e.touches.length !== 2 || !cur || !svgEl) return;
+      if (e.cancelable) e.preventDefault();
+      if (drag) cancelDrag();
+      const m = tMid(e.touches);
+      const r = stage.getBoundingClientRect();
+      pinch = { d0: Math.max(12, tDist(e.touches)), z0: curZoom(), at: m, pt: toPlan(m.x, m.y), ratio: 1 };
+      selBar.hidden = true;
+      stage.style.transformOrigin = Math.round(m.x - r.left) + 'px ' + Math.round(m.y - r.top) + 'px';
+      stage.style.willChange = 'transform';
+    }, { passive: false });
+    scroll.addEventListener('touchmove', (e) => {
+      if (!pinch || e.touches.length < 2) return;
+      if (e.cancelable) e.preventDefault();
+      pinch.ratio = MV.clamp(tDist(e.touches) / pinch.d0, 0.5 / pinch.z0, 5 / pinch.z0);
+      stage.style.transform = 'scale(' + r2(pinch.ratio) + ')';
+    }, { passive: false });
+    const endPinch = (e) => {
+      if (!pinch || e.touches.length >= 2) return;
+      const p = pinch;
+      pinch = null;
+      lastUp = Date.now();
+      stage.style.transform = ''; stage.style.transformOrigin = ''; stage.style.willChange = '';
+      if (Math.abs(p.ratio - 1) > 0.03) setZoom(p.z0 * p.ratio, p.at, p.pt);
+      else drawSelBar();
+    };
+    scroll.addEventListener('touchend', endPinch);
+    scroll.addEventListener('touchcancel', endPinch);
+    // 마지막 마우스 위치 (키보드 단축키 범위 판단용)
+    const onPtr = (e) => { if (e.pointerType === 'mouse') lastPtr = { x: e.clientX, y: e.clientY }; };
+    document.addEventListener('pointermove', onPtr, { passive: true });
+    document.addEventListener('pointerdown', onPtr, { passive: true });
+    ctx.onCleanup(() => { document.removeEventListener('pointermove', onPtr); document.removeEventListener('pointerdown', onPtr); });
 
     // ---- 키보드 ----
     const onKey = (e) => {
@@ -1595,6 +1874,26 @@
         if (pid) { e.preventDefault(); sel = pid; refresh(); return; }
       }
       if (!sel || editMode) return;
+      // 단축키는 도면(또는 선택한 짐)에 초점이 있거나, 초점 없이 마우스가 도면 위에 있을 때만.
+      // 다른 곳을 보고 있을 때 방향키는 평소처럼 화면을 굴리고, Backspace 로 짐이 지워지지 않게.
+      const inStage = !!ae && stage.contains(ae);
+      const bodyish = !ae || ae === document.body || ae === document.documentElement;
+      if (e.key === 'Escape') {
+        if (inStage || bodyish) { sel = null; refresh(); e.preventDefault(); }
+        return;
+      }
+      let over = false;
+      if (!inStage && bodyish && lastPtr) {
+        const t = document.elementFromPoint(lastPtr.x, lastPtr.y);
+        over = !!t && scroll.contains(t);
+      }
+      if (!inStage && !over) return;
+      const g = svgEl && svgEl.querySelector('[data-pid="' + CSS.escape(sel) + '"]');
+      if (!g) return;
+      const gr = g.getBoundingClientRect(), sr = scroll.getBoundingClientRect();
+      const vis = gr.right > Math.max(0, sr.left) && gr.left < Math.min(window.innerWidth, sr.right)
+        && gr.bottom > Math.max(0, sr.top) && gr.top < Math.min(window.innerHeight, sr.bottom);
+      if (!vis) return;   // 화면에 안 보이는 짐은 건드리지 않음
       const st = e.shiftKey ? 10 : 1;
       switch (e.key) {
         case 'ArrowLeft': nudge(-st, 0); break;
@@ -1602,7 +1901,6 @@
         case 'ArrowUp': nudge(0, -st); break;
         case 'ArrowDown': nudge(0, st); break;
         case 'Delete': case 'Backspace': removeSel(); break;
-        case 'Escape': sel = null; refresh(); break;
         default:
           if (e.code === 'KeyR' || e.key === 'r' || e.key === 'R' || e.key === 'ㄱ') { rotateSel(); break; }
           return;
@@ -1736,7 +2034,7 @@
                 const res = planPlacement('new', it.id);
                 if (!res) return;
                 commitPlacement('new', res);
-                MV.ui.toast(q(it) + jo(it.name, '을', '를') + ' 새 집 ' + (res.room ? res.room.name : '가운데') + '에 놓았어요', { action: { label: '새 집 배치 보기', onClick: () => MV.go('#/plan/new') } });
+                toast(q(it) + jo(it.name, '을', '를') + ' 새 집 ' + (res.room ? res.room.name : '가운데') + '에 놓았어요', { action: { label: '새 집 배치 보기', onClick: () => MV.go('#/plan/new') } });
               } }, '+ 새 집에 놓기'),
               el('button', { type: 'button', class: 'btn btn-sm btn-ghost fp-b', onclick: () => MV.inv.editor(it.id), 'aria-label': it.name + ' 수정 (버리기·판매로 바꾸기)' }, '✎')))),
         notAnywhere.length ? el('p', { class: 'tiny muted mt-8 mb-0' }, '“가져감” 짐 중 ' + notAnywhere.length + '개는 아직 어느 도면에도 안 놓였어요: ' + notAnywhere.slice(0, 6).map((it) => it.name).join(', ') + (notAnywhere.length > 6 ? ' …' : '')) : null));

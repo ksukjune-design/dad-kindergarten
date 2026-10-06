@@ -84,6 +84,22 @@
     return { g: null, anchor, id };
   }
   const guideHash = (id, anchor) => '#/guide/' + encodeURIComponent(id) + (anchor ? '/' + encodeURIComponent(anchor) : '');
+  /* 읽던 위치: 지금 기록(history entry)에 {id, y, det} 를 적어 두고, 뒤로/앞으로·새로고침으로 같은 기록에 돌아오면 되살립니다. */
+  const HS_KEY = 'mvGuide';
+  function readHS(id) {
+    try {
+      const s = history.state;
+      const v = s && typeof s === 'object' ? s[HS_KEY] : null;
+      return v && typeof v === 'object' && v.id === String(id) && typeof v.y === 'number' && isFinite(v.y) ? v : null;
+    } catch (e) { return null; }
+  }
+  function writeHS(v) {
+    try {
+      const s = history.state;
+      const base = s && typeof s === 'object' && !Array.isArray(s) ? s : {};
+      history.replaceState(Object.assign({}, base, { [HS_KEY]: v }), '');
+    } catch (e) { /* 무시 */ }
+  }
 
   /* 파싱: <template> 안에서 (이미지 로드·스크립트 실행 없이) 목차용 id 를 붙이고 본문 텍스트를 뽑습니다. */
   function parse(g) {
@@ -279,7 +295,7 @@
 .gd-copybtn:hover { border-color:var(--brand); color:var(--brand); }
 .gd-copybtn.is-done { border-color:var(--good); color:var(--good); }
 .gd-copybtn.is-inline { min-height:26px; padding:0 7px; margin-left:5px; vertical-align:1px; }
-@media (pointer: coarse) { .gd-copybtn { min-height:36px; } .gd-copybtn.is-inline { min-height:32px; } }
+@media (pointer: coarse) { .gd-copybtn, .gd-copybtn.is-inline { min-height:36px; } .gd-copybtn.is-inline { vertical-align:middle; margin-top:2px; margin-bottom:2px; } }
 @keyframes gd-flash { 0%, 35% { background-color:color-mix(in srgb, var(--brand) 20%, transparent); } 100% { background-color:transparent; } }
 .gd-flash { animation:gd-flash 2s ease-out; background-clip:content-box; border-radius:6px; }
 
@@ -291,8 +307,22 @@
 .gd-sources li + li { margin-top:4px; }
 .gd-sources a { overflow-wrap:anywhere; }
 .gd-sources .gd-src-host { color:var(--ink-3); font-size:.78rem; margin-left:4px; }
-.gd-related { display:flex; flex-wrap:wrap; gap:8px; }
-.gd-related .btn { min-height:42px; }
+.gd-related { display:grid; grid-template-columns:repeat(auto-fill, minmax(min(100%, 230px), 1fr)); gap:8px; }
+.gd-rel { display:flex; flex-direction:column; gap:2px; min-width:0; min-height:56px; padding:9px 14px; border-radius:12px; border:1px solid var(--line); background:var(--bg-2); color:var(--ink); text-decoration:none; }
+.gd-rel:hover { border-color:var(--brand); }
+.gd-rel small { font-size:.74rem; color:var(--ink-3); font-weight:700; }
+.gd-rel b { display:flex; align-items:center; gap:6px; font-size:.95rem; min-width:0; }
+.gd-rel-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.gd-rel-n { margin-left:auto; flex:none; font-size:.8rem; font-weight:700; color:var(--ink-3); font-variant-numeric:tabular-nums; }
+.gd-rel.is-main { background:var(--brand); border-color:var(--brand); color:var(--on-brand); }
+.gd-rel.is-main small, .gd-rel.is-main .gd-rel-n { color:var(--on-brand); opacity:.85; }
+.gd-rel.is-main:hover { filter:brightness(1.05); }
+.gd-rel.is-complete .gd-rel-n { color:var(--good); }
+.gd-rel.is-main.is-complete .gd-rel-n { color:var(--on-brand); }
+.gd-nf-list { display:flex; flex-direction:column; gap:6px; text-align:left; max-width:460px; margin:12px auto 0; }
+.gd-nf-list a { display:flex; align-items:center; gap:10px; min-height:44px; padding:6px 12px; border:1px solid var(--line); border-radius:10px; background:var(--bg-2); color:var(--ink); text-decoration:none; font-weight:700; font-size:.9rem; }
+.gd-nf-list a:hover { border-color:var(--brand); }
+.gd-nf-actions { display:flex; flex-wrap:wrap; gap:8px; justify-content:center; margin-top:12px; }
 .gd-pager { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; }
 .gd-pager a { display:flex; flex-direction:column; gap:2px; padding:10px 14px; border:1px solid var(--line); border-radius:12px; background:var(--bg-2); color:var(--ink); text-decoration:none; min-width:0; min-height:56px; }
 .gd-pager a:hover { border-color:var(--brand); }
@@ -328,8 +358,10 @@
     const head = (String(g.title || '') + ' ' + String(g.summary || '') + ' ' + rel.map((x) => x.name).join(' ')).toLowerCase();
     const ok = tokens.every((t) => head.includes(t) || p.low.includes(t));
     if (!ok) return null;
-    // 본문에서만 찾은 단어가 있으면 그 주변을 보여 주고, 그 절로 바로 가게
-    const bodyTok = tokens.find((t) => !head.includes(t)) || tokens.find((t) => p.low.includes(t));
+    // 본문에서만 찾은 단어가 있으면 그 주변을 보여 주고 그 절로 바로 가게.
+    // 검색어가 모두 제목·요약에 있으면 본문 일부만 참고로 보여 주고 글 처음으로 갑니다.
+    const onlyBody = tokens.find((t) => !head.includes(t));
+    const bodyTok = onlyBody || tokens.find((t) => p.low.includes(t));
     let snip = null, anchor = '';
     if (bodyTok) {
       const at = p.low.indexOf(bodyTok);
@@ -337,7 +369,7 @@
         const s = Math.max(0, at - 36), e = Math.min(p.text.length, at + bodyTok.length + 56);
         snip = (s > 0 ? '…' : '') + p.text.slice(s, e).trim() + (e < p.text.length ? '…' : '');
         const mk = p.marks.filter((m) => m.at <= at).pop();
-        if (mk) { anchor = mk.id; snip = { text: snip, where: mk.text }; } else snip = { text: snip, where: '' };
+        if (mk && onlyBody) { anchor = mk.id; snip = { text: snip, where: mk.text }; } else snip = { text: snip, where: '' };
       }
     }
     return { snip, anchor };
@@ -478,13 +510,31 @@
 
   function renderNotFound(root, rawId) {
     st.lastKey = 'missing';
+    // 파트 id 로 들어왔는데 가이드가 아직 없으면: 그 파트 체크리스트 + 같은 묶음(group)의 가이드를 대신 권합니다
+    const part = MV.parts.get(rawId);
+    const all = orderedGuides();
+    let near = [];
+    if (part) {
+      near = all.filter((x) => x.rel.some((p) => p.id !== part.id && (p.group || '') === (part.group || '')));
+    }
+    if (!near.length) near = all.slice(0, 3);
+    near = near.slice(0, 4);
     root.appendChild(el('a', { class: 'gd-back', href: '#/guide' }, '← 가이드 목록'));
     root.appendChild(el('div', { class: 'card' },
       el('div', { class: 'empty' },
-        el('span', { class: 'big' }, '🧭'),
-        el('p', { class: 'strong', style: { color: 'var(--ink)' } }, '“' + rawId + '” 가이드를 찾지 못했어요.'),
-        el('p', { class: 'small' }, '아직 작성 중이거나 이름이 바뀌었을 수 있어요.'),
-        el('a', { class: 'btn btn-primary', href: '#/guide' }, '가이드 목록 보기'))));
+        el('span', { class: 'big' }, part ? (part.emoji || '🧭') : '🧭'),
+        el('p', { class: 'strong', style: { color: 'var(--ink)' } }, part
+          ? '‘' + part.name + '’ 가이드는 아직 준비 중이에요.'
+          : '“' + rawId + '” 가이드를 찾지 못했어요.'),
+        el('p', { class: 'small' }, part
+          ? '할 일과 메모는 체크리스트에서 바로 관리할 수 있어요.'
+          : '아직 작성 중이거나 이름이 바뀌었을 수 있어요.'),
+        el('div', { class: 'gd-nf-actions' },
+          part ? el('a', { class: 'btn btn-primary', href: '#/checklist/' + encodeURIComponent(part.id) }, (part.emoji || '📌') + ' ' + part.name + ' 체크리스트로 →') : null,
+          el('a', { class: 'btn' + (part ? '' : ' btn-primary'), href: '#/guide' }, '가이드 목록 보기')),
+        near.length ? el('div', { class: 'gd-nf-list', 'aria-label': '관련 가이드' },
+          el('div', { class: 'tiny muted' }, part ? '같이 보면 좋은 가이드' : '다른 가이드'),
+          near.map((x) => el('a', { href: guideHash(x.g.id) }, el('span', { 'aria-hidden': 'true' }, x.g.icon || '📄'), String(x.g.title || x.g.id)))) : null)));
     window.scrollTo(0, 0);
   }
 
@@ -500,6 +550,7 @@
     const prevKey = st.lastKey;
     st.lastKey = key;
     const suppressed = Date.now() < suppressAnchorUntil;
+    const saved = readHS(g.id);
     let alive = true;
     ctx.onCleanup(() => { alive = false; });
 
@@ -527,12 +578,13 @@
           s.overdue ? el('span', { class: 'badge', title: '기한 지난 항목' }, String(s.overdue)) : null);
       }));
       partsBox.hidden = !fresh.length;
-      relatedBox.replaceChildren(...fresh.map((pt) => {
+      relatedBox.replaceChildren(...fresh.map((pt, i) => {
         const s = MV.parts.stats(pt.id);
-        return el('a', { class: 'btn' + (fresh.length === 1 ? ' btn-primary' : ''), href: '#/checklist/' + encodeURIComponent(pt.id), 'aria-label': pt.name + ' 체크리스트로 이동 · ' + s.total + '개 중 ' + s.done + '개 완료' },
-          fresh.length === 1
-            ? '이 가이드 관련 체크리스트로 → ' + (pt.emoji || '📌') + ' ' + s.done + '/' + s.total
-            : (pt.emoji || '📌') + ' ' + pt.name + ' ' + s.done + '/' + s.total + ' →');
+        const complete = s.total > 0 && s.done === s.total;
+        return el('a', { class: 'gd-rel' + (i === 0 ? ' is-main' : '') + (complete ? ' is-complete' : ''), href: '#/checklist/' + encodeURIComponent(pt.id), 'aria-label': '이 가이드 관련 체크리스트로: ' + pt.name + ' · ' + s.total + '개 중 ' + s.done + '개 완료' },
+          el('small', '이 가이드 관련 체크리스트로 →'),
+          el('b', el('span', { 'aria-hidden': 'true' }, pt.emoji || '📌'), el('span', { class: 'gd-rel-name' }, pt.name),
+            el('span', { class: 'gd-rel-n' }, s.done + '/' + s.total + (complete ? ' ✓' : ''))));
       }));
     };
     fillParts();
@@ -688,10 +740,31 @@
 
     ctx.subscribe((e) => { if (e && e.reset) return; if (alive) fillParts(); });
 
+    // 읽던 위치 저장: 스크롤이 멈출 때 + 링크를 누르는 순간(해시가 바뀌기 전)
+    const here = () => { const h = MV.parseHash(); return alive && h.name === 'guide' && String(h.params[0] || '') === String(g.id); };
+    const saveNow = () => {
+      if (!here()) return;
+      const det = [];
+      content.querySelectorAll('details').forEach((d, i) => { if (d.open) det.push(i); });
+      writeHS({ id: String(g.id), y: Math.round(window.scrollY), det });
+    };
+    let saveT = 0;
+    const saveSoon = () => { clearTimeout(saveT); saveT = setTimeout(saveNow, 180); };
+    const flushSave = () => { clearTimeout(saveT); saveNow(); };
+    window.addEventListener('scroll', saveSoon, { passive: true });
+    document.addEventListener('click', flushSave, true);
+    content.addEventListener('toggle', saveSoon, true);
+    ctx.onCleanup(() => { clearTimeout(saveT); window.removeEventListener('scroll', saveSoon); document.removeEventListener('click', flushSave, true); });
+
     // MV.rerender 가 스크롤을 정리한 다음 프레임에 위치 잡기
     requestAnimationFrame(() => {
       if (!alive) return;
-      if (anchor && !suppressed) {
+      if (saved && !suppressed) {
+        // 뒤로 가기·새로고침: 펼쳐 둔 접이식 내용과 읽던 위치 그대로
+        const dets = content.querySelectorAll('details');
+        (Array.isArray(saved.det) ? saved.det : []).forEach((i) => { if (dets[i]) dets[i].open = true; });
+        window.scrollTo(0, saved.y);
+      } else if (anchor && !suppressed) {
         const ok = goAnchor(anchor, { instant: true, updateHash: false });
         if (!ok) {
           if (prevKey !== key) window.scrollTo(0, 0);

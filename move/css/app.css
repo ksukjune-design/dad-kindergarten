@@ -117,7 +117,7 @@ code, kbd { font-family: var(--mono); font-size: .9em; background: var(--bg-3); 
 .app {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: var(--nav-w) 1fr;
+  grid-template-columns: var(--nav-w) minmax(0, 1fr);
   grid-template-rows: var(--topbar-h) 1fr;
   grid-template-areas: "top top" "nav view";
 }
@@ -130,7 +130,8 @@ code, kbd { font-family: var(--mono); font-size: .9em; background: var(--bg-3); 
   backdrop-filter: saturate(1.4) blur(10px);
   border-bottom: 1px solid var(--line);
 }
-.brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: inherit; min-width: 0; }
+.topbar { min-width: 0; }
+.brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: inherit; min-width: 0; flex: 0 1 auto; overflow: hidden; }
 .brand-mark { font-size: 1.5rem; }
 .brand-text { display: flex; flex-direction: column; line-height: 1.15; min-width: 0; }
 .brand-text strong { font-size: 1rem; }
@@ -141,6 +142,12 @@ code, kbd { font-family: var(--mono); font-size: .9em; background: var(--bg-3); 
   padding: 4px 12px; border-radius: 999px;
   background: var(--brand-bg); color: var(--brand);
   white-space: nowrap;
+  flex: 0 0 auto;
+}
+.topbar .btn-icon { flex: 0 0 auto; }
+@media (max-width: 420px) {
+  .dday .dday-date { display: none; }
+  .brand-text small { display: none; }
 }
 .nav {
   grid-area: nav;
@@ -174,7 +181,7 @@ code, kbd { font-family: var(--mono); font-size: .9em; background: var(--bg-3); 
 @media (max-width: 860px) {
   :root { --bottom-h: 64px; }
   .app {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     grid-template-rows: var(--topbar-h) 1fr;
     grid-template-areas: "top" "view";
   }

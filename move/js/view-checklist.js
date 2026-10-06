@@ -286,7 +286,7 @@
   }
   function emojiPicker(value) {
     let v = value || '📌';
-    const custom = el('input', { class: 'input ck-emo-input', value: v, maxlength: '8', 'aria-label': '이모지 직접 입력', placeholder: '직접' });
+    const custom = el('input', { class: 'input ck-emo-input', value: v, maxlength: '16', 'aria-label': '이모지 직접 입력', placeholder: '직접' });
     const btns = EMOJIS.map((e) => el('button', {
       type: 'button', class: 'ck-emo', 'aria-pressed': String(e === v), 'aria-label': '아이콘 ' + e,
       onclick: () => { v = e; custom.value = e; sync(); },
@@ -353,7 +353,7 @@
     /* ---------- 뼈대 ---------- */
     const sideTop = el('div', { class: 'ck-ws' });
     const searchInput = el('input', {
-      class: 'input ck-search-input', type: 'search', placeholder: '검색 (제목·설명·메모)', 'aria-label': '체크리스트 검색',
+      class: 'input ck-search-input', type: 'search', placeholder: '할 일·메모 검색', 'aria-label': '체크리스트 검색 (제목·설명·메모)',
       autocomplete: 'off', enterkeyhint: 'search', spellcheck: 'false',
     });
     const searchClear = el('button', { type: 'button', class: 'ck-search-clear', 'aria-label': '검색 지우기', hidden: true }, '✕');
@@ -365,7 +365,7 @@
       chans,
       el('div', { class: 'ck-side-foot' },
         el('button', { type: 'button', class: 'ck-addpart', onclick: () => addPart() }, el('span', { 'aria-hidden': 'true' }, '＋'), ' 파트 추가'),
-        el('p', { class: 'ck-keys' }, el('kbd', '/'), ' 검색 · ', el('kbd', 'n'), ' 추가 · ', el('kbd', 'j'), el('kbd', 'k'), ' 이동 · ', el('kbd', 'Esc'), ' 닫기')));
+        el('p', { class: 'ck-keys' }, el('kbd', '/'), ' 검색 · ', el('kbd', 'n'), ' 새 할 일', el('br'), el('kbd', 'j'), ' ', el('kbd', 'k'), ' 위아래 · ', el('kbd', 'Esc'), ' 상세 닫기')));
 
     const head = el('header', { class: 'ck-head' });
     const sub = el('div', { class: 'ck-sub' });
@@ -406,9 +406,10 @@
     }
     function goBackTo(target) {
       const st = history.state;
-      if (cur.itemId && !isPhone()) mem.focusRow = cur.itemId;
-      if (st && st.ckPrev === target) history.back();   // 앱 셸이 다시 그림 → mem 으로 복원
-      else nav(target, { replace: true, how: 'history' });
+      if (st && st.ckPrev === target) {
+        if (cur.itemId && !isPhone()) mem.focusRow = cur.itemId;
+        history.back();   // 앱 셸이 다시 그림 → mem 으로 스크롤·초점 복원
+      } else nav(target, { replace: true, how: 'history' });
     }
 
     function applyRoute(params, how) {
@@ -564,7 +565,7 @@
     function channelInfo(ch) {
       const sp = SPECIAL_MAP[ch];
       if (sp) {
-        if (ch === '~search') return { emoji: sp.emoji, name: cur.q ? '“' + cur.q + '” 검색' : '검색', desc: cur.q ? sp.desc : '왼쪽 검색창에 찾을 말을 적어 보세요.', special: true };
+        if (ch === '~search') return { emoji: sp.emoji, name: cur.q ? '“' + cur.q + '” 검색' : '검색', desc: cur.q ? sp.desc : '검색창에 찾을 말을 적어 보세요.', special: true };
         return { emoji: sp.emoji, name: sp.name, desc: sp.desc, special: true };
       }
       const p = MV.parts.get(ch);
@@ -801,74 +802,121 @@
       return el('h3', { class: 'ck-bucket-h ' + (cls || '') }, label, el('span', { class: 'ck-count' }, String(n)));
     }
 
+    /* 목록 구성: [{node}] (빈 상태 등 매번 새로) 또는 [{sec, key, headSig, head(), rows:[[item, opts]]}] */
     function buildList(ch) {
-      if (ch === '~activity') return buildActivity();
+      const nodeBlocks = (...nodes) => nodes.map((node) => ({ node }));
+      if (ch === '~activity') return nodeBlocks(...buildActivity());
       const info = channelInfo(ch);
       const u = ui();
       if (info.missing) {
-        return [emptyState('❓', '이 파트를 찾을 수 없어요. 삭제되었을 수 있어요.',
-          el('button', { type: 'button', class: 'btn btn-sm', onclick: () => nav(hashFor('~focus'), { replace: true }) }, '🔥 지금 할 일 보기'))];
+        return nodeBlocks(emptyState('❓', '이 파트를 찾을 수 없어요. 삭제되었을 수 있어요.',
+          el('button', { type: 'button', class: 'btn btn-sm', onclick: () => nav(hashFor('~focus'), { replace: true }) }, '🔥 지금 할 일 보기')));
       }
-      if (ch === '~search' && !termsOf(cur.q).length) return [emptyState('🔍', '찾을 말을 입력하세요. 제목·설명·메모를 모두 뒤져요.')];
+      if (ch === '~search' && !termsOf(cur.q).length) return nodeBlocks(emptyState('🔍', '찾을 말을 입력하세요. 제목·설명·메모를 모두 뒤져요.'));
       const items = listItemsFor(ch);
       const showPart = !!info.special;
-      const resetOwner = u.owner ? el('button', { type: 'button', class: 'btn btn-sm', onclick: () => setUI({ owner: '' }) }, '모든 담당 보기') : null;
+      const resetOwner = () => (u.owner ? el('button', { type: 'button', class: 'btn btn-sm', onclick: () => setUI({ owner: '' }) }, '모든 담당 보기') : null);
 
       if (ch === '~done') {
-        if (!items.length) return [emptyState('🌱', u.owner ? '“' + u.owner + '” 담당으로 끝낸 일이 아직 없어요.' : '아직 끝낸 일이 없어요. 하나씩 체크해 볼까요?', resetOwner)];
+        if (!items.length) return nodeBlocks(emptyState('🌱', u.owner ? '“' + u.owner + '” 담당으로 끝낸 일이 아직 없어요.' : '아직 끝낸 일이 없어요. 하나씩 체크해 볼까요?', resetOwner()));
         items.sort(cmpDone);
-        const out = []; let day = null; let secRows = null;
         const realToday = D.str(new Date()); const yest = D.add(realToday, -1);
+        const days = []; const byDay = new Map();
         items.forEach((it) => {
           const dt = new Date(it.doneAt);
           const k = isNaN(dt) ? '' : D.str(dt);
-          if (k !== day || !secRows) {
-            day = k;
-            const n = items.filter((x) => { const d2 = new Date(x.doneAt); return (isNaN(d2) ? '' : D.str(d2)) === k; }).length;
-            const label = !k ? '날짜 모름' : k === realToday ? '오늘' : k === yest ? '어제' : D.fmt(k);
-            secRows = el('section', { class: 'ck-bucket' }, bucketHead(label, n));
-            out.push(secRows);
-          }
-          secRows.appendChild(rowFor(it, ch, { showPart: true, doneMeta: true }));
+          if (!byDay.has(k)) { byDay.set(k, []); days.push(k); }
+          byDay.get(k).push(it);
         });
-        return out;
+        return days.map((k) => {
+          const arr = byDay.get(k);
+          const label = !k ? '날짜 모름' : k === realToday ? '오늘' : k === yest ? '어제' : D.fmt(k);
+          return { sec: true, key: 'doneday:' + k, headSig: label + '|' + arr.length, head: () => bucketHead(label, arr.length), rows: arr.map((it) => [it, { showPart: true, doneMeta: true }]) };
+        });
       }
 
       if (!items.length) {
-        if (ch === '~search') return [emptyState('🔍', '“' + cur.q + '”와(과) 맞는 항목이 없어요.', resetOwner)];
-        if (u.owner) return [emptyState('👤', '“' + u.owner + '” 담당 항목이 여기엔 없어요.', resetOwner)];
-        if (ch === '~focus') return [emptyState('😌', '급한 일이 없어요! 다음 일주일을 미리 볼까요?', el('button', { type: 'button', class: 'btn btn-sm', onclick: () => goChannel('~week') }, '🗓 7일 이내 보기'))];
-        if (ch === '~week') return [emptyState('🗓', '7일 안에 마감인 일이 없어요.', el('button', { type: 'button', class: 'btn btn-sm', onclick: () => goChannel('~all') }, '📋 전체 보기'))];
-        if (ch === '~all') return [emptyState('🎉', '남은 할 일이 하나도 없어요. 수고하셨어요!')];
-        return [emptyState('🌱', '아직 할 일이 없어요. 아래 입력창에 첫 할 일을 적어 보세요.')];
+        if (ch === '~search') return nodeBlocks(emptyState('🔍', '“' + cur.q + '”와(과) 맞는 항목이 없어요.', resetOwner()));
+        if (u.owner) return nodeBlocks(emptyState('👤', '“' + u.owner + '” 담당 항목이 여기엔 없어요.', resetOwner()));
+        if (ch === '~focus') return nodeBlocks(emptyState('😌', '급한 일이 없어요! 다음 일주일을 미리 볼까요?', el('button', { type: 'button', class: 'btn btn-sm', onclick: () => goChannel('~week') }, '🗓 7일 이내 보기')));
+        if (ch === '~week') return nodeBlocks(emptyState('🗓', '7일 안에 마감인 일이 없어요.', el('button', { type: 'button', class: 'btn btn-sm', onclick: () => goChannel('~all') }, '📋 전체 보기')));
+        if (ch === '~all') return nodeBlocks(emptyState('🎉', '남은 할 일이 하나도 없어요. 수고하셨어요!'));
+        return nodeBlocks(emptyState('🌱', '아직 할 일이 없어요. 아래 입력창에 첫 할 일을 적어 보세요.'));
       }
 
       const buckets = {};
       BUCKETS.forEach((b) => { buckets[b.id] = []; });
       items.forEach((it) => {
         let s = statusOf(it);
-        if (s === 'done' && lingering.has(it.id) && !(ch === '~search')) s = openStatusOf(it);
+        if (s === 'done' && lingering.has(it.id) && ch !== '~search') s = openStatusOf(it);
         (buckets[s] || buckets.nodate).push(it);
       });
       BUCKETS.forEach((b) => { buckets[b.id].sort(b.id === 'done' ? cmpDone : cmpItems); });
       const out = [];
       const openN = items.length - buckets.done.length;
-      if (openN === 0 && info.part) out.push(emptyState('🎉', '이 파트는 모두 끝났어요!'));
+      if (openN === 0 && info.part) out.push({ node: emptyState('🎉', '이 파트는 모두 끝났어요!') });
       BUCKETS.forEach((b) => {
         const arr = buckets[b.id];
         if (!arr.length) return;
         if (b.id === 'done') {
           const open = mem.doneOpen[ch] != null ? mem.doneOpen[ch] : (ch === '~search' || !u.hideDone);
-          const hdr = el('button', {
-            type: 'button', class: 'ck-bucket-h ck-done-h', 'aria-expanded': String(open), 'data-fkey': 'donegrp',
-            onclick: () => { mem.doneOpen[ch] = !open; renderList(); },
-          }, el('span', { class: 'ck-caret', 'aria-hidden': 'true' }, open ? '▾' : '▸'), '완료', el('span', { class: 'ck-count' }, String(arr.length)));
-          out.push(el('section', { class: 'ck-bucket ck-bucket-done' }, hdr, open ? arr.map((it) => rowFor(it, ch, { showPart })) : null));
+          out.push({
+            sec: true, key: 'b:done', cls: 'ck-bucket-done', headSig: 'done|' + arr.length + '|' + open + '|' + ch,
+            head: () => el('button', {
+              type: 'button', class: 'ck-bucket-h ck-done-h', 'aria-expanded': String(open), 'data-fkey': 'donegrp',
+              onclick: () => { mem.doneOpen[ch] = !open; renderList(); },
+            }, el('span', { class: 'ck-caret', 'aria-hidden': 'true' }, open ? '▾' : '▸'), '완료', el('span', { class: 'ck-count' }, String(arr.length))),
+            rows: open ? arr.map((it) => [it, { showPart }]) : [],
+          });
           return;
         }
-        out.push(el('section', { class: 'ck-bucket' }, bucketHead(b.label, arr.length, b.cls), arr.map((it) => rowFor(it, ch, { showPart }))));
+        out.push({ sec: true, key: 'b:' + b.id, headSig: b.id + '|' + arr.length, head: () => bucketHead(b.label, arr.length, b.cls), rows: arr.map((it) => [it, { showPart }]) });
       });
       return out;
+    }
+
+    /* 줄 캐시: 내용 서명이 같으면 같은 DOM 을 그대로 둠 (다시 만들면 레이아웃·글꼴 처리 비용이 큼) */
+    const rowCache = new Map();   // itemId → { sig, node }
+    const secCache = new Map();   // key → { node, head, headSig }
+    function rowSig(it, ch, opts) {
+      const p = MV.parts.get(it.partId);
+      return [ch, ch === '~search' ? cur.q + '\u0002' + haystack(it) : '', D.today(), it.title, it.done ? 1 : 0, it.doneAt || '', it.due || '',
+        it.priority || '', it.owner || '', (it.notes || []).length, it.guide ? 1 : 0, it.partId,
+        opts.showPart && p ? (p.emoji || '') + p.name : '', lingering.has(it.id) ? 1 : 0, opts.showPart ? 1 : 0, opts.doneMeta ? 1 : 0].join('\u0001');
+    }
+    function getRow(it, ch, opts) {
+      const sig = rowSig(it, ch, opts);
+      const c = rowCache.get(it.id);
+      if (c && c.sig === sig) return c.node;
+      const node = rowFor(it, ch, opts);
+      rowCache.set(it.id, { sig, node });
+      return node;
+    }
+    /* parent 의 자식(after 다음부터)을 desired 순서로 맞춤 — 최장 증가 부분수열로 움직이는 노드를 최소화 */
+    function reconcile(parent, desired, after) {
+      const want = new Set(desired);
+      const first = () => (after ? after.nextSibling : parent.firstChild);
+      for (let c = first(); c;) { const nx = c.nextSibling; if (!want.has(c)) parent.removeChild(c); c = nx; }
+      const idx = new Map(desired.map((n, i) => [n, i]));
+      const curNodes = [];
+      for (let c = first(); c; c = c.nextSibling) curNodes.push(c);
+      // LIS (patience sorting)
+      const tails = []; const prev = new Array(curNodes.length);
+      curNodes.forEach((n, i) => {
+        const v = idx.get(n);
+        let lo = 0; let hi = tails.length;
+        while (lo < hi) { const mid = (lo + hi) >> 1; if (idx.get(curNodes[tails[mid]]) < v) lo = mid + 1; else hi = mid; }
+        prev[i] = lo > 0 ? tails[lo - 1] : -1;
+        tails[lo] = i;
+      });
+      const stable = new Set();
+      for (let i = tails.length ? tails[tails.length - 1] : -1; i >= 0; i = prev[i]) stable.add(curNodes[i]);
+      let next = null;
+      for (let i = desired.length - 1; i >= 0; i--) {
+        const n = desired[i];
+        if (!stable.has(n)) parent.insertBefore(n, next);
+        next = n;
+      }
     }
 
     function activityIcon(text) {
@@ -922,18 +970,51 @@
       opts = opts || {};
       const ch = effCh();
       const key = ch + (ch === '~search' ? ':' + cur.q : '');
-      const prevScroll = list.scrollTop;
       const fk = focusKeyIn(list);
-      let nodes;
-      try { nodes = buildList(ch); } catch (e) { console.error(e); nodes = [emptyState('⚠️', '목록을 그리다 문제가 생겼어요: ' + (e && e.message))]; }
-      put(list, ...nodes);
-      if (!isPhone()) list.scrollTop = opts.restore ? (mem.listScroll[key] || 0) : prevScroll;
+      let fkIndex = -1;
+      if (fk && /^(cb|row):/.test(fk)) {
+        const fr = document.activeElement.closest('.ck-row');
+        fkIndex = fr ? MV.$$('.ck-row', list).indexOf(fr) : -1;
+      }
+      let blocks;
+      try { blocks = buildList(ch); } catch (e) { console.error(e); blocks = [{ node: emptyState('⚠️', '목록을 그리다 문제가 생겼어요: ' + (e && e.message)) }]; }
+      const usedRows = new Set(); const usedSecs = new Set();
+      const top = [];
+      blocks.forEach((b) => {
+        if (!b.sec) { top.push(b.node); return; }
+        let sec = secCache.get(b.key);
+        if (!sec) { sec = { node: el('section', { class: 'ck-bucket' + (b.cls ? ' ' + b.cls : '') }), head: null, headSig: null }; secCache.set(b.key, sec); }
+        if (sec.headSig !== b.headSig || !sec.head || sec.head.parentNode !== sec.node) {
+          const h = b.head();
+          if (sec.head && sec.head.parentNode === sec.node) sec.node.replaceChild(h, sec.head);
+          else sec.node.insertBefore(h, sec.node.firstChild);
+          sec.head = h; sec.headSig = b.headSig;
+        }
+        const rows = b.rows.map(([it, o]) => { usedRows.add(it.id); return getRow(it, ch, o); });
+        reconcile(sec.node, rows, sec.head);
+        usedSecs.add(b.key);
+        top.push(sec.node);
+      });
+      reconcile(list, top, null);
+      rowCache.forEach((v, id) => { if (!usedRows.has(id)) rowCache.delete(id); });
+      secCache.forEach((v, k) => { if (!usedSecs.has(k)) secCache.delete(k); });
+      markSelected();
+      // 자식만 바꾸면 스크롤 위치는 그대로 유지됨 → scrollTop 을 읽고 쓰지 않아 강제 레이아웃을 피함
+      if (opts.restore && !isPhone()) list.scrollTop = mem.listScroll[key] || 0;
       restoreFocusIn(list, fk);
+      // 초점이 있던 줄이 사라졌으면(완료 묶음으로 접힘 등) 같은 자리의 다음 줄로
+      if (fk && fkIndex >= 0 && (!document.activeElement || document.activeElement === document.body || !list.contains(document.activeElement))) {
+        const rows = MV.$$('.ck-row', list);
+        const r = rows[Math.min(fkIndex, rows.length - 1)];
+        const t = r && r.querySelector(fk.indexOf('cb:') === 0 ? '.ck-cb' : '.ck-row-title');
+        if (t) t.focus({ preventScroll: true });
+      }
       if (pendingFlash) {
         const pf = pendingFlash; pendingFlash = null;
         const row = list.querySelector('.ck-row[data-id="' + cssEsc(pf.id) + '"]');
         if (row) {
-          row.classList.add('ck-flash');
+          row.classList.remove('ck-flash'); void row.offsetWidth; row.classList.add('ck-flash');
+          row.addEventListener('animationend', () => row.classList.remove('ck-flash'), { once: true });
           row.scrollIntoView({ block: 'nearest' });
         } else {
           const p = MV.parts.get(pf.partId);
@@ -955,7 +1036,7 @@
       }
       MV.items.toggle(id);
       if (willDone) {
-        MV.ui.toast('완료했어요 ✓', {
+        MV.ui.toast('완료했어요', {
           action: { label: '되돌리기', onClick: () => { const x = MV.items.get(id); if (x && x.done) { if (lingering.has(id)) { clearTimeout(lingering.get(id)); lingering.delete(id); } MV.items.toggle(id); } } },
         });
       } else MV.ui.toast('다시 열었어요');
@@ -1242,7 +1323,7 @@
       }, '담당');
 
       // 설명
-      f.detail = el('textarea', { class: 'textarea ck-detail', rows: '3', 'aria-label': '설명', placeholder: '자세한 내용, 전화번호, 준비물, 결정한 것…' });
+      f.detail = el('textarea', { class: 'textarea ck-detail', id: 'ck-detail-' + String(id).replace(/[^\w-]/g, ''), rows: '3', 'aria-label': '설명', placeholder: '자세한 내용, 전화번호, 준비물, 결정한 것…' });
       f.detail.value = it.detail || '';
       f.detail._orig = f.detail.value;
       f.detail.addEventListener('focus', () => { const x = curItem(); f.detail._orig = x ? (x.detail || '') : f.detail.value; });
@@ -1267,7 +1348,7 @@
           el('div', { class: 'ck-field' }, el('span', { class: 'ck-field-l' }, '마감'), dueBox),
           el('div', { class: 'ck-field' }, el('span', { class: 'ck-field-l' }, '중요도'), f.prio),
           el('div', { class: 'ck-field' }, el('span', { class: 'ck-field-l' }, '담당'), f.owner)),
-        el('div', { class: 'ck-sec' }, el('label', { class: 'ck-sec-h' }, '설명'), f.detail, f.detailPrev),
+        el('div', { class: 'ck-sec' }, el('label', { class: 'ck-sec-h', for: f.detail.id }, '설명'), f.detail, f.detailPrev),
         el('div', { class: 'ck-sec' }, el('div', { class: 'ck-sec-h' }, '링크', el('button', { type: 'button', class: 'btn btn-ghost btn-sm ck-addlink', onclick: addLink }, '+ 링크 추가')), f.links, f.guide),
         el('div', { class: 'ck-sec ck-thread-sec' }, el('div', { class: 'ck-sec-h ck-thread-h' }, '💬 메모', f.notesCount), f.notes),
         f.stamps,
@@ -1393,6 +1474,7 @@
           const last = f.notes.lastElementChild;
           if (last) {
             last.classList.add('ck-flash');
+            last.addEventListener('animationend', () => last.classList.remove('ck-flash'), { once: true });
             if (isPhone()) last.scrollIntoView({ block: 'nearest' });
             else f.body.scrollTop = f.body.scrollHeight;
           }
@@ -1622,6 +1704,7 @@
 /* 스레드 */
 .ck-thread { display: none; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg-2); }
 .ck-th-head { flex: none; display: flex; align-items: center; gap: 8px; min-height: 54px; padding: 8px 10px 8px 14px; border-bottom: 1px solid var(--line); background: var(--bg-2); }
+.ck-th-back { flex: none; white-space: nowrap; padding: 0 8px; }
 .ck-th-part { flex: 0 1 auto; min-width: 0; min-height: 30px; font-size: .8rem; }
 .ck-move { flex: 0 1 auto; width: auto; max-width: 170px; min-height: 36px; padding: 4px 8px; font-size: .8rem; }
 .ck-th-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 14px 16px 20px; }
@@ -1694,6 +1777,10 @@
 .ck-emo[aria-pressed="true"] { border-color: var(--brand); background: var(--brand-bg); box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand) 25%, transparent); }
 .ck-emo-input { grid-column: span 2; min-height: 42px; text-align: center; font-size: 1.1rem; }
 .ck-copy-ta { min-height: 220px; font-size: .85rem; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ck *, .ck *::before, .ck *::after { animation: none !important; transition: none !important; }
+}
 
 /* ---------- 데스크톱·태블릿: 작업 공간 ---------- */
 @media (min-width: 700px) {
@@ -1791,8 +1878,8 @@
   .ck-row-title { font-size: 1rem; }
   .ck-act { padding: 8px 2px; }
   .ck-composer { position: sticky; bottom: calc(var(--bottom-h) + env(safe-area-inset-bottom)); z-index: 6; margin: 0 -16px; padding: 8px 12px 10px; background: color-mix(in srgb, var(--bg) 94%, transparent); backdrop-filter: blur(10px); border-top: 1px solid var(--line); }
-  .ck-comp-row { flex-wrap: wrap; }
-  .ck-comp-part { flex: 1 1 100%; max-width: none; min-height: 40px; }
+  .ck-comp-part { flex: 0 1 auto; max-width: 34%; min-height: 44px; padding-left: 6px; padding-right: 2px; font-size: .8rem; }
+  .ck-comp-btn { padding: 0 12px; }
   .ck-comp-input { font-size: 1rem; }
 
   .ck-th-head { position: sticky; top: var(--topbar-h); z-index: 6; margin: -14px -16px 0; padding: 6px 10px 6px 4px; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(10px); }
