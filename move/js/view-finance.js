@@ -730,7 +730,8 @@
            없으면 이 화면의 체크·신고 상태가 기준. 보이는 신고 상태는 늘 줄의 완료 여부와 맞춤 */
         const st = ['done', 'late'].indexOf(f.protect.rentReport) >= 0 ? f.protect.rentReport : 'unknown';
         if (!link.item && st !== 'unknown') done = true;
-        extra.reportState = done ? (st === 'unknown' ? 'done' : st) : 'unknown';
+        // 확인은 했는데(줄·항목 체크) 결과를 아직 안 고른 상태 = 'checked' — 결과를 가정하지 않음
+        extra.reportState = done ? (st === 'unknown' ? 'checked' : st) : 'unknown';
         const follow = findLinked(REPORT_FOLLOW, items, f.links, 'prot-');
         extra.follow = follow.item;
         const cd = D.valid(f.newHome.contractDate) ? f.newHome.contractDate : '2026-07-13';
@@ -778,6 +779,9 @@
       const over = D.diff(dl, today);
       A.push({ id: 'report', level: over > 0 ? 'bad' : 'warn', overdue: over > 0, tab: 'protect', anchor: 'fn-p-report',
         text: '새 계약 임대차 신고 기한(' + D.fmt(dl) + ')' + (over > 0 ? '이 ' + over + '일 지났을 수 있어요 — 신고필증부터 확인하고, 안 됐으면 바로 신고하세요.' : '까지 신고 여부를 확인하세요.') });
+    } else if (rep && rep.reportState === 'checked') {
+      A.push({ id: 'reportResult', level: 'info', tab: 'protect', anchor: 'fn-p-report',
+        text: '임대차 신고를 확인했다면 결과(신고돼 있음 / 안 돼 있어서 지금 신고함)도 골라 주세요 — 안 돼 있었다면 바로 신고해야 해요.' });
     }
     if (c.broker.verdict === 'over') {
       A.push({ id: 'brokerOver', level: 'bad', tab: 'tax', anchor: 'fn-broker',
@@ -1105,10 +1109,13 @@ div.fn-alert { cursor: default; }
 .fn-kv > .v.is-good { color: var(--good); } .fn-kv > .v.is-bad { color: var(--bad); }
 .fn-cl-link, .fn-guide { display: inline-flex; align-items: center; min-height: 36px; font-size: .8rem; font-weight: 650; white-space: nowrap; }
 /* 터치 화면: 글 속 링크·접기 버튼도 누르는 곳 36px 이상 */
-@media (pointer: coarse), (max-width: 1024px) {
+@media (pointer: coarse), (any-pointer: coarse), (max-width: 1024px) {
   .fn-page a:not(.btn) { display: inline-flex; align-items: center; min-height: 36px; vertical-align: middle; }
   .fn-page details:not(.fn-why) > summary { padding: 8px 0; min-height: 36px; }
 }
+/* 터치 화면인데 브라우저가 pointer:coarse 를 알려 주지 않는 경우 (가로 태블릿 등) — JS 로 붙인 fn-touch */
+.fn-page.fn-touch a:not(.btn) { display: inline-flex; align-items: center; min-height: 36px; vertical-align: middle; }
+.fn-page.fn-touch details:not(.fn-why) > summary { padding: 8px 0; min-height: 36px; }
 .fn-card-h .fn-guide { margin-left: auto; }
 .fn-contacts { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
 
@@ -1207,6 +1214,7 @@ div.fn-alert { cursor: default; }
 .fn-bad-hint { color: var(--bad) !important; font-weight: 700; }
 .fn-page .input[aria-invalid="true"] { border-color: var(--bad); box-shadow: 0 0 0 2px color-mix(in srgb, var(--bad) 22%, transparent); }
 .fn-bad-hint:empty, .fn-num-msg:empty { display: none; }
+.fn-warn-hint { color: var(--warn) !important; font-weight: 700; }
 .fn-memo-total { max-width: 240px; margin: 0; }
 .fn-memo-row { align-items: flex-end; }
 
@@ -1421,7 +1429,7 @@ div.fn-alert { cursor: default; }
         const lost = !inNode && (!ae || ae === document.body) && !!lastFocus && node.contains(lastFocus);
         const had = inNode || lost;
         const fk = inNode ? ae.getAttribute('data-fk') : null;
-        const intent = lost && navKey && Date.now() - navKey.t < 1500 ? nextFocusable(lastFocus, navKey.shift) : null;
+        const intent = lost && navKey && navKey.kind === 'tab' && Date.now() - navKey.t < 1500 ? nextFocusable(lastFocus, navKey.shift) : null;
         const intentFk = intent && node.contains(intent) ? intent.getAttribute('data-fk') : null;
         let kids;
         try { kids = fn(); } catch (e) {
@@ -1551,7 +1559,9 @@ div.fn-alert { cursor: default; }
 
     /* ---- 셸: 머리글 · 요약 · 확인할 것 · 탭 ---- */
     const dd = D.dday(P.c.move);
-    root.appendChild(el('div', { class: 'fn-page' },
+    let touch = false;
+    try { touch = (navigator.maxTouchPoints || 0) > 0 || 'ontouchstart' in window; } catch (e) { touch = false; }
+    root.appendChild(el('div', { class: 'fn-page' + (touch ? ' fn-touch' : '') },
       el('div', { class: 'view-head' },
         el('div', null,
           el('h1', '💰 자금흐름'),
@@ -1595,7 +1605,11 @@ div.fn-alert { cursor: default; }
       requestAnimationFrame(() => { revealTab(P.tab); moreHint(); });
     }
     // 키보드 Tab 으로 칸을 옮기다 그 칸이 다시 그려져 사라지면 다음 칸으로 (rescueFocus)
-    const onNavKey = (e) => { if (e.key === 'Tab') navKey = { shift: !!e.shiftKey, t: Date.now() }; };
+    const onNavKey = (e) => {
+      if (e.key === 'Tab') navKey = { kind: 'tab', shift: !!e.shiftKey, t: Date.now() };
+      // 키보드로 버튼·체크를 눌러 그 칸이 사라질 때(예: '확인했어요')도 다음 칸으로
+      else if ((e.key === 'Enter' || e.key === ' ') && e.target && (e.target.tagName === 'BUTTON' || (e.target.tagName === 'INPUT' && e.target.type === 'checkbox'))) navKey = { kind: 'act', shift: false, t: Date.now() };
+    };
     const onFocusIn = (e) => { lastFocus = e.target; };
     document.addEventListener('keydown', onNavKey, true);
     document.addEventListener('focusin', onFocusIn, true);
@@ -1976,8 +1990,7 @@ div.fn-alert { cursor: default; }
     if (!r) return;
     if (r.key === 'report') {
       const cur = P.c.f.protect.rentReport;
-      const known = cur === 'done' || cur === 'late';
-      setReportState(P, v ? (known ? cur : 'done') : 'unknown', Object.assign({ assumed: v && !known }, o));
+      setReportState(P, v ? (cur === 'done' || cur === 'late' ? cur : 'checked') : 'unknown', o);
       return;
     }
     const linked = liveItem(r.linked);
@@ -1996,7 +2009,10 @@ div.fn-alert { cursor: default; }
   }
 
   /* 임대차 신고 상태 ↔ 줄 체크 ↔ 체크리스트 '[긴급] … 신고됐는지 확인'·'[신고 안 됐으면] 바로 신고' 항목 */
-  const REPORT_LABEL = { unknown: '모름 — 확인 필요', done: '신고돼 있음', late: '지금 신고함' };
+  const REPORT_LABEL = { unknown: '모름 — 확인 필요', checked: '확인함 (결과 고르기 전)', done: '신고돼 있음', late: '지금 신고함' };
+  /* state: 'unknown' 모름 → 두 항목 모두 미완료
+            'checked' 확인만 함(줄·항목 체크) → 확인 항목만 완료, '[신고 안 됐으면] 바로 신고' 항목은 그대로
+            'done' 신고돼 있음 · 'late' 지금 신고함 → 두 항목 모두 완료 (결과를 직접 고른 경우에만 후속 항목을 닫음) */
   function setReportState(P, state, o) {
     o = o || {};
     if (!REPORT_LABEL[state]) state = 'unknown';
@@ -2004,17 +2020,22 @@ div.fn-alert { cursor: default; }
     const main = row ? liveItem(row.linked) : null;
     const follow = row ? liveItem(row.follow) : null;
     const done = state !== 'unknown';
+    const closeFollow = state === 'done' || state === 'late';
+    // 후속 항목은 결과를 고를 때 닫고, '모름'으로 되돌릴 때는 우리가 닫았던 경우에만 다시 엶
+    const prevKnown = ['done', 'late'].indexOf(P.c.f.protect.rentReport) >= 0;
+    const touchFollow = !!follow && (closeFollow || (state === 'unknown' && prevKnown));
     const changed = [];
     if (main && !!main.done !== done) changed.push(main.title);
-    if (follow && !!follow.done !== done) changed.push(follow.title);
+    if (touchFollow && !!follow.done !== closeFollow) changed.push(follow.title);
     structNext = true;
     updAll((fin, st) => {
-      fin.protect.rentReport = state;
-      if (main) { fin.links['prot-report'] = main.id; setItemDone(st, main.id, done); } else fin.protect.checks.report = done;
-      if (follow) { fin.links['prot-reportNow'] = follow.id; setItemDone(st, follow.id, done); }
+      fin.protect.rentReport = closeFollow ? state : 'unknown';
+      if (main) { fin.links['prot-report'] = main.id; setItemDone(st, main.id, done); }
+      fin.protect.checks.report = done;
+      if (touchFollow) { fin.links['prot-reportNow'] = follow.id; setItemDone(st, follow.id, closeFollow); }
     }, { log: '자금흐름: 임대차 신고 상태 → ' + REPORT_LABEL[state] + (changed.length ? ' (체크리스트 ' + changed.length + '개 ' + (done ? '완료' : '다시 열기') + ')' : '') });
-    if (o.assumed && done) {
-      MV.ui.toast('신고 상태를 "신고돼 있음"으로 표시했어요 — 안 돼 있어서 지금 신고했다면 "지금 신고함"으로 바꿔 주세요');
+    if (state === 'checked') {
+      MV.ui.toast('확인했어요. 아래 "신고 상태"에서 결과(신고돼 있음 / 지금 신고함)도 골라 주세요');
     } else if (changed.length && !o.quiet) {
       MV.ui.toast('체크리스트도 ' + (done ? '완료로' : '미완료로') + ' 바꿨어요: ' + changed.map((t) => '“' + t + '”').join(', '));
     }
@@ -2440,7 +2461,7 @@ div.fn-alert { cursor: default; }
     const ymd = (x) => { const d = D.parse(x); return d ? d.getFullYear() + '.' + (d.getMonth() + 1) + '.' + d.getDate() : ''; };
     for (let i = 0; i < Math.min(g.periods, 3); i++) starts.push(ymd(addMonths(g.start, 12 * i)));
     const startTxt = g.periods <= 3 ? ' (' + starts.join(', ') + ' 시작분)' : '';
-    const head = how + ' 빌린 날부터 1년 단위마다 차액 ' + krw(g.benefit) + '이 통째로 증여로 계산돼요. 지금까지 ' + g.periods + '번' + startTxt + ' → 누적 ' + krw(g.cumulative) + '. ';
+    const head = how + ' 1년 단위마다 차액 ' + krw(g.benefit) + '이 통째로 증여로 계산돼요. 지금까지 ' + g.periods + '번' + startTxt + ' → 누적 ' + krw(g.cumulative) + '. ';
     const excess = Math.max(0, g.cumulative - g.deduction);
     let mid;
     if (g.deduction <= 0) {
@@ -2448,9 +2469,9 @@ div.fn-alert { cursor: default; }
     } else if (excess > 0) {
       mid = '남은 성년 자녀 공제 ' + krw(g.deduction) + '을 넘은 ' + krw(excess) + '이 과세 대상이 될 수 있어요 (세율 10%면 약 ' + krw(giftTax(excess)) + ' + 가산세). ';
     } else {
-      mid = '남은 성년 자녀 공제 ' + krw(g.deduction) + ' 안이라 아직 낼 세금은 없지만 신고는 필요할 수 있어요. 공제로 ' + (g.coveredPeriods > 0 ? g.coveredPeriods + '번째 1년분까지(약 ' + g.yearsToExhaust.toFixed(1) + '년분)' : '1년분도 다') + ' 흡수돼요. ';
+      mid = '성년 자녀 공제 ' + krw(g.deduction) + ' 안이라 아직 낼 세금은 없지만 신고는 필요할 수 있어요(공제로 ' + (g.coveredPeriods > 0 ? g.coveredPeriods + '번째 1년분, 약 ' + g.yearsToExhaust.toFixed(1) + '년분까지' : '1년분도 다') + ' 흡수). ';
     }
-    const next = g.nextPeriod ? '다음 1년분은 ' + D.fmtLong(g.nextPeriod).replace(/ \(.\)$/, '') + ' 무렵부터 계산돼요 — 그 전에 연 ' + pctTxt(g.minRate || 0) + ' 이상으로 이자를 약정하고 실제로 주세요. ' : '';
+    const next = g.nextPeriod ? '다음 1년분은 ' + D.fmtLong(g.nextPeriod).replace(/ \(.\)$/, '') + ' 무렵부터 — 그 전에 연 ' + pctTxt(g.minRate || 0) + ' 이상 이자를 약정하고 실제로 주세요. ' : '';
     return el('div', { class: 'fn-warn' + (g.deduction <= 0 || excess > 0 ? ' is-bad' : '') }, head + mid + next + '진짜 위험은 아래 "원금 전체가 증여로 판정"되는 경우예요.');
   }
 
@@ -2681,10 +2702,20 @@ div.fn-alert { cursor: default; }
     const f = P.c.f;
     const state = el('label', { class: 'field' }, el('span', '신고 상태'));
     const sel = el('select', { class: 'select', 'data-fk': 'p-report-state' },
-      [['unknown', '모름 — 확인 필요'], ['done', '신고돼 있음 (신고필증 확인)'], ['late', '안 돼 있었음 → 지금 신고함']].map(([v, l]) => el('option', { value: v, selected: v === cur().reportState }, l)));
+      [['unknown', '모름 — 확인 필요'], ['checked', '확인함 — 결과를 골라 주세요'], ['done', '신고돼 있음 (신고필증 확인)'], ['late', '안 돼 있었음 → 지금 신고함']].map(([v, l]) => el('option', { value: v, selected: v === cur().reportState }, l)));
+    const optChecked = sel.querySelector('option[value="checked"]');
     sel.addEventListener('change', () => setReportState(P, sel.value));
-    state.append(sel, el('small', { class: 'hint' }, '고르면 체크리스트의 신고 확인 항목도 같이 바뀌어요'));
-    P.bind(() => { const want = cur().reportState || 'unknown'; if (sel.value !== want && document.activeElement !== sel) sel.value = want; });
+    const hint = el('small', { class: 'hint' });
+    state.append(sel, hint);
+    P.bind(() => {
+      const want = cur().reportState || 'unknown';
+      optChecked.hidden = want !== 'checked';
+      if (sel.value !== want && document.activeElement !== sel) sel.value = want;
+      hint.textContent = want === 'checked'
+        ? '결과를 고르면 "[신고 안 됐으면] 바로 신고하기" 항목도 같이 정리돼요'
+        : '고르면 체크리스트의 신고 확인 항목도 같이 바뀌어요';
+      hint.classList.toggle('fn-warn-hint', want === 'checked');
+    });
     return el('div', { class: 'fn-step-body' },
       P.live('div', 'fn-kv', () => {
         const x = cur();

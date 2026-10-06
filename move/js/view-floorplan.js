@@ -1485,6 +1485,8 @@
 }
 /* ---- 평면도 사진 · 축척 맞추기 · 방 그리기 ---- */
 .fp-svg .fp-bg, .fp-svg .fp-bg image { pointer-events: none; }
+:root[data-theme="dark"] .fp-svg .fp-bg image { filter: invert(1) hue-rotate(180deg); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .fp-svg .fp-bg image { filter: invert(1) hue-rotate(180deg); } }
 .fp-svg.is-bgfade .fp-room { fill-opacity: .16; }
 .fp-svg.is-bgfade .fp-deco { opacity: .82; }
 .fp-svg.is-bgfade.is-edit .fp-room:hover, .fp-svg.is-bgfade.is-edit .fp-room:focus { fill-opacity: .4; }
@@ -1507,7 +1509,10 @@
 .fp-range { display: flex; align-items: center; gap: 8px; flex: 1 1 220px; min-width: 0; font-size: .8rem; color: var(--ink-2); font-weight: 700; }
 .fp-range input[type=range] { flex: 1 1 auto; min-width: 90px; height: 36px; accent-color: var(--brand); margin: 0; }
 .fp-range output { min-width: 2.8em; text-align: right; font-variant-numeric: tabular-nums; }
-.fp-help > summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 6px; min-height: 36px; font-weight: 700; color: var(--ink-2); }
+.fp-help { flex: 0 1 auto; min-width: 0; }
+.fp-help[open] { flex: 1 1 100%; }
+.fp-help > summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 6px; border-radius: 10px; font-weight: 700; font-size: .84rem; color: var(--ink-2); }
+.fp-help > summary:hover { background: var(--bg-3); }
 .fp-help > summary::-webkit-details-marker { display: none; }
 .fp-help > summary::before { content: '▸'; color: var(--ink-3); transition: transform .15s; }
 .fp-help[open] > summary::before { transform: rotate(90deg); }
@@ -1528,7 +1533,8 @@
 .fp-tools { display: inline-flex; flex-wrap: wrap; gap: 2px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px; padding: 2px; }
 .fp-tools .btn { border-color: transparent; background: transparent; min-height: 36px; padding: 0 10px; font-size: .84rem; }
 .fp-tools .btn[aria-pressed="true"] { background: var(--brand); color: var(--on-brand); }
-.fp-edittip { flex: 1 1 100%; font-size: .82rem; color: var(--ink-2); }
+.fp-editrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; width: 100%; }
+.fp-edittip { flex: 1 1 220px; min-width: 0; font-size: .82rem; color: var(--ink-2); }
 .fp-kindsel { display: flex; flex-wrap: wrap; gap: 4px; }
 .fp-kindsel button { min-height: 36px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--line-2); background: var(--bg-2); color: var(--ink); font: inherit; font-size: .84rem; font-weight: 650; cursor: pointer; }
 .fp-kindsel button[aria-pressed="true"] { background: var(--brand-bg); border-color: var(--brand); color: var(--brand); }
@@ -1629,7 +1635,7 @@
     const hint = el('p', { class: 'fp-hint' }, coarse
       ? '짐을 손가락으로 끌어 옮기고, 톡 누르면 돌리기·빼기 메뉴가 나와요. 빈 곳을 끌면 화면이 움직이고, 두 손가락으로 벌리면 도면이 커져요.'
       : '짐을 끌어서 옮기고, 눌러서 선택하면 돌리기·빼기를 할 수 있어요. 키보드(도면 위에서): 방향키 1cm(Shift 10cm) · R 회전 · Delete 빼기 · Esc 해제 · Ctrl+휠 확대');
-    const planCard = el('section', { class: 'card fp-plan', 'aria-label': PLAN_LABEL[key] + ' 도면' }, chips, bgBar, wizBar, editBar, scroll, legend(), hint);
+    const planCard = el('section', { class: 'card fp-plan', 'aria-label': PLAN_LABEL[key] + ' 도면' }, chips, bgBar, wizBar, editBar, scroll, legend(), hint, fileIn);
     const side = el('aside', { class: 'card fp-side', 'aria-label': '배치할 짐 목록' });
     const checks = el('section', { class: 'card fp-checks', 'aria-label': '배치 점검' });
     const laundry = key === 'new' ? el('section', { class: 'card fp-laundry', 'aria-label': '다용도실 세탁기·건조기 점검' }) : null;
@@ -1768,13 +1774,14 @@
       editBar.textContent = '';
       const T = (id, label) => el('button', { type: 'button', class: 'btn fp-b', 'data-tool': id, 'aria-pressed': String(tool === id), onclick: () => setTool(id) }, label);
       put(editBar,
-        el('div', { class: 'fp-tools', role: 'group', 'aria-label': '치수 수정 도구' },
-          T('room', '✏️ 방 고치기'), T('draw', '＋ 방 그리기'), T('doorAdd', '🚪 문 추가'), T('doorDel', '🚪 문 삭제')),
-        el('button', { type: 'button', class: 'btn btn-sm fp-b', 'data-tool': 'size', onclick: openSizeEditor, title: '도면 전체 가로·세로 (cm)' }, '📐 전체 크기 ' + Math.round(plan.width) + '×' + Math.round(plan.depth)),
-        el('span', { class: 'spacer' }),
-        plan.edited ? el('button', { type: 'button', class: 'btn btn-sm btn-danger fp-b', onclick: resetAllRooms }, '도면 전체 원래대로') : null,
-        el('button', { type: 'button', class: 'btn btn-sm btn-primary fp-b', onclick: () => { editMode = false; tool = 'room'; preview = null; syncStageMode(); refresh(); } }, '완료'),
-        el('div', { class: 'fp-edittip' }, TOOL_TIPS[tool] + ' 짐은 잠시 잠겨요.'));
+        el('div', { class: 'fp-editrow' },
+          el('div', { class: 'fp-tools', role: 'group', 'aria-label': '치수 수정 도구' },
+            T('room', '✏️ 방 고치기'), T('draw', '＋ 방 그리기'), T('doorAdd', '🚪 문 추가'), T('doorDel', '🚪 문 삭제')),
+          el('button', { type: 'button', class: 'btn btn-sm fp-b', 'data-tool': 'size', onclick: openSizeEditor, title: '도면 전체 가로·세로 (cm)' }, '📐 전체 크기 ' + Math.round(plan.width) + '×' + Math.round(plan.depth))),
+        el('div', { class: 'fp-editrow' },
+          el('div', { class: 'fp-edittip', 'aria-live': 'polite' }, TOOL_TIPS[tool] + ' 짐은 잠시 잠겨요.'),
+          plan.edited ? el('button', { type: 'button', class: 'btn btn-sm btn-danger fp-b', onclick: resetAllRooms }, '도면 전체 원래대로') : null,
+          el('button', { type: 'button', class: 'btn btn-sm btn-primary fp-b', onclick: () => { editMode = false; tool = 'room'; preview = null; syncStageMode(); refresh(); } }, '완료')));
       if (fTool) { const b = editBar.querySelector('[data-tool="' + fTool + '"]'); if (b) b.focus({ preventScroll: true }); }
     }
     function setTool(id) {
@@ -1827,20 +1834,19 @@
       const open = prefs().bgPanel;
       const sg = [open, !!bg, bg ? [bg.show, bg.fade, bg.rot, bg.calibrated, Math.round(bg.cmPerPx * 1e4), bg.natW, bg.natH, bg.src.length] : null, !!wiz];
       if (!changed('bgbar', sg) && !force) { syncOpacity(); return; }
-      bgBar.hidden = !open;
+      // 맞추는 동안엔 안내 띠가 대신하므로 사진 도구는 접어 둠
+      bgBar.hidden = !open || !!wiz;
       bgBar.textContent = '';
-      if (!open) return;
+      if (!open || wiz) return;
       if (!bg) {
         put(bgBar,
           el('div', { class: 'fp-bgrow' },
             el('span', { class: 'fp-bglabel' }, '🖼 평면도 사진'),
             el('span', { class: 'small muted', style: { flex: '1 1 220px', minWidth: '0' } }, '진짜 평면도를 캡처해서 깔면, 그 위에서 방·문을 맞춰 도면을 고칠 수 있어요.'),
             btn('📷 사진 고르기', () => fileIn.click(), { class: 'btn fp-b btn-primary' }),
-            fileIn),
-          helpDetails());
+            helpDetails()));
         return;
       }
-      const off = !!wiz;
       const range = el('input', { type: 'range', min: '15', max: '100', step: '5', value: String(Math.round(bg.opacity * 100)), 'aria-label': '사진 진하기', class: 'fp-opacity' });
       const out = el('output', Math.round(bg.opacity * 100) + '%');
       range.addEventListener('input', () => {
@@ -1850,25 +1856,22 @@
         if (im) im.setAttribute('opacity', r2(v));
         MV.store.update((st) => { const b = bgsOf(st)[key]; if (b) b.opacity = v; }, { silent: true });
       });
-      const tg = (label, on, onClick, title) => btn(label, onClick, { 'aria-pressed': String(!!on), title, disabled: off });
+      const tg = (label, on, onClick, title) => btn(label, onClick, { 'aria-pressed': String(!!on), title });
       put(bgBar,
         el('div', { class: 'fp-bgrow' },
           el('span', { class: 'fp-bglabel' }, '🖼 평면도 사진'),
           el('span', { class: 'chip ' + (bg.calibrated ? 'good' : 'warn') }, bg.calibrated ? '축척 맞춤 ✓' : '축척을 맞춰 주세요'),
           bg.calibrated ? el('span', { class: 'tiny muted num' }, '사진 1px ≈ ' + (Math.round(bg.cmPerPx * 100) / 100) + 'cm') : null,
-          el('span', { class: 'spacer' }),
-          tg('👁 사진 보이기', bg.show, () => setBg({ show: !bg.show }), '사진 보이기/숨기기')),
+          el('label', { class: 'fp-range' }, el('span', '진하기'), range, out)),
         el('div', { class: 'fp-bgrow' },
-          el('label', { class: 'fp-range' }, el('span', '진하기'), range, out),
-          tg('▤ 도면 칸 흐리게', bg.fade, () => setBg({ fade: !bg.fade }), '방 칸을 옅게 해서 사진 선이 보이게')),
-        el('div', { class: 'fp-bgrow' },
-          btn('📏 축척 맞추기', () => startWiz('pts'), { class: 'btn fp-b' + (bg.calibrated ? '' : ' btn-primary'), disabled: off, title: '두 점과 실제 길이로 사진 크기 맞추기 → 위치 맞추기' }),
-          btn('✋ 사진 위치 옮기기', () => startWiz('move'), { disabled: off, title: '사진을 끌어서 도면 선에 맞추기' }),
-          btn('↻ 90°', rotateBg, { disabled: off, 'aria-label': '사진 90도 돌리기', title: '사진 90도 돌리기' }),
-          btn('사진 바꾸기', () => fileIn.click(), { disabled: off }),
-          btn('🗑 사진 지우기', deleteBg, { class: 'btn fp-b btn-danger', disabled: off }),
-          fileIn),
-        helpDetails());
+          tg('👁 보이기', bg.show, () => setBg({ show: !bg.show }), '사진 보이기/숨기기'),
+          tg('▤ 도면 칸 흐리게', bg.fade, () => setBg({ fade: !bg.fade }), '방 칸을 옅게 해서 사진 선이 보이게'),
+          btn('📏 축척 맞추기', () => startWiz('pts'), { class: 'btn fp-b' + (bg.calibrated ? '' : ' btn-primary'), title: '두 점과 실제 길이로 사진 크기 맞추기 → 위치 맞추기' }),
+          btn('✋ 위치 옮기기', () => startWiz('move'), { title: '사진을 끌어서 도면 선에 맞추기' }),
+          btn('↻ 90°', rotateBg, { 'aria-label': '사진 90도 돌리기', title: '사진 90도 돌리기' }),
+          btn('사진 바꾸기', () => fileIn.click()),
+          btn('🗑 사진 지우기', deleteBg, { class: 'btn fp-b btn-danger' }),
+          helpDetails()));
     }
     function syncOpacity() {
       const r = bgBar.querySelector('.fp-opacity');
@@ -1948,7 +1951,9 @@
       if (used !== first) notes.push('저장 공간이 빠듯해 사진을 ' + used.natW + '×' + used.natH + 'px로 더 줄였어요');
       if (res === 'nostore') notes.push('이 브라우저는 저장이 안 돼서 창을 닫으면 사진이 사라져요');
       startWiz('pts');
-      toast((notes.length ? '사진을 깔았어요. ' + notes.join(' · ') : '사진을 깔았어요 — 이제 축척을 맞춰요'), { ms: notes.length ? 7000 : 3500 });
+      // 다음 할 일은 안내 띠가 알려 주므로, 알림은 주의할 점이 있을 때만 (도면 위를 가리지 않게)
+      if (lastToast && lastToast.isConnected) lastToast.remove();
+      if (notes.length) toast('사진을 깔았어요. ' + notes.join(' · '), { ms: 7000 });
     }
     function rotateBg() {
       const bg = bgOf(key);
@@ -2607,35 +2612,54 @@
         .finally(() => { bExport.disabled = false; });
     }
 
-    // ---- 방 치수 수정 ----
-    function openRoomEditor(rid) {
+    // ---- 방 고치기 · 그리기 · 지우기 ----
+    /** 다른 방과 겹치지 않는 이름: '방' → '방 2' … */
+    function uniqName(plan, base, exceptId) {
+      const b0 = String(base || '방').trim() || '방';
+      const used = (n) => plan.rooms.some((r) => r.id !== exceptId && norm(r.name) === norm(n));
+      if (!used(b0)) return b0;
+      for (let i = 2; i < 100; i++) if (!used(b0 + ' ' + i)) return b0 + ' ' + i;
+      return b0 + ' ' + (Date.now() % 1000);
+    }
+    /** 방 창 — rid: 고칠 방 (원래 방·그린 방) / rect: 방금 그린 네모 (새 방) */
+    function openRoomEditor(rid, rect) {
       const plan = getPlan(key);
-      const r = plan && plan.rooms.find((x) => x.id === rid);
-      if (!r) return;
+      if (!plan) return;
+      const isNew = !!rect;
+      const r = isNew ? null : plan.rooms.find((x) => x.id === rid);
+      if (!isNew && !r) { preview = null; drawOverlay(); return; }
+      const isAdded = !isNew && r.added;
       // 말이 되는 범위: 원래 도면 크기를 기준으로 (오타 하나로 도면 전체가 망가지지 않게)
       const os = validRooms(plan).map((x) => x.orig).filter((x) => x.w > 0 && x.h > 0);
-      const base = MV.plans[key] || {};
       const ob = { x0: Math.min(0, ...os.map((x) => x.x)), y0: Math.min(0, ...os.map((x) => x.y)),
-        x1: Math.max(num(base.width, 0), ...os.map((x) => x.x + x.w)), y1: Math.max(num(base.depth, 0), ...os.map((x) => x.y + x.h)) };
+        x1: Math.max(plan.width, plan.baseSize.width, ...os.map((x) => x.x + x.w)), y1: Math.max(plan.depth, plan.baseSize.depth, ...os.map((x) => x.y + x.h)) };
       const maxDim = Math.max(1200, Math.round(Math.max(ob.x1 - ob.x0, ob.y1 - ob.y0) * 1.5 / 10) * 10);
       const PAD = 500;
+      const start = isNew ? { name: uniqName(plan, '방'), kind: 'bedroom', x: rect.x, y: rect.y, w: rect.w, h: rect.h } : r;
       const f = {};
       const numIn = (v) => el('input', { class: 'input num', type: 'number', inputmode: 'decimal', min: '0', step: '1', value: String(Math.round(v * 10) / 10) });
-      f.name = el('input', { class: 'input', value: r.name, placeholder: '예: 안방' });
-      f.w = numIn(r.w); f.h = numIn(r.h); f.x = numIn(r.x); f.y = numIn(r.y);
-      f.w.max = f.h.max = String(maxDim); f.w.min = f.h.min = '30';
+      f.name = el('input', { class: 'input', value: start.name, placeholder: '예: 안방' });
+      const kinds = ROOM_KINDS.slice();
+      if (!kinds.some(([id]) => id === start.kind)) kinds.push([start.kind, '기타 (' + start.kind + ')']);
+      f.kind = el('select', { class: 'select' }, kinds.map(([id, label]) => el('option', { value: id, selected: id === start.kind }, label)));
+      f.w = numIn(start.w); f.h = numIn(start.h); f.x = numIn(start.x); f.y = numIn(start.y);
+      f.w.max = f.h.max = String(maxDim); f.w.min = f.h.min = String(MIN_ROOM);
+      // 새 방: 이름을 직접 안 고쳤으면 종류를 바꿀 때 이름도 따라감
+      let nameTouched = !isNew;
+      f.name.addEventListener('input', () => { nameTouched = true; });
       const prev = el('div', { class: 'fp-area-prev', 'aria-live': 'polite' });
-      const read = () => ({ name: f.name.value.trim(), w: parseFloat(f.w.value), h: parseFloat(f.h.value), x: parseFloat(f.x.value), y: parseFloat(f.y.value) });
+      const read = () => ({ name: f.name.value.trim(), kind: f.kind.value, w: parseFloat(f.w.value), h: parseFloat(f.h.value), x: parseFloat(f.x.value), y: parseFloat(f.y.value) });
+      const fallbackName = (v) => v.name || (isNew ? uniqName(plan, kindLabel(v.kind)) : r.orig.name);
       /** 막아야 할 오류 → [{input, msg}] */
       const errorsOf = (v) => {
         const out = [];
         // 같은 이름의 방이 둘이면 짐의 '위치' 이름이 어느 방인지 알 수 없어져서 막음 (이름을 안 바꾼 경우는 그대로 둠)
-        const nm = v.name || r.orig.name;
-        const clash = norm(nm) !== norm(r.name) ? nameClash(plan, rid, nm) : null;
+        const nm = fallbackName(v);
+        const clash = isNew ? nameClash(plan, null, nm) : norm(nm) !== norm(r.name) ? nameClash(plan, rid, nm) : null;
         if (clash) out.push([f.name, '「' + nm + '」' + jo(nm, '은', '는') + ' 이미 다른 방 이름이에요 — 다른 이름을 넣어 주세요 (예: ' + nm + ' 2)']);
-        if (!isFinite(v.w)) out.push([f.w, '가로를 넣어 주세요']); else if (v.w < 30 || v.w > maxDim) out.push([f.w, '가로 ' + Math.round(v.w) + 'cm — 30~' + maxDim + 'cm 사이로 넣어 주세요']);
-        if (!isFinite(v.h)) out.push([f.h, '세로를 넣어 주세요']); else if (v.h < 30 || v.h > maxDim) out.push([f.h, '세로 ' + Math.round(v.h) + 'cm — 30~' + maxDim + 'cm 사이로 넣어 주세요']);
-        const okW = v.w >= 30 && v.w <= maxDim, okH = v.h >= 30 && v.h <= maxDim;
+        if (!isFinite(v.w)) out.push([f.w, '가로를 넣어 주세요']); else if (v.w < MIN_ROOM || v.w > maxDim) out.push([f.w, '가로 ' + Math.round(v.w) + 'cm — ' + MIN_ROOM + '~' + maxDim + 'cm 사이로 넣어 주세요']);
+        if (!isFinite(v.h)) out.push([f.h, '세로를 넣어 주세요']); else if (v.h < MIN_ROOM || v.h > maxDim) out.push([f.h, '세로 ' + Math.round(v.h) + 'cm — ' + MIN_ROOM + '~' + maxDim + 'cm 사이로 넣어 주세요']);
+        const okW = v.w >= MIN_ROOM && v.w <= maxDim, okH = v.h >= MIN_ROOM && v.h <= maxDim;
         if (!isFinite(v.x)) out.push([f.x, 'X를 넣어 주세요']); else if (v.x < ob.x0 - PAD || (okW && v.x + v.w > ob.x1 + PAD)) out.push([f.x, 'X 위치가 도면에서 너무 멀어요 (' + Math.round(ob.x0 - PAD) + '~' + Math.round(ob.x1 + PAD) + 'cm 안)']);
         if (!isFinite(v.y)) out.push([f.y, 'Y를 넣어 주세요']); else if (v.y < ob.y0 - PAD || (okH && v.y + v.h > ob.y1 + PAD)) out.push([f.y, 'Y 위치가 도면에서 너무 멀어요 (' + Math.round(ob.y0 - PAD) + '~' + Math.round(ob.y1 + PAD) + 'cm 안)']);
         return out;
@@ -2647,42 +2671,68 @@
         prev.textContent = '';
         prev.className = 'fp-area-prev' + (errs.length ? ' is-bad' : '');
         if (errs.length) { put(prev, errs.map(([, msg]) => el('div', '⛔ ' + msg))); return; }
-        const a = (v.w * v.h) / 10000, a0 = area(r.orig);
-        put(prev, el('strong', Math.round(v.w) + '×' + Math.round(v.h) + 'cm = ' + fmtA(a)),
-          el('span', { class: 'muted' }, ' · 원래 도면 ' + Math.round(r.orig.w) + '×' + Math.round(r.orig.h) + ' (' + fmtA(a0) + ', ' + fmtD(r1(a) - r1(a0)) + ')'));
+        const a = (v.w * v.h) / 10000;
+        if (isNew || isAdded) put(prev, el('strong', Math.round(v.w) + '×' + Math.round(v.h) + 'cm = ' + fmtA(a)), el('span', { class: 'muted' }, ' · ' + kindLabel(v.kind) + (isNew ? ' · 새로 그린 방' : ' · 직접 그린 방')));
+        else {
+          const a0 = area(r.orig);
+          put(prev, el('strong', Math.round(v.w) + '×' + Math.round(v.h) + 'cm = ' + fmtA(a)),
+            el('span', { class: 'muted' }, ' · 원래 도면 ' + Math.round(r.orig.w) + '×' + Math.round(r.orig.h) + ' (' + fmtA(a0) + ', ' + fmtD(r1(a) - r1(a0)) + ')'));
+        }
         const me = { x: v.x, y: v.y, w: v.w, h: v.h };
-        const ov = validRooms(plan).filter((o) => o.id !== rid).map((o) => ({ o, i: inter(me, o) })).filter((z) => z.i && z.i.w > 2 && z.i.h > 2);
+        const ov = validRooms(plan).filter((o) => isNew || o.id !== rid).map((o) => ({ o, i: inter(me, o) })).filter((z) => z.i && z.i.w > 2 && z.i.h > 2);
         const warns = [];
-        if (a0 > 0 && (a / a0 > 2 || a / a0 < 0.5)) warns.push('원래 도면보다 ' + (a > a0 ? '2배 넘게 커졌어요' : '절반 아래로 작아졌어요') + ' — 숫자를 다시 확인하세요');
-        ov.slice(0, 3).forEach(({ o, i }) => warns.push('옆 공간 「' + o.name + '」' + jo(o.name, '과', '와') + ' ' + Math.round(i.w) + '×' + Math.round(i.h) + 'cm 겹쳐요 — 실측이 맞다면 그 방도 고쳐 주세요'));
+        if (!isNew && !isAdded) {
+          const a0 = area(r.orig);
+          if (a0 > 0 && (a / a0 > 2 || a / a0 < 0.5)) warns.push('원래 도면보다 ' + (a > a0 ? '2배 넘게 커졌어요' : '절반 아래로 작아졌어요') + ' — 숫자를 다시 확인하세요');
+        }
+        ov.slice(0, 3).forEach(({ o, i }) => warns.push('옆 공간 「' + o.name + '」' + jo(o.name, '과', '와') + ' ' + Math.round(i.w) + '×' + Math.round(i.h) + 'cm 겹쳐요 — ' + (isNew ? '겹친 방을 지우거나 줄여 주세요' : '실측이 맞다면 그 방도 고쳐 주세요')));
         if (warns.length) put(prev, el('div', { class: 'fp-prev-warn' }, warns.map((w) => el('div', '⚠️ ' + w))));
       };
-      Object.values(f).forEach((i) => i.addEventListener('input', upd));
+      f.kind.addEventListener('change', () => { if (!nameTouched) f.name.value = uniqName(plan, kindLabel(f.kind.value)); upd(); });
+      [f.name, f.w, f.h, f.x, f.y].forEach((i) => i.addEventListener('input', upd));
       upd();
       const field = (label, input, hint2) => el('label', { class: 'field' }, el('span', label), input, hint2 ? el('small', { class: 'hint' }, hint2) : null);
       const save = () => {
         const v = read();
         const errs = errorsOf(v);
         if (errs.length) { upd(); try { errs[0][0].focus(); } catch (e) { /* 무시 */ } return false; }
-        const newName = v.name || r.orig.name;
-        const nv = { x: r1(v.x), y: r1(v.y), w: r1(v.w), h: r1(v.h), name: newName };
-        const same = (o) => ['x', 'y', 'w', 'h'].every((k) => Math.abs(nv[k] - r1(o[k])) < 0.05) && nv.name === o.name;
+        const newName = fallbackName(v);
+        const nv = { x: r1(v.x), y: r1(v.y), w: r1(v.w), h: r1(v.h), name: newName, kind: v.kind };
+        if (isNew) {
+          const entry = Object.assign({ id: MV.uid('rm') }, nv);
+          MV.store.update((st) => { editsOf(st)[key].added.push(entry); },
+            { log: '➕ ' + PLAN_LABEL[key] + ' 방 그리기: ' + newName + ' ' + Math.round(v.w) + '×' + Math.round(v.h) + 'cm' });
+          toast('「' + shortName(newName, 12) + '」' + jo(newName, '을', '를') + ' 그렸어요', { action: { label: '되돌리기', onClick: () => {
+            MV.store.update((st) => { const E = editsOf(st)[key]; E.added = E.added.filter((a) => !a || a.id !== entry.id); }, { log: '↩ 방 그리기 되돌림: ' + newName });
+          } } });
+          return true;
+        }
+        const same = (o) => ['x', 'y', 'w', 'h'].every((k2) => Math.abs(nv[k2] - r1(o[k2])) < 0.05) && nv.name === o.name && nv.kind === o.kind;
         if (same(r)) return true;                     // 바뀐 게 없으면 저장하지 않음 (실측 반영 표시도 안 생김)
-        const backToOrig = same(r.orig);             // 원래 값으로 되돌린 경우는 수정 기록을 지움
         const before = getPlan(key);
         let moved = 0;
-        MV.store.update((st) => {
-          if (backToOrig) delete editsOf(st)[key].rooms[rid];
-          else editsOf(st)[key].rooms[rid] = nv;
-          moved = remapRoomRefs(st, key, before, [{ rid, from: r.name, to: newName }]);
-        }, { log: '📏 ' + PLAN_LABEL[key] + (backToOrig ? ' 치수 원래대로: ' + newName : ' 실측 반영: ' + newName + ' ' + Math.round(v.w) + '×' + Math.round(v.h) + 'cm') });
+        if (isAdded) {
+          MV.store.update((st) => {
+            const a = editsOf(st)[key].added.find((z) => z && String(z.id) === String(r.srcId));
+            if (a) Object.assign(a, nv);
+            moved = remapRoomRefs(st, key, before, [{ rid, from: r.name, to: newName }]);
+          }, { log: '✏️ ' + PLAN_LABEL[key] + ' 그린 방 수정: ' + newName + ' ' + Math.round(v.w) + '×' + Math.round(v.h) + 'cm' });
+        } else {
+          const backToOrig = same(r.orig);             // 원래 값으로 되돌린 경우는 수정 기록을 지움
+          MV.store.update((st) => {
+            if (backToOrig) delete editsOf(st)[key].rooms[rid];
+            else editsOf(st)[key].rooms[rid] = nv;
+            moved = remapRoomRefs(st, key, before, [{ rid, from: r.name, to: newName }]);
+          }, { log: '📏 ' + PLAN_LABEL[key] + (backToOrig ? ' 치수 원래대로: ' + newName : ' 실측 반영: ' + newName + ' ' + Math.round(v.w) + '×' + Math.round(v.h) + 'cm') });
+        }
         if (moved) toast('짐 ' + moved + '개의 “' + (key === 'new' ? '새 집 위치' : '지금 집 위치') + '”도 「' + newName + '」' + joRo(newName) + ' 바꿨어요');
         return true;
       };
       let m = null;
-      Object.values(f).forEach((i) => i.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); if (save() && m) m.close(); } }));
+      [f.name, f.w, f.h, f.x, f.y].forEach((i) => i.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); if (save() && m) m.close(); } }));
       const actions = [];
-      if (r.edited) actions.push({ label: '원래대로', kind: 'danger', onClick: () => {
+      if (!isNew) actions.push({ label: '🗑 방 삭제', kind: 'danger', onClick: (close) => { deleteRoom(r).then((ok) => { if (ok) close(); }); return false; } });
+      if (!isNew && !isAdded && r.edited) actions.push({ label: '원래대로', kind: 'danger', onClick: () => {
         const before = getPlan(key);
         const clash = r.name !== r.orig.name ? nameClash(before, rid, r.orig.name) : null;
         if (clash) {
@@ -2697,25 +2747,183 @@
         return true;
       } });
       actions.push({ label: '취소', kind: 'ghost' });
+      actions.push({ label: isNew ? '추가' : '저장', kind: 'primary', onClick: () => save() });
+      m = MV.ui.modal({
+        title: isNew ? '＋ 새 방' : (isAdded ? '✏️ ' : '📏 ') + r.name + ' 고치기',
+        body: el('div', { class: 'stack' },
+          el('p', { class: 'small muted mb-0' }, isNew
+            ? '그린 네모의 이름과 종류를 정하세요. 숫자(cm)로 더 정확히 고칠 수 있어요. X·Y는 도면 왼쪽 위에서부터의 위치예요.'
+            : '벽 안쪽 기준 실측값(cm)을 넣으세요. X·Y는 도면 왼쪽 위에서부터의 위치예요. 옆 방은 자동으로 바뀌지 않아요. 이름을 바꾸면 이 방에 둔 짐의 위치 이름도 함께 바뀌어요.'),
+          el('div', { class: 'form-grid' }, field('방 이름', f.name), field('종류', f.kind, '다용도실이면 세탁기 점검, 발코니면 면적 따로')),
+          el('div', { class: 'form-grid' }, field('가로 W (cm)', f.w), field('세로 H (cm)', f.h), field('X (cm)', f.x), field('Y (cm)', f.y)),
+          prev),
+        actions,
+        onClose: () => { if (isNew) { preview = null; drawOverlay(); } },
+      });
+    }
+    /** 방 지우기 (원래 방은 '지운 방' 목록에, 그린 방은 목록에서 뺌) → Promise<지웠는지> */
+    function deleteRoom(r) {
+      const placedIn = cur ? cur.items.filter((o) => hasPt(r, o.r.x + o.r.w / 2, o.r.y + o.r.h / 2)).length : 0;
+      return MV.ui.confirm('「' + r.name + '」' + jo(r.name, '을', '를') + ' 도면에서 지울까요?' + (r.added ? '' : ' 이 방에만 붙은 문·창·고정물도 함께 숨겨져요.')
+        + (placedIn ? ' 이 방에 놓인 짐 ' + placedIn + '개는 그 자리에 그대로 남아요.' : ''), { danger: true, okLabel: '방 지우기', title: '방 삭제' }).then((ok) => {
+        if (!ok) return false;
+        let snap = null;
+        MV.store.update((st) => {
+          const E = editsOf(st)[key];
+          if (r.added) {
+            const i = E.added.findIndex((a) => a && String(a.id) === String(r.srcId));
+            if (i >= 0) { snap = { i, entry: MV.clone(E.added[i]) }; E.added.splice(i, 1); }
+          } else if (!E.deleted.map(String).includes(r.id)) E.deleted.push(r.id);
+        }, { log: '🗑 ' + PLAN_LABEL[key] + ' 방 삭제: ' + r.name });
+        toast('「' + shortName(r.name, 12) + '」' + jo(r.name, '을', '를') + ' 지웠어요', { action: { label: '되돌리기', onClick: () => restoreRoom(r, snap) } });
+        return true;
+      });
+    }
+    function restoreRoom(r, snap) {
+      MV.store.update((st) => {
+        const E = editsOf(st)[key];
+        if (r.added) {
+          if (snap && !E.added.some((a) => a && String(a.id) === String(snap.entry.id))) E.added.splice(Math.min(snap.i, E.added.length), 0, snap.entry);
+        } else E.deleted = E.deleted.filter((id) => String(id) !== r.id);
+      }, { log: '↩ ' + PLAN_LABEL[key] + ' 방 되살림: ' + r.name });
+      const plan = getPlan(key);
+      const clash = plan ? nameClash(plan, r.id, r.name) : null;
+      setTimeout(() => toast(clash ? '「' + shortName(r.name, 12) + '」' + jo(r.name, '과', '와') + ' 이름이 같은 방이 있어요 — ✏️ 방 고치기로 한쪽 이름을 바꿔 주세요'
+        : '「' + shortName(r.name, 12) + '」' + jo(r.name, '을', '를') + ' 되살렸어요', { ms: clash ? 5500 : undefined }), 30);
+    }
+
+    // ---- 전체 크기 ----
+    function openSizeEditor() {
+      const plan = getPlan(key);
+      if (!plan) return;
+      const rs = validRooms(plan);
+      const ext = rs.length ? { w: Math.max(...rs.map((r) => r.x + r.w)), h: Math.max(...rs.map((r) => r.y + r.h)) } : { w: plan.width, h: plan.depth };
+      const up5 = (v) => Math.ceil(v / SNAP - 0.001) * SNAP;
+      const numIn = (v) => el('input', { class: 'input num', type: 'number', inputmode: 'decimal', min: '100', max: '3000', step: '1', value: String(Math.round(v * 10) / 10) });
+      const fW = numIn(plan.width), fD = numIn(plan.depth);
+      const prev = el('div', { class: 'fp-area-prev', 'aria-live': 'polite' });
+      const read = () => ({ w: parseFloat(fW.value), d: parseFloat(fD.value) });
+      const errorsOf = (v) => {
+        const out = [];
+        if (!isFinite(v.w) || v.w < 100 || v.w > 3000) out.push([fW, '가로는 100~3000cm 사이로 넣어 주세요']);
+        if (!isFinite(v.d) || v.d < 100 || v.d > 3000) out.push([fD, '세로(깊이)는 100~3000cm 사이로 넣어 주세요']);
+        return out;
+      };
+      const upd = () => {
+        const v = read();
+        const errs = errorsOf(v);
+        [fW, fD].forEach((i) => { if (errs.some(([j]) => j === i)) i.setAttribute('aria-invalid', 'true'); else i.removeAttribute('aria-invalid'); });
+        prev.textContent = '';
+        prev.className = 'fp-area-prev' + (errs.length ? ' is-bad' : '');
+        if (errs.length) { put(prev, errs.map(([, msg]) => el('div', '⛔ ' + msg))); return; }
+        put(prev, el('strong', Math.round(v.w) + '×' + Math.round(v.d) + 'cm'), el('span', { class: 'muted' }, ' · 원래 도면 ' + Math.round(plan.baseSize.width) + '×' + Math.round(plan.baseSize.depth) + 'cm'));
+        const outside = rs.filter((r) => r.x + r.w > v.w + 1 || r.y + r.h > v.d + 1 || r.x < -1 || r.y < -1);
+        if (outside.length) put(prev, el('div', { class: 'fp-prev-warn' }, el('div', '⚠️ 방 ' + outside.length + '개가 이 크기 밖으로 나가요 (' + outside.slice(0, 4).map((r) => r.name).join(', ') + (outside.length > 4 ? ' …' : '') + ') — 그 방도 고치거나 지워 주세요')));
+      };
+      [fW, fD].forEach((i) => i.addEventListener('input', upd));
+      upd();
+      const save = () => {
+        const v = read();
+        const errs = errorsOf(v);
+        if (errs.length) { upd(); try { errs[0][0].focus(); } catch (e) { /* 무시 */ } return false; }
+        const w = r1(v.w), d = r1(v.d);
+        const back = Math.abs(w - plan.baseSize.width) < 0.05 && Math.abs(d - plan.baseSize.depth) < 0.05;
+        if (Math.abs(w - plan.width) < 0.05 && Math.abs(d - plan.depth) < 0.05) return true;
+        MV.store.update((st) => { const E = editsOf(st)[key]; if (back) delete E.size; else E.size = { width: w, depth: d }; },
+          { log: '📐 ' + PLAN_LABEL[key] + ' 전체 크기 ' + (back ? '원래대로' : Math.round(w) + '×' + Math.round(d) + 'cm') });
+        toast('전체 크기를 ' + Math.round(w) + '×' + Math.round(d) + 'cm로 맞췄어요');
+        return true;
+      };
+      let m = null;
+      [fW, fD].forEach((i) => i.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); if (save() && m) m.close(); } }));
+      const field = (label, input, hint2) => el('label', { class: 'field' }, el('span', label), input, hint2 ? el('small', { class: 'hint' }, hint2) : null);
+      const actions = [];
+      if (plan.sizeEdited) actions.push({ label: '원래 크기', kind: 'danger', onClick: () => {
+        MV.store.update((st) => { delete editsOf(st)[key].size; }, { log: '📐 ' + PLAN_LABEL[key] + ' 전체 크기 원래대로' });
+        toast('전체 크기를 원래 도면대로 되돌렸어요');
+      } });
+      actions.push({ label: '취소', kind: 'ghost' });
       actions.push({ label: '저장', kind: 'primary', onClick: () => save() });
       m = MV.ui.modal({
-        title: '📏 ' + r.name + ' 치수 수정',
+        title: '📐 ' + PLAN_LABEL[key] + ' 전체 크기',
         body: el('div', { class: 'stack' },
-          el('p', { class: 'small muted mb-0' }, '벽 안쪽 기준 실측값(cm)을 넣으세요. X·Y는 도면 왼쪽 위에서부터의 위치예요. 옆 방은 자동으로 바뀌지 않아요. 이름을 바꾸면 이 방에 둔 짐의 위치 이름도 함께 바뀌어요.'),
-          field('방 이름', f.name),
-          el('div', { class: 'form-grid' }, field('가로 W (cm)', f.w), field('세로 H (cm)', f.h), field('X (cm)', f.x), field('Y (cm)', f.y)),
+          el('p', { class: 'small muted mb-0' }, '집 바깥벽 기준 전체 가로·세로(cm)예요. 외곽선·치수선·화면 맞춤이 이 크기를 따라가요. 방 크기는 따로 고쳐야 해요.'),
+          el('div', { class: 'form-grid' }, field('전체 가로 (cm)', fW), field('전체 세로·깊이 (cm)', fD)),
+          el('div', { class: 'row' }, el('button', { type: 'button', class: 'btn btn-sm fp-b', onclick: () => { fW.value = String(up5(ext.w)); fD.value = String(up5(ext.h)); upd(); } },
+            '방에 맞추기 (' + up5(ext.w) + '×' + up5(ext.h) + ')')),
           prev),
         actions,
       });
     }
+
+    // ---- 문 추가 · 삭제 ----
+    function addDoorAt(P) {
+      const plan = cur.plan;
+      const thr = Math.max(25, 30 / cur.s);
+      let best = null;
+      validRooms(plan).forEach((r) => {
+        const inside = hasPt(r, P.x, P.y);
+        [['T', Math.abs(P.y - r.y)], ['B', Math.abs(P.y - r.y - r.h)], ['L', Math.abs(P.x - r.x)], ['R', Math.abs(P.x - r.x - r.w)]].forEach(([side, dist]) => {
+          const horiz = side === 'T' || side === 'B';
+          const along = horiz ? P.x >= r.x - 5 && P.x <= r.x + r.w + 5 : P.y >= r.y - 5 && P.y <= r.y + r.h + 5;
+          if (!along || dist > thr) return;
+          const score = dist + (inside ? 0 : thr);   // 누른 곳이 들어 있는 방을 먼저
+          if (!best || score < best.score) best = { r, side, score };
+        });
+      });
+      if (!best) { toast('문을 달 방의 벽(가장자리) 가까이를 눌러 주세요'); return; }
+      const { r, side } = best;
+      const horiz = side === 'T' || side === 'B';
+      const len = horiz ? r.w : r.h;
+      if (len < 50) { toast('이 벽은 너무 짧아 문을 달 수 없어요'); return; }
+      const w = Math.max(40, Math.min(NEW_DOOR_W, Math.floor((len - 10) / SNAP) * SNAP));
+      const lo = (horiz ? r.x : r.y) + 5, hi = Math.max(lo, (horiz ? r.x + r.w : r.y + r.h) - 5 - w);
+      let at = Math.round(((horiz ? P.x : P.y) - w / 2) / SNAP) * SNAP;
+      at = r1(MV.clamp(at, lo, hi));
+      const d = { id: MV.uid('dr'), x: horiz ? at : r1(side === 'L' ? r.x : r.x + r.w), y: horiz ? r1(side === 'T' ? r.y : r.y + r.h) : at, width: w,
+        orientation: horiz ? 'h' : 'v', swing: side === 'T' ? 'down' : side === 'B' ? 'up' : side === 'L' ? 'right' : 'left', hinge: 'start', room: r.id };
+      const g = doorGeom(d);
+      const clash = plan.doors.some((o) => o.orientation === d.orientation && hit(doorGeom(o).gap, g.gap, 2));
+      if (clash) { toast('그 자리엔 이미 문이 있어요 — 조금 옆을 눌러 주세요'); return; }
+      MV.store.update((st) => { editsOf(st)[key].doorsAdded.push(d); }, { log: '🚪 ' + PLAN_LABEL[key] + ' 문 추가: ' + r.name + ' (' + w + 'cm)' });
+      toast(shortName(r.name, 12) + '에 문(' + w + 'cm)을 달았어요', { action: { label: '되돌리기', onClick: () => {
+        MV.store.update((st) => { const E = editsOf(st)[key]; E.doorsAdded = E.doorsAdded.filter((z) => !z || z.id !== d.id); }, { log: '↩ 문 추가 되돌림' });
+      } } });
+    }
+    function askDeleteDoor(dk) {
+      const d = cur && cur.plan.doors.find((x) => x._key === dk);
+      if (!d) return;
+      const label = d._added ? '직접 추가한 문' : (d.note ? String(d.note).split(/[.(]/)[0].trim() : '') || '문';
+      MV.ui.confirm('「' + label + '」' + jo(label, '을', '를') + ' 도면에서 지울까요? 문이 없어진 자리는 벽으로 그려져요.', { danger: true, okLabel: '문 지우기', title: '문 삭제' }).then((ok) => {
+        if (!ok) return;
+        let snap = null;
+        const k0 = doorKey(d);
+        MV.store.update((st) => {
+          const E = editsOf(st)[key];
+          if (d._added) {
+            const i = E.doorsAdded.findIndex((z) => z && String(z.id) === d.id);
+            if (i >= 0) { snap = { i, entry: MV.clone(E.doorsAdded[i]) }; E.doorsAdded.splice(i, 1); }
+          } else if (!E.doorsDeleted.includes(k0)) E.doorsDeleted.push(k0);
+        }, { log: '🚪 ' + PLAN_LABEL[key] + ' 문 삭제: ' + label });
+        toast('문을 지웠어요', { action: { label: '되돌리기', onClick: () => {
+          MV.store.update((st) => {
+            const E = editsOf(st)[key];
+            if (d._added) { if (snap && !E.doorsAdded.some((z) => z && z.id === snap.entry.id)) E.doorsAdded.splice(Math.min(snap.i, E.doorsAdded.length), 0, snap.entry); }
+            else E.doorsDeleted = E.doorsDeleted.filter((z) => z !== k0);
+          }, { log: '↩ 문 삭제 되돌림' });
+        } } });
+      });
+    }
     function resetAllRooms() {
-      MV.ui.confirm(PLAN_LABEL[key] + ' 도면의 실측 수정을 모두 지우고 원래 도면으로 되돌릴까요?', { danger: true, okLabel: '원래대로' }).then((ok) => {
+      MV.ui.confirm(PLAN_LABEL[key] + ' 도면에서 고친 것(방 치수·이름·종류, 그린 방, 지운 방, 전체 크기, 문 추가·삭제)을 모두 지우고 원래 도면으로 되돌릴까요? 평면도 사진은 그대로 둬요.', { danger: true, okLabel: '원래대로', title: '도면 전체 원래대로' }).then((ok) => {
         if (!ok) return;
         const plan = getPlan(key);
         MV.store.update((st) => {
-          editsOf(st)[key].rooms = {};
+          const E = editsOf(st)[key];
+          E.rooms = {}; E.added = []; E.deleted = []; E.doorsAdded = []; E.doorsDeleted = [];
+          delete E.size;
           // 모든 이름을 '바꾸기 전' 기준으로 한꺼번에 되돌림 (작은방1→서재, 서재→옷방 같은 연쇄도 안전하게)
-          if (plan) remapRoomRefs(st, key, plan, plan.rooms.filter((x) => x.edited && x.name !== x.orig.name).map((x) => ({ rid: x.id, from: x.name, to: x.orig.name })));
+          if (plan) remapRoomRefs(st, key, plan, plan.rooms.filter((x) => x.edited && !x.added && x.name !== x.orig.name).map((x) => ({ rid: x.id, from: x.name, to: x.orig.name })));
         }, { log: '📏 ' + PLAN_LABEL[key] + ' 도면 전체 원래대로' });
         toast('원래 도면으로 되돌렸어요');
       });
@@ -2803,7 +3011,7 @@
       lastUp = Date.now();
     }
     stage.addEventListener('pointerdown', (e) => {
-      if (editMode || !cur || !svgEl || drag || pinch) return;
+      if (editMode || wiz || gest || !cur || !svgEl || drag || pinch) return;
       if (e.pointerType === 'mouse' && e.button !== 0) return;
       const g = e.target.closest && e.target.closest('.fp-item');
       if (!g || !svgEl.contains(g)) return;
@@ -2846,13 +3054,134 @@
     stage.addEventListener('pointerup', endDrag);
     stage.addEventListener('pointercancel', endDrag);
     stage.addEventListener('touchstart', (e) => {
-      if (!editMode && e.touches.length === 1 && e.target.closest && e.target.closest('.fp-item')) e.preventDefault();
+      if (!editMode && !wiz && e.touches.length === 1 && e.target.closest && e.target.closest('.fp-item')) e.preventDefault();
     }, { passive: false });
+
+    // ---- 사진 끌기 · 축척 점 옮기기 · 방 그리기 (마우스·터치·펜) ----
+    /** 방 그리기 점: 5cm 단위, 스냅이 켜져 있으면 가까운 방 벽·외곽에 붙음 */
+    function snapPt(P) {
+      let x = Math.round(P.x / SNAP) * SNAP, y = Math.round(P.y / SNAP) * SNAP;
+      if (prefs().snap && cur) {
+        const thr = Math.max(4, 10 / cur.s);
+        const xs = [0, cur.plan.width], ys = [0, cur.plan.depth];
+        validRooms(cur.plan).forEach((r) => { xs.push(r.x, r.x + r.w); ys.push(r.y, r.y + r.h); });
+        let bd = thr;
+        xs.forEach((v) => { const d = Math.abs(P.x - v); if (d < bd) { bd = d; x = v; } });
+        bd = thr;
+        ys.forEach((v) => { const d = Math.abs(P.y - v); if (d < bd) { bd = d; y = v; } });
+      }
+      return { x: r1(x), y: r1(y) };
+    }
+    const rectFrom = (a, b) => ({ x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: r1(Math.abs(b.x - a.x)), h: r1(Math.abs(b.y - a.y)) });
+    function cancelGest() {
+      if (!gest) return;
+      const g = gest;
+      gest = null;
+      try { stage.releasePointerCapture(g.id); } catch (err) { /* 무시 */ }
+      lastUp = Date.now();
+      if (g.type === 'bgmove') { const im = svgEl && svgEl.querySelector('.fp-bg image'); if (im) im.setAttribute('transform', bgTransform(g.bg, g.x0, g.y0)); }
+      if (g.type === 'pt' && wiz && g.p0) wiz.pts[g.i] = g.p0;
+      drawOverlay();
+    }
+    stage.addEventListener('pointerdown', (e) => {
+      if (!cur || !svgEl || drag || pinch || gest) return;
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      const base = { id: e.pointerId, sx: e.clientX, sy: e.clientY, moved: false, ptype: e.pointerType };
+      if (wiz) {
+        if (wiz.step === 'move') {
+          const bg = bgOf(key);
+          if (!bg) return;
+          e.preventDefault();
+          gest = Object.assign(base, { type: 'bgmove', bg, x0: bg.x, y0: bg.y, x: bg.x, y: bg.y });
+        } else if (wiz.step === 'pts') {
+          const t = e.target.closest && e.target.closest('.fp-wizpt');
+          if (!t) return;
+          const i = +t.getAttribute('data-i');
+          if (!wiz.pts[i]) return;
+          e.preventDefault();
+          gest = Object.assign(base, { type: 'pt', i, p0: Object.assign({}, wiz.pts[i]) });
+        } else return;
+      } else if (editMode && tool === 'draw') {
+        e.preventDefault();
+        const a = snapPt(toPlan(e.clientX, e.clientY));
+        preview = null;
+        gest = Object.assign(base, { type: 'draw', a, rect: null });
+      } else return;
+      try { stage.setPointerCapture(e.pointerId); } catch (err) { /* 무시 */ }
+    });
+    stage.addEventListener('pointermove', (e) => {
+      if (!gest || e.pointerId !== gest.id) return;
+      if (!gest.moved) {
+        if (Math.hypot(e.clientX - gest.sx, e.clientY - gest.sy) < (gest.ptype === 'mouse' ? 3 : 6)) return;
+        gest.moved = true;
+      }
+      e.preventDefault();
+      if (gest.type === 'bgmove') {
+        gest.x = r1(gest.x0 + (e.clientX - gest.sx) / cur.s);
+        gest.y = r1(gest.y0 + (e.clientY - gest.sy) / cur.s);
+        const im = svgEl && svgEl.querySelector('.fp-bg image');
+        if (im) im.setAttribute('transform', bgTransform(gest.bg, gest.x, gest.y));
+      } else if (gest.type === 'pt') {
+        wiz.pts[gest.i] = toPlan(e.clientX, e.clientY);
+        drawOverlay();
+        if (wiz.distEl) wiz.distEl.textContent = Math.round(wizDist()) + 'cm';
+      } else if (gest.type === 'draw') {
+        gest.rect = rectFrom(gest.a, snapPt(toPlan(e.clientX, e.clientY)));
+        drawOverlay();
+      }
+    });
+    const endGest = (e) => {
+      if (!gest || e.pointerId !== gest.id) return;
+      if (e.type === 'pointercancel') { cancelGest(); if (pending) refresh(); return; }
+      const g = gest;
+      gest = null;
+      try { stage.releasePointerCapture(e.pointerId); } catch (err) { /* 무시 */ }
+      lastUp = Date.now();
+      if (g.type === 'bgmove') {
+        if (g.moved && (g.x !== g.x0 || g.y !== g.y0)) setBg({ x: g.x, y: g.y });
+        else if (pending) refresh();
+      } else if (g.type === 'pt') {
+        if (pending) refresh();
+      } else if (g.type === 'draw') {
+        const rc = g.rect;
+        if (!g.moved || !rc || rc.w < MIN_ROOM || rc.h < MIN_ROOM) {
+          preview = null;
+          drawOverlay();
+          if (pending) refresh();
+          toast(g.moved ? '너무 작아요 — 가로·세로 ' + MIN_ROOM + 'cm 넘게 끌어 주세요' : '도면 위를 끌어서 네모를 그려 주세요');
+          return;
+        }
+        preview = rc;
+        drawOverlay();
+        if (pending) refresh();
+        openRoomEditor(null, rc);
+      }
+    };
+    stage.addEventListener('pointerup', endGest);
+    stage.addEventListener('pointercancel', endGest);
+
     stage.addEventListener('click', (e) => {
       if (Date.now() - lastUp < 350) return;
       // 선택 도구 단추는 누르자마자 다시 그려져 문서에서 떨어져 나가므로 경로로 판단
       if (!e.target.isConnected || e.composedPath().includes(selBar)) return;
+      if (wiz) {
+        if (!cur) return;
+        const P = toPlan(e.clientX, e.clientY);
+        if (wiz.step === 'pts') {
+          if (wiz.pts.length >= 2) wiz.pts = [];
+          wiz.pts.push(P);
+          drawOverlay(); drawWizBar();
+        } else if (wiz.step === 'origin') setOrigin(P);
+        return;
+      }
       if (editMode) {
+        if (tool === 'doorAdd') { addDoorAt(toPlan(e.clientX, e.clientY)); return; }
+        if (tool === 'doorDel') {
+          const dh = e.target.closest && e.target.closest('[data-door]');
+          if (dh) askDeleteDoor(dh.getAttribute('data-door')); else toast('지울 문(빨간 점선 칸)을 눌러 주세요');
+          return;
+        }
+        if (tool === 'draw') return;
         const rr = e.target.closest && e.target.closest('[data-rid]');
         if (rr) openRoomEditor(rr.getAttribute('data-rid'));
         return;
@@ -2897,6 +3226,7 @@
       if (e.touches.length !== 2 || !cur || !svgEl || pinch) return;
       if (e.cancelable) e.preventDefault();
       if (drag) cancelDrag();
+      if (gest) cancelGest();
       const m = tMid(e.touches);
       const r = stage.getBoundingClientRect();
       pinch = { d0: Math.max(12, tDist(e.touches)), z0: curZoom(), at: m, pt: toPlan(m.x, m.y), ratio: 1 };
@@ -2923,15 +3253,29 @@
       const inSvg = ae && svgEl && svgEl.contains(ae);
       if (inSvg && (e.key === 'Enter' || e.key === ' ')) {
         const rid = editMode && ae.getAttribute('data-rid');
+        const dk = editMode && ae.getAttribute('data-door');
         const pid = !editMode && ae.getAttribute('data-pid');
+        if (dk) { e.preventDefault(); askDeleteDoor(dk); return; }
         if (rid) { e.preventDefault(); openRoomEditor(rid); return; }
         if (pid) { e.preventDefault(); sel = pid; refresh(); return; }
       }
-      if (!sel || editMode) return;
       // 단축키는 도면(또는 선택한 짐)에 초점이 있거나, 초점 없이 마우스가 도면 위에 있을 때만.
       // 다른 곳을 보고 있을 때 방향키는 평소처럼 화면을 굴리고, Backspace 로 짐이 지워지지 않게.
-      const inStage = !!ae && (planCard.contains(ae) || tb.contains(ae));
+      const inStage = !!ae && ((planCard.contains(ae) && !bgBar.contains(ae)) || tb.contains(ae));
       const bodyish = !ae || ae === document.body || ae === document.documentElement;
+      if (wiz) {
+        if (gest) return;
+        if (e.key === 'Escape' && (inStage || bodyish)) { e.preventDefault(); cancelWiz(); return; }
+        const AR = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+        if (wiz.step === 'move' && AR[e.key] && (inStage || bodyish)) {
+          const k3 = e.shiftKey ? 10 : 1;
+          e.preventDefault();
+          nudgeBg(AR[e.key][0] * k3, AR[e.key][1] * k3);
+        }
+        return;
+      }
+      if (editMode && tool !== 'room' && e.key === 'Escape' && (inStage || bodyish)) { e.preventDefault(); if (gest) cancelGest(); setTool('room'); return; }
+      if (!sel || editMode) return;
       if (e.key === 'Escape') {
         if (inStage || bodyish) { sel = null; refresh(); e.preventDefault(); }
         return;

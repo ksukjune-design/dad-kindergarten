@@ -14,10 +14,14 @@
            inputs: { 이사 조건 },
            quotes: [{ id, company, amount, vatIncluded, tons, crew, ladder, aircon, arrange, waste,
                       deposit, date, note, licenseChecked, insuranceChecked, visitDone }],
-           calib:  { factor, at, median, n, base }, // 방문견적 중앙값 보정 (factor 1 = 보정 없음)
+           calib:  { factor, at, median, n, base, sig }, // 방문견적 중앙값 보정 (factor 1 = 보정 없음, sig = 보정에 쓴 견적 서명)
            lgChecks: { schedule, landlord, brand } }
    계산  MV.calc.moveEstimate(state) → { tons, crew, volume, low, typical, high,
-           lines:[{key,label,low,typical,high,detail}], lgCost:{low,typical,high,rows}|null, notes:[], ... }
+           lines:[{key,label,low,typical,high,detail}], lgCost:{low,typical,high,rows,vatIncluded:true}|null, notes:[],
+           vatIncl,                       // low/typical/high 가 부가세 포함인지 (‘부가세 더하기’, 기본 꺼짐 = 리서치 시세 그대로 부가세 별도)
+           pay:{low,typical,high},        // 이삿짐센터 ‘실제로 낼 돈’ (언제나 부가세 포함)
+           totalPay:{low,typical,high},   // pay + LG 요금(소비자가, 부가세 포함) — 이삿짐센터와 LG를 더할 땐 이 값
+           ... }
          순수 함수 — state.inventory + state.estimate 만 읽고, estimate 가 없으면 기본값으로 계산.
 
    계수 기본값·근거·신뢰도: 리서치 검증본 (movers_verified.json · appliances_verified.json, 2026-10-06).
@@ -1047,7 +1051,8 @@
 .es-qcmp-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); }
 .es-qcmp-card .es-qc-amt { font-weight: 900; font-variant-numeric: tabular-nums; text-align: right; }
 .es-qcmp-card .es-qc-sub { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px; font-size: .78rem; color: var(--ink-3); }
-.es-ask ol { margin: 0; padding-left: 1.35em; }
+.es-ask ol { margin: 10px 0 0; padding-left: 1.35em; }
+.es-ask .es-ask-links { margin: 0 0 10px; }
 .es-ask li { font-size: .86rem; line-height: 1.5; margin-bottom: 6px; }
 .es-ask-card { position: sticky; top: calc(var(--topbar-h) + 12px); max-height: calc(100vh - var(--topbar-h) - 24px); overflow: auto; }
 @media (max-width: 1100px) { .es-ask-card { position: static; max-height: none; } }
@@ -1078,6 +1083,9 @@
 .es-lgi-cost b { display: block; font-size: 1.02rem; font-variant-numeric: tabular-nums; }
 .es-lgi-cost small { display: block; color: var(--ink-3); font-size: .74rem; line-height: 1.4; }
 .es-lgi-does { grid-column: 2 / -1; font-size: .78rem; color: var(--ink-2); margin-top: 4px; }
+.es-lgi-does.es-lgi-bad { color: var(--bad); font-weight: 650; }
+.es-reco .es-reco-fix { margin: 6px 0 12px; }
+.es-lgi-name .es-lgi-nb { font-weight: 800; }
 @media (max-width: 560px) {
   .es-lgi { grid-template-columns: 30px minmax(0, 1fr); }
   .es-lgi .es-seg { grid-column: 1 / -1; }
@@ -1233,6 +1241,16 @@
     ptr.sel = s || null;
   };
   const onPtrUp = () => releasePtr(350);
+  /* 한글 조합 중인지 기억 — 조합이 시작되기 전 글자를 남겨 두었다가, 다른 탭 동기화로 화면이 다시 그려지면 그 글자로 되살려요.
+     조합 중인 글자까지 옮기면 IME 가 그 글자를 새 칸에 한 번 더 넣어 ‘냉장고고’처럼 겹쳐요 */
+  const ime = { el: null, value: '', s: null, e: null };
+  const onCompStart = (e) => {
+    const t = e.target;
+    if (!t || !('value' in t)) return;
+    ime.el = t; ime.value = t.value;
+    try { ime.s = t.selectionStart; ime.e = t.selectionEnd; } catch (er) { ime.s = ime.e = null; }
+  };
+  const onCompEnd = () => { ime.el = null; };
   const onClickCap = () => releasePtr(0);
   const onChangeCap = (e) => { if (ptr.sel && e.target === ptr.sel) ptr.sel = null; releasePtr(0); };
   const onFocusOut = (e) => {
@@ -2024,7 +2042,8 @@
       // 견적 자체가 바뀌었을 때만 ‘다시 맞추기’를 권해요 (예전 보정은 서명이 없어 견적 수로만 판단)
       const quotesChanged = ns.length > 0 && (cal.sig != null ? quoteSig(est0) !== cal.sig : cal.n !== ns.length);
       const condChanged = !quotesChanged && ns.length > 0 && isNum(cal.base) && cal.base > 0 && raw.subtotalEx > 0 && Math.abs(raw.subtotalEx - cal.base) / cal.base > 0.005;
-      if (quotesChanged && f) box.appendChild(missingNote(raw, est0));
+      const mn1 = ns.length ? missingNote(raw, est0) : null;
+      if (mn1) box.appendChild(mn1);
       if (condChanged) {
         const vm = raw.vatIncl ? raw.vatMul : 1;
         box.appendChild(el('p', { class: 'small es-calib-info' }, 'ℹ️ 보정한 뒤 짐·조건이 바뀌었어요 (보정 전 모델 ' + won(cal.base * vm) + ' → ' + won(raw.subtotalEx * vm) + '). 비율 ×' + cal.factor.toFixed(2) +
@@ -2040,7 +2059,8 @@
       const diff = f - 1;
       box.appendChild(el('p', '견적 ' + ns.length + '곳(같은 조건·' + bl + ' 환산) 중앙값 ', el('b', won(med)), (Math.abs(diff) < 0.005 ? ' — 지금 모델 기준가 ' + josa(won(raw.typical), '과/와') + ' 거의 같아요.' : ' — 지금 모델 기준가 ' + won(raw.typical) + '보다 ' + Math.abs(Math.round(diff * 100)) + '%' + (diff > 0 ? ' 높아요.' : ' 낮아요.')) +
         (ns.length < 3 ? ' 견적이 3곳 모이면 더 믿을 만해요.' : '')));
-      box.appendChild(missingNote(raw, est0));
+      const mn2 = missingNote(raw, est0);
+      if (mn2) box.appendChild(mn2);
       if (f < 0.5 || f > 2) box.appendChild(el('p', { class: 'small', style: { color: 'var(--bad)' } }, '차이가 너무 커요(×' + f.toFixed(2) + '). 금액·포함 항목을 다시 확인하세요. 보정은 ×0.5~×2 사이로만 해요.'));
       box.appendChild(el('div', { class: 'row' }, el('button', { type: 'button', class: 'btn btn-sm btn-primary', onclick: applyCalibration }, '모델을 견적에 맞추기 (×' + MV.clamp(f, 0.5, 2).toFixed(2) + ')')));
     }
@@ -2081,7 +2101,7 @@
             el('span', { class: 'chip' }, '👷 ' + est.crewLabel),
             el('span', { class: 'chip' + (est.surchargePct ? ' warn' : ' good') }, '📅 ' + est.dateLabel + (est.surchargePct ? ' +' + r1(est.surchargePct) + '%' : ' 할증 없음')),
             el('span', { class: 'chip' }, '❄️ 에어컨 ' + (acInc ? '포함 (' + est.counts.acN + '대)' : '제외')),
-            el('span', { class: 'chip', title: est.vatIncl ? '부가세 10%를 더한 금액이에요' : '리서치 시세는 부가세 별도예요. ‘이사 견적’에서 ‘부가세 10% 더하기’를 켜면 포함 금액으로 봐요' }, '🧾 ' + basisLabel(est.vatIncl)))),
+            el('span', { class: 'chip', title: est.vatIncl ? '부가세 ' + fmtDec(est.coef.vat_pct) + '%를 더한 금액이에요' : '리서치 시세는 부가세 별도예요. ‘이사 조건’에서 ‘부가세 ' + fmtDec(est.coef.vat_pct) + '% 더하기’를 켜면 포함 금액으로 봐요 (부가세 포함 약 ' + won(est.pay.typical) + ')' }, '🧾 ' + basisLabel(est.vatIncl)))),
         el('div', { class: 'es-hero-side' },
           lg && lg.typical > 0 ? el('div', { class: 'es-lgsum' }, '🔌 LG로 옮기는 가전 ' + lg.count + '대 별도 ', el('b', '약 ' + won(lg.typical)),
             el('span', '→ 이사 전체 약 ' + won(est.totalPay.typical) + ' (부가세 포함' + (est.vatIncl ? '' : ' — 이삿짐센터 ' + won(est.pay.typical) + ' + LG') + ')')) : null,
@@ -2305,11 +2325,14 @@
       wasteHint.textContent = '‘버림’ 짐(폐가전 제외) 부피 ' + m3(est.counts.autoWasteM3) + '. 고장 세탁기 같은 폐가전은 1599-0903 무상방문수거로 따로 처리하세요.';
     });
     arrSub.appendChild(fieldWrap('추가 인원 (명)', numInput('arrangeCount', { min: 1, max: 10 })));
+    // 부가세율은 계산 기준에서 바꿀 수 있어 글자도 그 값을 따라감
+    const vatField = checkField('vat', '부가세 10% 더하기 (실제로 낼 돈으로 보기)');
+    upd(() => { const sp = vatField.querySelector('span'); if (sp) sp.textContent = '부가세 ' + fmtDec(coefNow().vat_pct) + '% 더하기 (실제로 낼 돈으로 보기)'; }, vatField);
     card.appendChild(el('div', { class: 'es-checks' },
       checkField('waste', '폐기물을 이삿짐센터에 맡기기', (v) => { wasteSub.hidden = !v; }), wasteSub,
       checkField('arrange', '정리수납 추가 인력 요청', (v) => { arrSub.hidden = !v; }), arrSub,
       checkField('includeUndecided', '처리 ‘미정’ 짐도 가져가는 것으로 계산'),
-      checkField('vat', '부가세 10% 더하기 (부가세 별도 시세와 비교할 때)')));
+      vatField));
     return card;
   }
 
@@ -2555,7 +2578,7 @@
           ' · 사다리차 ' + (est.parts.ladder > 0 ? '포함' : '없음') + ' · 에어컨 ' + (est.counts.acN ? est.counts.acN + '대 포함' : '제외'))),
       el('div', { class: 'mt-12' }, calibBox(false)),
       el('p', { class: 'small es-muted mt-8 mb-0' }, '업체 견적에 빠진 항목(사다리차·에어컨 등)은 모델 금액을 더해 ‘같은 조건 환산’으로 비교해요. 부가세도 모델과 같은 기준으로 맞춰요 — 지금 모델은 ',
-        el('b', basisLabel(est.vatIncl)), est.vatIncl ? ' 금액이라 ‘부가세 별도’ 견적에 ' + r1(est.coef.vat_pct) + '%를 더해요.' : ' 시세라 ‘부가세 포함’ 견적에서 부가세를 빼고 비교해요. 실제로 낼 돈은 ‘이사 견적’에서 ‘부가세 10% 더하기’를 켜면 보여요.'));
+        el('b', basisLabel(est.vatIncl)), est.vatIncl ? ' 금액이라 ‘부가세 별도’ 견적에 ' + r1(est.coef.vat_pct) + '%를 더해요.' : ' 시세라 ‘부가세 포함’ 견적에서 부가세를 빼고 비교해요. 실제로 낼 돈은 ‘이사 견적’에서 ‘부가세 ' + fmtDec(est.coef.vat_pct) + '% 더하기’를 켜면 보여요.'));
   }
   function quotesCompare() {
     const est = R.est;
@@ -2727,11 +2750,12 @@
     const text = '[방문견적 때 물어볼 것]\n' + ASK.map((t, i) => (i + 1) + '. ' + t).join('\n');
     return el('aside', { class: 'card es-ask es-ask-card', 'aria-label': '방문견적 질문 목록' },
       sectionHead('❓', '방문견적 때 물어볼 것', null, el('button', { type: 'button', class: 'btn btn-sm', onclick: () => copyText(text) }, '📋 복사')),
-      el('ol', ASK.map((t) => el('li', t))),
-      el('div', { class: 'callout warn small' }, '견적은 꼭 문자·PDF 같은 서면으로 받고, 버릴 것과 LG가 옮길 것은 현장에서 실물로 표시하세요. 2021~2023 포장이사 피해 중 약 70%가 파손이었어요.', ' ', srcLinks(['kca', 'herald'])),
-      el('div', { class: 'row mt-8' },
+      // 가이드 링크는 맨 위에 — 데스크톱에서 이 칸이 따로 스크롤돼 아래쪽이 잘 안 보여요
+      el('div', { class: 'row es-ask-links' },
         el('a', { class: 'btn btn-sm', href: '#/guide/mover' }, '📘 업체 고르는 법 가이드 →'),
-        srcLinks(['jjan', 'terms'])));
+        srcLinks(['jjan', 'terms'])),
+      el('div', { class: 'callout warn small' }, '견적은 꼭 문자·PDF 같은 서면으로 받고, 버릴 것과 LG가 옮길 것은 현장에서 실물로 표시하세요. 2021~2023 포장이사 피해 중 약 70%가 파손이었어요.', ' ', srcLinks(['kca', 'herald'])),
+      el('ol', ASK.map((t) => el('li', t))));
   }
   function renderQuotes(body) {
     body.appendChild(region(quotesTop, 'qtop'));
@@ -2901,15 +2925,23 @@
       const st = stGet();
       const ids = new Set(items.map((it) => it.id));
       const allMover = compute(st, { inventory: (st.inventory || []).filter((x) => x && typeof x === 'object').map((it) => (ids.has(it.id) ? Object.assign({}, it, { lg: false }) : it)) });
-      const save = Math.max(0, allMover.typical - est.typical);
-      const acPart = Math.max(0, allMover.parts.aircon - est.parts.aircon);
-      savingTxt = '이 짐 목록이면 지금 선택으로 이삿짐센터 비용이 약 ' + won(save) + ' 줄어요' + (acPart > 0 ? ' (그중 에어컨 이전설치 몫 약 ' + won(acPart) + ')' : '') +
+      const save = Math.max(0, payK(allMover, 'typical') - payK(est, 'typical'));
+      const acPart = Math.max(0, toPay(est, allMover.parts.aircon - est.parts.aircon));
+      savingTxt = '이 짐 목록이면 지금 선택으로 이삿짐센터 비용이 부가세 포함 약 ' + won(save) + ' 줄어요' + (acPart > 0 ? ' (그중 에어컨 이전설치 몫 약 ' + won(acPart) + ')' : '') +
         (allMover.tons !== est.tons ? ', 차량도 ' + tonsLabel(allMover.tons) + ' → ' + josa(tonsLabel(est.tons), '으로/로') + ' ' + (est.tons < allMover.tons ? '내려가요' : '바뀌어요') + '. ' : '. ') +
         '리서치는 에어컨을 뺀 가전만 따지면 0~20만원 정도라고 봤어요. ';
     }
     let verdict;
     if (!nLg) verdict = el('p', '지금은 모두 이삿짐센터로 계산 중이에요. 냉장고·건조기·에어컨처럼 파손이 걱정되는 가전부터 LG 견적(1544-7777)을 받아 보세요.');
-    else if (otherBrand.length) verdict = el('p', { style: { color: 'var(--bad)' } }, el('b', '⚠ ' + otherBrand.map(nm).join(', ')), josa(nm(otherBrand[otherBrand.length - 1]), '은/는').slice(nm(otherBrand[otherBrand.length - 1]).length) + ' 다른 브랜드로 보여요. LG 이전설치는 LG 제품만 돼요 — 이삿짐센터로 바꾸세요.');
+    else if (otherBrand.length) {
+      verdict = el('div',
+        el('p', { style: { color: 'var(--bad)' } }, el('b', '⚠ ' + otherBrand.map(nm).join(', ')), josa(nm(otherBrand[otherBrand.length - 1]), '은/는').slice(nm(otherBrand[otherBrand.length - 1]).length) + ' 다른 브랜드로 보여요. LG 이전설치는 LG 제품만 돼요 — 이삿짐센터로 바꾸세요.'),
+        el('div', { class: 'row es-reco-fix' }, el('button', { type: 'button', class: 'btn btn-sm btn-primary', onclick: () => {
+          const ids = new Set(otherBrand.map((it) => it.id));
+          MV.store.update((st) => { (st.inventory || []).forEach((x) => { if (x && ids.has(x.id)) x.lg = false; }); }, { log: '다른 브랜드 가전을 이삿짐센터로: ' + otherBrand.map(nm).join(', ') });
+          toast(otherBrand.length + '개를 이삿짐센터로 바꿨어요.');
+        } }, '🚚 ' + otherBrand.length + '개 이삿짐센터로 바꾸기')));
+    }
     else if (condsOk) verdict = el('p', el('b', '✅ LG 이용을 권해요.'), ' 조건을 모두 채웠어요. 이삿짐센터 계약서에 ‘LG가 옮기는 가전(목록)은 제외’ 특약을 넣으세요.');
     else if (!under) verdict = el('p', el('b', 'LG 합계가 약 ' + josa(won(total), '으로/로') + ' 30만원을 넘어요.'), ' 이삿짐센터 일괄도 같이 비교해 보세요 — 에어컨만 LG처럼 섞는 것도 방법이에요.');
     else verdict = el('p', el('b', '조건 확인 중이에요.'), ' 아래 항목을 모두 확인하면 LG를 쓰고, 하나라도 안 되면 이삿짐센터에 일괄로 맡기세요.');
@@ -2971,6 +3003,9 @@
     document.addEventListener('click', onClickCap, true);
     document.addEventListener('change', onChangeCap, true);
     root.addEventListener('focusout', onFocusOut);
+    ime.el = null;
+    root.addEventListener('compositionstart', onCompStart, true);
+    root.addEventListener('compositionend', onCompEnd, true);
     let ro = null;
     if (tabId === 'inventory' && window.ResizeObserver) {
       ro = new ResizeObserver(() => { if (R === myR && R.tableMode !== undefined && tableMode() !== R.tableMode) refreshNamed(['invlist']); });
@@ -2982,7 +3017,10 @@
       try {
         const a = document.activeElement;
         if (R === myR && a && root.contains(a) && isTyping(a) && a.dataset && a.dataset.fk) {
-          mem.restore = { fk: a.dataset.fk, value: a.value, s: a.selectionStart, e: a.selectionEnd, tab: tabId, at: Date.now() };
+          const composing = ime.el === a;
+          mem.restore = composing
+            ? { fk: a.dataset.fk, value: ime.value, s: ime.s, e: ime.e, tab: tabId, at: Date.now() }
+            : { fk: a.dataset.fk, value: a.value, s: a.selectionStart, e: a.selectionEnd, tab: tabId, at: Date.now() };
         }
       } catch (e) { /* 무시 */ }
       document.removeEventListener('pointerdown', onPtrDown, true);
@@ -2991,6 +3029,8 @@
       document.removeEventListener('click', onClickCap, true);
       document.removeEventListener('change', onChangeCap, true);
       root.removeEventListener('focusout', onFocusOut);
+      root.removeEventListener('compositionstart', onCompStart, true);
+      root.removeEventListener('compositionend', onCompEnd, true);
       if (ro) ro.disconnect();
       clearTimeout(ptr.timer); clearTimeout(ptr.retry); ptr.retry = null;
       ptr.down = false; ptr.sel = null;
