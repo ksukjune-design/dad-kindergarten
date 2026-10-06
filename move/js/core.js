@@ -599,7 +599,7 @@
       el('div', { class: 'form-grid' },
         field('이름', f.name), field('분류', f.cat), field('처리', f.fate), field('수량', f.qty)),
       el('div', { class: 'form-grid' },
-        field('가로 W (cm)', f.w), field('깊이 D (cm)', f.d), field('높이 H (cm)', f.h)),
+        field('가로 (cm)', f.w), field('깊이 (cm)', f.d), field('높이 (cm)', f.h)),
       el('div', { class: 'form-grid' },
         field('지금 집 위치', f.room), field('새 집 위치', f.roomNew), acRow),
       field('제품 링크 (URL)', f.url, '인터넷에서 찾은 제품 페이지를 붙여 두면 규격 확인이 쉽습니다'),

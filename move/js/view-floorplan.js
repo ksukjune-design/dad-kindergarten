@@ -226,6 +226,83 @@
     gaps.forEach(([s0, e0]) => { cov += Math.max(0, Math.min(b, e0) - Math.max(a, s0)); });
     return Math.max(0, 1 - cov / (b - a));
   }
+  /** 문이 차지하는 자리 (열림 범위 + 벽 틈) — 문 삭제 도구에서 누르는 칸 */
+  function doorBox(d) {
+    const g = doorGeom(d);
+    const x0 = Math.min(g.swing.x, g.gap.x), y0 = Math.min(g.swing.y, g.gap.y);
+    return { x: x0, y: y0, w: Math.max(g.swing.x + g.swing.w, g.gap.x + g.gap.w) - x0, h: Math.max(g.swing.y + g.swing.h, g.gap.y + g.gap.h) - y0 };
+  }
+  const DOOR_TAP = 44;   // 문 삭제: 누르는 칸의 최소 크기 (화면 px)
+  /** 누르는 칸: 문 자리를 가운데 두고 가로·세로 minS(cm) 이상으로 넓힘 */
+  function doorPad(d, minS) {
+    const b = doorBox(d);
+    const w = Math.max(b.w, minS), h = Math.max(b.h, minS);
+    return { x: b.x + b.w / 2 - w / 2, y: b.y + b.h / 2 - h / 2, w, h };
+  }
+  /** (x,y)를 누르면 지울 문: 누르는 칸에 든 문 중 실제 문 자리에서 가장 가까운 것 (같으면 가운데가 더 가까운 것) */
+  function doorAtPt(plan, x, y, minS) {
+    let best = null;
+    plan.doors.forEach((d) => {
+      if (!hasPt(doorPad(d, minS), x, y)) return;
+      const b = doorBox(d);
+      const dist = Math.hypot(Math.max(b.x - x, 0, x - b.x - b.w), Math.max(b.y - y, 0, y - b.y - b.h));
+      const cd = Math.hypot(b.x + b.w / 2 - x, b.y + b.h / 2 - y);
+      if (!best || dist < best.dist - 0.01 || (Math.abs(dist - best.dist) <= 0.01 && cd < best.cd)) best = { d, dist, cd };
+    });
+    return best ? best.d : null;
+  }
+  /** 문이 열리는 쪽을 반대로 (경첩 자리는 그대로) */
+  const flipSwing = (d) => (d.orientation === 'v' ? (d.swing === 'left' ? 'right' : 'left') : (d.swing === 'up' ? 'down' : 'up'));
+  /**
+   * 방을 옮기거나 크기를 바꾸면 그 방에 직접 단 문(doorsAdded, room = 방 id)도 같은 벽을 따라 옮김 (st 안에서 호출).
+   * from·to = 바꾸기 전·후 방 {x,y,w,h}. 벽 위의 자리(벽 시작에서 떨어진 거리)는 그대로, 벽이 짧아지면 안으로 당기고 문 폭도 줄임 → 옮긴 문 개수
+   */
+  function moveRoomDoors(E, rid, from, to) {
+    let n = 0;
+    E.doorsAdded.forEach((d) => {
+      if (!d || typeof d !== 'object' || String(d.room) !== String(rid)) return;
+      const v = d.orientation === 'v';
+      const x = num(d.x, 0), y = num(d.y, 0), w0 = Math.max(10, num(d.width, NEW_DOOR_W));
+      let side = '';
+      if (v) side = Math.abs(x - from.x) < 3 ? 'L' : Math.abs(x - from.x - from.w) < 3 ? 'R' : '';
+      else side = Math.abs(y - from.y) < 3 ? 'T' : Math.abs(y - from.y - from.h) < 3 ? 'B' : '';
+      if (!side) return;   // 이 방 벽 위에 있지 않던 문은 건드리지 않음
+      const len = v ? to.h : to.w, start = v ? to.y : to.x;
+      const w = w0 > len - 10 && len >= 50 ? Math.max(40, Math.floor((len - 10) / SNAP) * SNAP) : w0;
+      const at = r1(MV.clamp(start + (v ? y - from.y : x - from.x), start, Math.max(start, start + len - w)));
+      const nx = v ? r1(side === 'L' ? to.x : to.x + to.w) : at;
+      const ny = v ? at : r1(side === 'T' ? to.y : to.y + to.h);
+      if (Math.abs(nx - x) > 0.05 || Math.abs(ny - y) > 0.05 || w !== w0) { d.x = nx; d.y = ny; d.width = w; n++; }
+    });
+    return n;
+  }
+  /**
+   * 이 화면에서 연 창(방·크기·확인·짐 편집)을 기억했다가 화면을 떠나면(뒤로 가기·다른 메뉴) 함께 닫음
+   * → 다른 화면 위에 창이 남아 엉뚱한 도면을 고치지 않게. 닫을 땐 창의 ✕ 를 눌러 확인 창은 '취소'로 끝남
+   */
+  function modalTracker(ctx) {
+    const mine = new Set();
+    const track = (open) => {
+      const before = new Set(document.querySelectorAll('.modal-back'));
+      const ret = open();
+      mine.forEach((b) => { if (!b.isConnected) mine.delete(b); });
+      document.querySelectorAll('.modal-back').forEach((b) => { if (!before.has(b)) mine.add(b); });
+      return ret;
+    };
+    ctx.onCleanup(() => {
+      mine.forEach((b) => {
+        if (!b.isConnected) return;
+        const x = b.querySelector('.modal-head button');
+        try { if (x) x.click(); else b.remove(); } catch (e) { b.remove(); }
+      });
+      mine.clear();
+    });
+    return {
+      modal: (o) => track(() => MV.ui.modal(o)),
+      confirm: (msg, o) => track(() => MV.ui.confirm(msg, o)),
+      invEditor: (id, o) => track(() => MV.inv.editor(id, o)),
+    };
+  }
   /** 원래 문을 가리키는 고정 키 (자료 순서가 바뀌어도 같은 문을 가리키도록 x·y·방향으로) */
   const doorKey = (d) => Math.round(num(d.x, 0)) + ',' + Math.round(num(d.y, 0)) + ',' + (d.orientation === 'v' ? 'v' : 'h');
   /** 선분(문·창·트인 곳: x,y,길이 L,방향)이 방 r 의 네 변 중 하나 위에 통째로 놓였는지 */
@@ -492,8 +569,15 @@
       if ((ownerGone || segHidden(door)) && !onLive(door, door.width)) { doorsHidden++; return; }
       doorsAdded.push(door);
     });
+    // 남은 문이 지운 방 쪽으로 열리면 (예: 다용도실을 지웠는데 주방→다용도실 문) 남은 방 쪽으로 열리게 뒤집음 — 그쪽도 빈 곳이면 그대로
+    const swingIn = (d, rs) => { const g = doorGeom(d); const cx = g.swing.x + g.swing.w / 2, cy = g.swing.y + g.swing.h / 2; return rs.some((r) => hasPt(r, cx, cy)); };
+    const flipDead = (d) => {
+      if (!deadRooms.length || !swingIn(d, deadRooms) || swingIn(d, liveRooms)) return d;
+      const nd = Object.assign({}, d, { swing: flipSwing(d), _flipped: true });
+      return swingIn(nd, liveRooms) ? nd : d;
+    };
     const p = Object.assign({}, base, {
-      key, rooms, doors: doors.concat(doorsAdded),
+      key, rooms, doors: doors.concat(doorsAdded).map(flipDead),
       windows: arr(base.windows).filter((w) => !segHidden(w)),
       fixtures: arr(base.fixtures).filter((f) => !rectHidden(f)),
       // 붙박이장은 옷 수납 길이 비교에 쓰이므로 방을 지워도 남김 (실측으로 따로 확인)
@@ -1294,11 +1378,15 @@
     // 11) 문 삭제 도구: 누를 수 있는 문 자리 (열림 범위 + 벽 틈)
     if (tool === 'doorDel') {
       const gd = svg('g', { class: 'fp-doorhits' });
+      // 손가락으로 누르기 쉽게 화면에서 44px 이상인 투명한 칸을 먼저 깔고 (겹치면 누른 곳에서 가장 가까운 문을 고름), 그 위에 보이는 칸
+      const minS = DOOR_TAP / s;
       plan.doors.forEach((d) => {
-        const g = doorGeom(d);
-        const x0 = Math.min(g.swing.x, g.gap.x), y0 = Math.min(g.swing.y, g.gap.y);
-        const x1 = Math.max(g.swing.x + g.swing.w, g.gap.x + g.gap.w), y1 = Math.max(g.swing.y + g.swing.h, g.gap.y + g.gap.h);
-        gd.appendChild(svg('rect', Object.assign({ class: 'fp-doorhit', 'data-door': d._key, x: r1(x0), y: r1(y0), width: r1(x1 - x0), height: r1(y1 - y0), rx: 4,
+        const p = doorPad(d, minS);
+        gd.appendChild(svg('rect', { class: 'fp-doorpad', 'data-door': d._key, x: r1(p.x), y: r1(p.y), width: r1(p.w), height: r1(p.h), fill: 'transparent' }));
+      });
+      plan.doors.forEach((d) => {
+        const bx = doorBox(d);
+        gd.appendChild(svg('rect', Object.assign({ class: 'fp-doorhit', 'data-door': d._key, x: r1(bx.x), y: r1(bx.y), width: r1(bx.w), height: r1(bx.h), rx: 4,
           tabindex: '0', role: 'button', 'aria-label': (d.note ? String(d.note).split(/[.(]/)[0] : '문') + ' 지우기' }, NS), svg('title', String(d.note || '문'))));
       });
       root.appendChild(gd);
@@ -3068,7 +3156,11 @@
       const d = cur && cur.plan.doors.find((x) => x._key === dk);
       if (!d) return;
       const label = d._added ? '직접 추가한 문' : (d.note ? String(d.note).split(/[.(]/)[0].trim() : '') || '문';
-      MV.ui.confirm('「' + label + '」' + jo(label, '을', '를') + ' 도면에서 지울까요? 문이 없어진 자리는 벽으로 그려져요.', { danger: true, okLabel: '문 지우기', title: '문 삭제' }).then((ok) => {
+      // 어느 문을 골랐는지 도면에 진하게 표시 (확인 창 뒤로 보임)
+      const mark = (on) => { if (svgEl) svgEl.querySelectorAll('.fp-doorhit').forEach((n) => n.classList.toggle('is-pick', on && n.getAttribute('data-door') === dk)); };
+      mark(true);
+      ui.confirm('「' + label + '」' + jo(label, '을', '를') + ' 도면에서 지울까요? 문이 없어진 자리는 벽으로 그려져요.', { danger: true, okLabel: '문 지우기', title: '문 삭제' }).then((ok) => {
+        mark(false);
         if (!ok) return;
         let snap = null;
         const k0 = doorKey(d);
@@ -3402,8 +3494,10 @@
       if (editMode) {
         if (tool === 'doorAdd') { addDoorAt(toPlan(e.clientX, e.clientY)); return; }
         if (tool === 'doorDel') {
-          const dh = e.target.closest && e.target.closest('[data-door]');
-          if (dh) askDeleteDoor(dh.getAttribute('data-door')); else toast('지울 문(빨간 점선 칸)을 눌러 주세요');
+          // 문끼리 가까워 누르는 칸이 겹치면 누른 곳에서 가장 가까운 문 (칸 밖이어도 손가락 크기 안이면)
+          const P = toPlan(e.clientX, e.clientY);
+          const d = doorAtPt(cur.plan, P.x, P.y, DOOR_TAP / cur.s);
+          if (d) askDeleteDoor(d._key); else toast('지울 문(빨간 점선 칸)을 눌러 주세요');
           return;
         }
         if (tool === 'draw') return;

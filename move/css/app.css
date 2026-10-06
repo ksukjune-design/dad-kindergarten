@@ -274,6 +274,10 @@ hr.sep { border: 0; border-top: 1px solid var(--line); margin: 16px 0; }
 .btn-sm { min-height: 30px; padding: 0 10px; font-size: .82rem; }
 .btn-icon { width: 38px; padding: 0; font-size: 1.15rem; }
 .btn-sm.btn-icon { width: 30px; }
+@media (pointer: coarse) {
+  .btn-sm { min-height: 36px; }
+  .btn-sm.btn-icon { width: 36px; }
+}
 
 .chip {
   display: inline-flex; align-items: center; gap: 4px;
@@ -389,6 +393,8 @@ table.tbl tfoot td { font-weight: 800; border-top: 2px solid var(--line-2); }
   width: max-content; max-width: calc(100vw - 24px);
   pointer-events: none;
 }
+/* 아래에서 올라오는 창(모달)이 열려 있으면 알림은 위쪽에 */
+body:has(.modal-back) .toast-wrap { bottom: auto; top: calc(env(safe-area-inset-top, 0px) + 12px); }
 .toast {
   pointer-events: auto;
   background: var(--ink); color: var(--bg);
