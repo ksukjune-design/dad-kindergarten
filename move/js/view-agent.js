@@ -8,8 +8,13 @@
    대화     이 브라우저의 localStorage 'mv:agent:chat' 에 마지막 40개 (보는 사람마다 따로)
             같은 브라우저의 다른 탭과는 저장할 때·storage 이벤트 때 메시지 id 로 합침 (지운 id 는 removed 로 기억)
             매 요청 = [지시 턴(오늘·사실·앱 데이터 요약 JSON·규칙)] + 최근 대화 12턴 (120KB 이하)
+            지난 대화는 질문마다 [질문 → 답] 으로 묶어 보냄. 중지·오류·창 닫힘으로 글도 변경도 없이 끝난 질문 뒤에는
+            '(사용자가 중지함/처리 못 함 — 실행하지 말 것)' 답 자리를 넣어, 다음 질문과 한 턴으로 합쳐져 실행되지 않게 함
             끊긴 답을 '다시 보내기'하면 끊긴 글·이미 바꾼 목록을 같이 보내 같은 변경을 되풀이하지 않게 함
             (다시 보내기·도구 없이 묻기는 대화의 마지막 답에만). tools_unavailable 을 받으면 이 창에서는 도구 없이 물음
+   다른 탭   답하는 창은 10초마다 답에 살아 있음(hb)을 저장, 창을 닫으면(pagehide) '끊김'으로 저장.
+            다른 창은 그 답을 '다른 창에서 답하는 중'으로 보여 주고, 45초 넘게 소식이 없으면 '끊김'으로 봄.
+            대화 지우기는 다른 창에서 답하는 중인 질문·답을 남기고, 이 창에서 답하는 중인 것은 다른 창이 지워도 되살림
    도구     sample.limits().tools 가 있을 때만 (없으면 요약만 보고 답하고 '직접 고치세요'로 안내)
             읽기: get_overview, list_items, get_item, list_parts, get_budget, get_estimate,
                   get_workplan(주별 일정), get_move_day(이사 당일 순서), list_inventory
@@ -19,7 +24,11 @@
             삭제 도구는 없습니다. 자금흐름 상태가 아직 없으면 자금흐름 화면이 기본값을 만들게 합니다.
    🤖 버튼  #/agent 가 아닌 모든 화면 오른쪽 아래 (모달이 열리면 숨김, 화면 아래 입력줄이 있으면 그 위로)
             페이지가 스크롤되는 화면에는 맨 아래 76px 빈 자리(body.ag-fab-pad)를 둬서 마지막 버튼이 가려지지 않게
-   되돌리기 도구가 처음 고치기 직전에 그 할 일·짐(하나씩)·예산·견적(통째로)의 값을 떠 두고, 답 아래 '변경 n건'
+            화면 안의 목록이 따로 스크롤되면(태블릿·데스크톱 체크리스트) 버튼 밑 그 목록 끝에도 빈 자리(.ag-fab-padin)
+   금액     도구의 금액 글은 직접 읽음: '5만 5천원'·'3백만원'·'1억 2천만원' OK, 범위('3-4만원')·모르는 단위('12k')·
+            애매한 글('1억 5천')은 한국어 오류로 돌려보내 숫자 하나를 다시 받음. 변경 상자는 줄이지 않은 정확한 금액
+   되돌리기 도구가 처음 고치기 직전에 그 할 일·짐(하나씩)·예산 줄(finance.budget)·업체 견적(estimate.quotes)의
+            값을 떠 두고 (견적·자금흐름 화면이 처음 열릴 때 채우는 기본값은 보지 않음), 답 아래 '변경 n건'
             상자에서 그것만 되돌림 (도면 사진·화면 설정·다른 항목은 그대로). 답마다 따로(최근 10개),
             그 답이 고친 것을 이후에 누가 또 고치면 그 답의 되돌리기만 막음. 새로고침하면 사라짐.
    예산     예산 화면과 같은 틀: ① 꼭 드는 이사 비용 기준 11/3 전후 현금(netEssential) ② 살림까지 ③ 전부.
@@ -1093,7 +1102,7 @@
   const S_OWNER = { type: 'string', enum: ['나', '아내', '함께', '없음'], description: '담당자 (없음 = 미정)' };
   const S_PRI = { type: 'string', enum: ['high', 'mid', 'low'], description: 'high=중요, mid=보통, low=여유' };
   const S_DATE = { type: ['string', 'null'], description: 'YYYY-MM-DD (지우려면 null)' };
-  const S_MONEY = { type: ['number', 'string'], description: '원 단위 숫자 또는 "32만원"·"2.1억" 같은 글' };
+  const S_MONEY = { type: ['number', 'string'], description: '원 단위 숫자 또는 "32만원"·"5만 5천원"·"2.1억" 같은 금액 하나 (범위는 안 됨)' };
   const S_GROUP = { type: 'string', enum: ['essential', 'purchase', 'optional'], description: 'essential=꼭 드는 이사 비용, purchase=새로 사는 살림, optional=선택·나중에' };
   const TOOLS = [
     {
@@ -1798,7 +1807,7 @@
     if (code === 'cancelled') {
       bot.status = 'stopped';
       bot.text = partial || bot.text || '';
-      bot.note = '중지했어요.';
+      bot.note = '중지했어요.' + (bot.changes && bot.changes.length ? ' 그 전에 바꾼 것은 아래에 남아 있어요.' : ' 앱 데이터는 바꾸지 않았어요.');
       return;
     }
     if (HIDE_CODES.has(code)) {
