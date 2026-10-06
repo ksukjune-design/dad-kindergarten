@@ -555,7 +555,7 @@
         el('span', { class: 'big' }, part ? (part.emoji || '🧭') : '🧭'),
         el('p', { class: 'strong', style: { color: 'var(--ink)' } }, part
           ? '‘' + part.name + '’ 가이드는 아직 준비 중이에요.'
-          : '“' + rawId + '” 가이드를 찾지 못했어요.'),
+          : '찾는 가이드가 없어요.'),
         el('p', { class: 'small' }, part
           ? '할 일과 메모는 체크리스트에서 바로 관리할 수 있어요.'
           : '아직 작성 중이거나 이름이 바뀌었을 수 있어요.'),
