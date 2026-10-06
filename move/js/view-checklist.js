@@ -9,8 +9,8 @@
      #/checklist/~focus|~week|~all|~done|~activity[/<itemId>]   특수 채널
      #/checklist/~search/<검색어>[/<itemId>]
 
-   화면 안에서의 이동은 history.pushState/replaceState 로 처리하고(전체 다시 그리기 없음),
-   뒤로·앞으로(hashchange)도 이 뷰가 먼저 받아 입력창·스크롤을 지킨 채 바꿉니다.
+   화면 안에서의 이동(채널·항목 클릭)은 history.pushState/replaceState 로 처리해 다시 그리지 않습니다.
+   뒤로·앞으로(hashchange)는 앱 셸이 화면을 새로 그리므로, 스크롤·초안·초점을 mem 에 두었다가 되살립니다.
    CSS 접두사: ck-
    ============================================================ */
 (function () {
@@ -57,6 +57,9 @@
     noteDrafts: {},     // 항목 → 메모 초안
     composerPart: '',   // 특수 채널에서 추가할 파트
     lastChannel: '~focus',
+    sideScroll: 0,      // 사이드바 스크롤
+    unmountedAt: -1e9,  // 마지막으로 이 뷰를 닫은 시각 (같은 뷰 다시 그리기 판별)
+    focusRow: null,     // 다시 그린 뒤 초점을 돌려줄 항목
   };
 
   /* ---------------- 작은 도우미 ---------------- */
@@ -403,25 +406,19 @@
     }
     function goBackTo(target) {
       const st = history.state;
-      if (st && st.ckPrev === target) history.back();
+      if (cur.itemId && !isPhone()) mem.focusRow = cur.itemId;
+      if (st && st.ckPrev === target) history.back();   // 앱 셸이 다시 그림 → mem 으로 복원
       else nav(target, { replace: true, how: 'history' });
     }
-    function onHash(e) {
-      if (!alive) return;
-      const r = MV.parseHash();
-      if (r.name !== 'checklist') return;          // 다른 화면 → 앱 셸이 처리
-      e.stopImmediatePropagation();                 // 같은 화면 안 이동 → 다시 그리지 않고 바꿈
-      MV.route = { name: 'checklist', params: r.params };
-      try { applyRoute(r.params, 'history'); } catch (err) { console.error(err); MV.rerender(); }
-    }
-    window.addEventListener('hashchange', onHash, true);
-    ctx.onCleanup(() => window.removeEventListener('hashchange', onHash, true));
 
     function applyRoute(params, how) {
+      const inPlace = how === 'init' && performance.now() - mem.unmountedAt < 120;   // 뒤로·앞으로로 같은 뷰를 다시 그림
       const prevKey = screenKey();
       const prevEff = effCh(); const prevQ = cur.q;
-      if (isPhone()) mem.winScroll[prevKey] = window.scrollY;
-      if (!isPhone()) mem.listScroll[prevEff + (prevEff === '~search' ? ':' + prevQ : '')] = list.scrollTop;
+      if (how !== 'init') {
+        if (isPhone()) mem.winScroll[prevKey] = window.scrollY;
+        else mem.listScroll[prevEff + (prevEff === '~search' ? ':' + prevQ : '')] = list.scrollTop;
+      }
 
       let ch = params[0] || null; let q = ''; let itemId = null;
       if (ch === '~search') { q = params[1] || ''; itemId = params[2] || null; }
@@ -453,7 +450,19 @@
       }
       wrap.classList.toggle('ck-open', !!itemId);
 
-      if (isPhone() && how !== 'init') {
+      if (how === 'init') {
+        chans.scrollTop = mem.sideScroll || 0;
+        if (inPlace && isPhone()) {
+          const k = screenKey();
+          const y = k.indexOf('thread:') === 0 ? 0 : (mem.winScroll[k] || 0);
+          requestAnimationFrame(() => { if (alive) window.scrollTo(0, y); });   // 셸의 scrollTo 다음에
+        }
+        if (inPlace && mem.focusRow && !isPhone()) {
+          const a = list.querySelector('.ck-row[data-id="' + cssEsc(mem.focusRow) + '"] .ck-row-title');
+          if (a) a.focus({ preventScroll: true });
+        }
+        mem.focusRow = null;
+      } else if (isPhone()) {
         const k = screenKey();
         if (k !== prevKey || how === 'history') {
           const y = how === 'history' && mem.winScroll[k] != null ? mem.winScroll[k] : 0;
@@ -863,9 +872,8 @@
     }
 
     function activityIcon(text) {
-      const m = /^(\p{Extended_Pictographic}️?)\s*/u.exec(text);
-      if (m) return { icon: m[1], text: text.slice(m[0].length) };
-      if (/^↩/.test(text)) return { icon: '↩️', text: text.replace(/^↩︎?\s*/, '') };
+      const m = /^(\p{Extended_Pictographic})[\uFE0E\uFE0F]?\s*/u.exec(text);
+      if (m) return { icon: m[1] + '\uFE0F', text: text.slice(m[0].length) };
       if (/^항목 추가/.test(text)) return { icon: '➕', text };
       if (/^(항목|파트|짐) 삭제/.test(text)) return { icon: '🗑️', text };
       if (/^파트/.test(text)) return { icon: '📁', text };
@@ -1226,7 +1234,7 @@
       // 중요도·담당
       f.prio = seg([['high', '중요', 'ck-seg-bad'], ['mid', '보통'], ['low', '여유']], it.priority || 'mid', (v) => {
         const x = curItem(); if (!x || (x.priority || 'mid') === v) return;
-        MV.items.update(id, { priority: v }, '중요도 변경: ' + x.title + ' → ' + PRI_LABEL[v]);
+        MV.items.update(id, { priority: v }, '🚩 중요도 변경: ' + x.title + ' → ' + PRI_LABEL[v]);
       }, '중요도');
       f.owner = seg([['', '없음'], ['나', '나'], ['아내', '아내'], ['함께', '함께']], it.owner || '', (v) => {
         const x = curItem(); if (!x || (x.owner || '') === v) return;
@@ -1459,6 +1467,9 @@
       lingering.forEach((t) => clearTimeout(t));
       lingering.clear();
       if (!isPhone()) mem.listScroll[effCh() + (effCh() === '~search' ? ':' + cur.q : '')] = list.scrollTop;
+      else mem.winScroll[screenKey()] = window.scrollY;
+      mem.sideScroll = chans.scrollTop;
+      mem.unmountedAt = performance.now();
     });
 
     /* ---------- 시작 ---------- */

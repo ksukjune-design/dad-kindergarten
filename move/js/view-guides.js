@@ -93,7 +93,13 @@
     const tpl = document.createElement('template');
     tpl.innerHTML = html;
     const frag = tpl.content;
-    frag.querySelectorAll('script').forEach((s) => s.remove());
+    // 콘텐츠는 우리가 쓴 것이지만, 실행되는 코드는 들이지 않습니다
+    frag.querySelectorAll('script, iframe, object, embed').forEach((s) => s.remove());
+    frag.querySelectorAll('*').forEach((n) => {
+      Array.from(n.attributes).forEach((a) => {
+        if (/^on/i.test(a.name) || (/^(href|src|xlink:href|action|formaction)$/i.test(a.name) && /^\s*javascript:/i.test(a.value))) n.removeAttribute(a.name);
+      });
+    });
     const used = new Set(Array.from(frag.querySelectorAll('[id]')).map((n) => n.id));
     const sections = [];
     frag.querySelectorAll('h2, h3').forEach((h) => {
@@ -260,7 +266,7 @@
     var(--bg-2); }
 .gd-tablewrap table { width:100%; border-collapse:collapse; margin:0; font-size:.88rem; line-height:1.5; }
 .gd-tablewrap th, .gd-tablewrap td { padding:8px 11px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; overflow-wrap:normal; }
-.gd-tablewrap td { min-width:6.5em; }
+.gd-tablewrap td { min-width:7.5em; }
 .gd-tablewrap td.num, .gd-tablewrap td:first-child { min-width:4em; }
 .gd-tablewrap thead th { font-size:.78rem; color:var(--ink-2); font-weight:800; white-space:nowrap; background:color-mix(in srgb, var(--bg-3) 70%, transparent); }
 .gd-tablewrap tr:last-child td { border-bottom:0; }
@@ -547,11 +553,13 @@
     /* 목차 */
     const tocLinks = [];      // [{id, a}] 데스크톱 + 접이식 둘 다
     let closeMobile = () => {};
+    let spyLock = 0, spyTimer = 0;
     const goAnchor = (logical, opts) => {
       opts = opts || {};
       const t = findTarget(content, logical, idMap);
       if (!t) return false;
       openParents(t);
+      if (!opts.instant && !reduceMotion()) spyLock = Date.now() + 900;   // 부드러운 스크롤 중엔 목차 강조가 흔들리지 않게
       t.scrollIntoView({ behavior: opts.instant || reduceMotion() ? 'auto' : 'smooth', block: 'start' });
       if (opts.updateHash !== false) {
         try { history.replaceState(history.state, '', guideHash(g.id, logical)); } catch (e) { /* 무시 */ }
@@ -623,11 +631,17 @@
     const spy = () => {
       raf = 0;
       if (!alive || !sections.length) return;
+      const wait = spyLock - Date.now();
+      if (wait > 0) {
+        clearTimeout(spyTimer);
+        spyTimer = setTimeout(() => { if (alive) spy(); }, wait + 40);
+        return;
+      }
       const off = topOffset();
       let cur = null;
       for (const s of sections) {
         if (!s.el.isConnected) continue;
-        if (s.el.getBoundingClientRect().top - off <= 4) cur = s; else break;
+        if (s.el.getBoundingClientRect().top - off <= 28) cur = s; else break;
       }
       if (!cur && (window.innerHeight + window.scrollY) >= document.documentElement.scrollHeight - 2) cur = sections[sections.length - 1];
       setActive(cur ? cur.id : sections[0].id);
@@ -635,7 +649,7 @@
     const onScroll = () => { if (!raf) raf = requestAnimationFrame(spy); };
     window.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('resize', onScroll, { passive: true });
-    ctx.onCleanup(() => { window.removeEventListener('scroll', onScroll); window.removeEventListener('resize', onScroll); if (raf) cancelAnimationFrame(raf); });
+    ctx.onCleanup(() => { window.removeEventListener('scroll', onScroll); window.removeEventListener('resize', onScroll); if (raf) cancelAnimationFrame(raf); clearTimeout(spyTimer); });
 
     // 본문 안의 해시 링크 (#abc, #/guide/<같은 id>/abc) 는 화면을 다시 그리지 않고 이동
     content.addEventListener('click', (e) => {

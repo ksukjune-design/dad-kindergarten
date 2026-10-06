@@ -705,7 +705,7 @@
       });
       g.appendChild(svg('title', it.name + ' · ' + Math.round(num(it.w, 0)) + '×' + Math.round(num(it.d, 0)) + '×' + Math.round(num(it.h, 0)) + 'cm · ' + MV.inv.fate(fate).label));
       if (live) {
-        const hw = Math.max(r.w, 30 / s), hh = Math.max(r.h, 30 / s);
+        const hw = Math.max(r.w, 26 / s), hh = Math.max(r.h, 26 / s);
         g.appendChild(svg('rect', { class: 'fp-hit', x: r1((r.w - hw) / 2), y: r1((r.h - hh) / 2), width: r1(hw), height: r1(hh), fill: 'transparent' }));
       }
       g.appendChild(svg('rect', Object.assign({
@@ -769,7 +769,7 @@
   function exportPlanPNG(plan, key, o) {
     return new Promise((resolve, reject) => {
       const scale = MV.clamp(2400 / plan.vb.w, 1.2, 3);
-      const node = buildSVG(plan, key, { s: scale, interactive: false, edit: false, grid: o.grid, sel: null, issues: o.issues, items: o.items, fontScale: 1.2 });
+      const node = buildSVG(plan, key, { s: scale, interactive: false, edit: false, grid: o.grid, sel: null, issues: o.issues, items: o.items, fontScale: 1.9 });
       const holder = el('div', { 'aria-hidden': 'true', style: { position: 'fixed', left: '-30000px', top: '0', pointerEvents: 'none' } }, node);
       document.body.appendChild(holder);
       let xml;
@@ -798,7 +798,7 @@
           g.drawImage(img, 0, head, W, H);
           c.toBlob((blob) => {
             if (!blob) { reject(new Error('이미지 변환 실패')); return; }
-            downloadBlob(blob, (key === 'new' ? '새집' : '지금집') + '-배치도-' + MV.date.today() + '.png');
+            downloadBlob(blob, 'move-plan-' + key + '-' + MV.date.today().replace(/-/g, '') + '.png');
             resolve();
           }, 'image/png');
         } catch (e) { reject(e); }
