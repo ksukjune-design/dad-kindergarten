@@ -2162,7 +2162,7 @@
 .ck-comp-pl { display: none; flex: none; font-size: .74rem; font-weight: 800; color: var(--ink-3); white-space: nowrap; }
 .ck-comp-part { flex: 1 1 auto; width: auto; min-width: 0; max-width: 100%; min-height: 44px; font-size: .85rem; }
 /* 좁은 목록 열(목록 열 480px 미만: 스레드가 열린 데스크톱, 좁은 태블릿 등): 파트 고르기는 윗줄로 → 입력칸을 넓게.
-   컨테이너 쿼리라 JS 로 너비를 재지 않음 (입력창 안쪽 너비 456px = 목록 열 480px − 좌우 여백 24px) */
+   컨테이너 쿼리라 JS 로 너비를 재지 않음 (입력창 영역의 안쪽 너비 456px = 목록 열 480px − 좌우 여백 24px) */
 .ck-composer { container: ck-comp / inline-size; }
 @media (min-width: 700px) {
   @container ck-comp (max-width: 455.98px) {
