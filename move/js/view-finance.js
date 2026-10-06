@@ -242,31 +242,33 @@
 
   /* ======================= 기본값 ======================= */
   const DEFAULT_TIMES = { bankA: '09:20', recv: '09:30', keys: '09:45', registry: '10:00', toC: '10:15', broker: '10:40', bank: '11:00', movein: '14:00' };
+  /* 가족 결정(2026-10-06): 옷장은 이사 후 간이 옷장(약 20만원, 선택·나중에), 통돌이 약 50만원(이사 후 배송),
+     커튼·소품은 지금 것 가져감(0원), 입주청소는 직접(0원), 예비비 없음 */
   const LINE_META = {
-    mover: { auto: 'mover', low: 1500000, high: 2800000, conf: 'low', basis: '서울 20평대 3인 포장이사 약 150만~280만원(부가세 별도 시세), 모델 기준가 197만원(에어컨 제외). 예산에는 실제로 낼 돈(부가세 포함)을 넣어요. 방문견적 3곳으로 다시 맞추기' },
+    mover: { auto: 'mover', low: 1500000, high: 2800000, conf: 'low', basis: '서울 20평대 3인 포장이사 약 150만~280만원(부가세 별도 시세), 모델 기준가 197만원(에어컨 제외). 11/3은 손없는날·주말 할증은 없고 월초라 업체에 따라 약 5% 붙을 수 있어요. 예산에는 실제로 낼 돈(부가세 포함)을 넣어요. 옷장을 이사 전에 사지 않으니 행거박스를 몇 개 가져오는지 물어 견적에 넣기. 방문견적 3곳으로 다시 맞추기' },
     lg: { auto: 'lg', low: 300000, high: 800000, conf: 'low', basis: 'LG 이전설치: 냉장고 약 12만·건조기 약 11만(2개 이상 10% 할인)·운송비 약 4만원, 스탠드 에어컨 31.8만원(2025-11 기준). 1544-7777 확인' },
-    clean: { low: 300000, high: 450000, conf: 'low', basis: '입주청소 30만~45만원 (24평 안팎). 직접 청소하면 0원 — 사전방문 때 집 상태를 보고 정해요' },
-    wardrobe: { low: 500000, high: 2000000, conf: 'low', basis: '옷장 50만~200만원 — 붙박이장이 없어져 꼭 필요해요. 사전방문(10/10~10/11) 때 실측 → 집주인 벽 고정 동의 10/14까지 → 10/18까지 주문 → 설치는 이사 후 11/4~11/6 (선반입이 되면 11/2)' },
-    washer: { low: 600000, high: 1100000, conf: 'low', basis: '통돌이 세탁기 60만~110만원. 고장 세탁기는 폐가전 무상방문수거(1599-0903)' },
+    wardrobe: { low: 100000, high: 300000, conf: 'low', basis: '간이 옷장·행거 약 10만~30만원 (이케아 등, 추정). 이사 전에는 사지 않아요 — 옷은 박스·행거박스로 옮기고, 이사 후 방을 실측해서 사요. 키 큰 옷장을 고르면 그때 벽 고정이 필요한지 확인. 11/3 현금에는 넣지 않아요' },
+    washer: { low: 400000, high: 600000, conf: 'low', basis: '통돌이 세탁기 약 50만원 선 (40만~60만원, 추정). 이사 후 11/4~11/6 배송으로 주문. 고장 세탁기는 지금 집에서 폐가전 무상방문수거(1599-0903)' },
     waste: { auto: 'waste', low: 0, high: 100000, conf: 'low', basis: '대형폐기물 스티커 품목당 약 1.5만원(강서구 단가표 확인). 폐가전은 무상수거' },
     elevator: { auto: 'elevator', low: 0, high: 200000, conf: 'low', basis: '단지당 0~10만원, 관리사무소마다 달라요 — 두 관리사무소에 확인' },
     internet: { low: 0, high: 50000, conf: 'low', basis: '통신사 이전설치비(보통 수만원 이내) — 통신사에 확인' },
     hug: { auto: 'hug', optional: true, low: 736000, high: 819200, conf: 'mid', basis: 'HUG 아파트 요율 연 약 0.115~0.128% × 2년 (3.2억이면 약 74만~82만원). 전입·확정일자 뒤 11월 중 가입할 때 내는 돈이라 11/3 당일 현금과는 따로예요. 2025~2026 개편 여부는 신청 화면에서 확인' },
-    deco: { low: 200000, high: 600000, conf: 'low', basis: '커튼·소품 20만~60만원. 사전방문 때 창 치수를 재서 안방·아이방 커튼(또는 블라인드)만 10/25까지 주문해 이사 날 달고, 나머지는 살아 보며 천천히' },
-    reserve: { low: 0, high: 500000, conf: 'low', basis: '예상 못 한 지출 대비 (배관 연장, 실외기 앵글, 추가 인력 등)' },
   };
+  /* HUG 미가입 때 생길 수 있는 문제를 실제 숫자로 비교한 별첨 가이드 */
+  const HUG_GUIDE = '#/guide/hug';
   /* 예산 묶음 — 11/3 전후에 꼭 현금이 필요한 돈과 살림 구입·선택 항목을 나눠 봄 */
   const GROUPS = [
     { id: 'essential', icon: '🚚', label: '꼭 드는 이사 비용', short: '꼭 드는 비용', what: '이사 날 전후로 반드시 나가는 돈 — 11/3 남는 돈으로 낼 수 있어야 해요',
       desc: '이사 날 전후로 반드시 나가는 돈이에요 (이사업체, LG 가전 이전, 엘리베이터 사용료, 대형폐기물, 인터넷 이전). 11/3에 남는 돈으로 이걸 낼 수 있는지가 가장 중요해요.' },
-    { id: 'purchase', icon: '🛒', label: '새로 사는 살림', short: '살림 구입', what: '새로 사는 물건 — 필요하지만 카드 할부로 나눠 낼 수 있어요',
-      desc: '이사비가 아니라 새로 사는 물건이에요 (붙박이장 대신 옷장, 고장 난 세탁기 대신 통돌이, 커튼·소품). 필요하지만 카드 할부로 나눠 낼 수 있어요.' },
-    { id: 'optional', icon: '🗂', label: '선택·나중에', short: '선택·나중에', what: '안 해도 되거나 이사 뒤에 내는 돈 (HUG 보증료는 전입 후 11월 중 가입할 때 내요)',
-      desc: '안 해도 되거나(입주청소) 이사 뒤에 내는 돈(HUG 보증료는 전입 후 11월 중 가입할 때), 혹시 몰라 잡아 둔 예비비예요.' },
+    { id: 'purchase', icon: '🛒', label: '새로 사는 살림', short: '살림 구입', what: '새로 사는 물건 — 고장 난 세탁기 대신 통돌이(약 50만원, 이사 후 배송). 커튼·소품은 지금 것을 가져가요',
+      desc: '이사비가 아니라 새로 사는 물건이에요. 고장 난 세탁기 대신 통돌이 세탁기(약 50만원)를 이사 후 11/4~11/6에 배송받아요. 커튼·소품은 지금 것을 가져가서 0원이에요. 카드 할부로 나눠 낼 수도 있어요.' },
+    { id: 'optional', icon: '🗂', label: '선택·나중에', short: '선택·나중에', what: '이사 뒤에 정하거나 내는 돈 — 간이 옷장(이사 후 실측하고 구매), HUG 보증료(전입 후 11월 중 가입할 때)',
+      desc: '이사 뒤에 정해도 되는 돈이에요. 간이 옷장(약 20만원, 추정)은 이사 후 실측하고 이케아 등에서 사고, HUG 보증료는 전입·확정일자 뒤 11월 중 가입할 때 내요. 11/3 현금에는 넣지 않아요.' },
   ];
   const GROUP_BY_ID = {};
   GROUPS.forEach((g) => { GROUP_BY_ID[g.id] = g; });
-  const GROUP_OF = { mover: 'essential', lg: 'essential', elevator: 'essential', waste: 'essential', internet: 'essential', wardrobe: 'purchase', washer: 'purchase', deco: 'purchase', clean: 'optional', hug: 'optional', reserve: 'optional' };
+  /* clean·deco·reserve 는 예전 기본 줄 — 사용자가 고친 줄만 남아 있을 수 있어 묶음만 기억 */
+  const GROUP_OF = { mover: 'essential', lg: 'essential', elevator: 'essential', waste: 'essential', internet: 'essential', washer: 'purchase', wardrobe: 'optional', hug: 'optional', deco: 'purchase', clean: 'optional', reserve: 'optional' };
   const groupOf = (l) => (l && GROUP_BY_ID[l.group] ? l.group : (l && GROUP_OF[l.id]) || 'purchase');
   const REFUND_META = {
     jangsu: { conf: 'mid', basis: '공동주택관리법 시행령 제31조 — 세입자가 낸 장기수선충당금은 소유자에게 돌려받을 수 있어요(약 20만~50만원 추정). 관리사무소 납부확인서로 금액 확정' },
@@ -285,20 +287,55 @@
     o.label = String(o.label == null ? '' : o.label);
     return o;
   }
-  function defaultLines() {
-    return [
-      { id: 'mover', label: '이사업체 (포장이사)', amount: 2167000 },
-      { id: 'lg', label: 'LG 가전 이전설치', amount: 565000 },
-      { id: 'clean', label: '입주청소', amount: 380000 },
-      { id: 'wardrobe', label: '옷장 구매', amount: 1000000 },
-      { id: 'washer', label: '통돌이 세탁기 구매', amount: 850000 },
-      { id: 'waste', label: '대형폐기물 스티커', amount: 50000 },
-      { id: 'elevator', label: '엘리베이터 사용료 (두 단지)', amount: 100000 },
-      { id: 'internet', label: '인터넷 이전설치', amount: 20000 },
-      { id: 'hug', label: '전세보증금반환보증 보증료 (HUG 2년)', amount: 780800 },
-      { id: 'deco', label: '커튼·소품', amount: 400000 },
-      { id: 'reserve', label: '예비비', amount: 300000 },
-    ].map(normLine);
+  /* 기본 줄 (v3, 2026-10-06 가족 결정 반영) */
+  const DEFAULT_LINES = [
+    { id: 'mover', label: '이사업체 (포장이사 · 부가세 포함)', amount: 2167000, group: 'essential' },
+    { id: 'lg', label: 'LG 가전 이전설치', amount: 565000, group: 'essential' },
+    { id: 'waste', label: '대형폐기물 스티커', amount: 50000, group: 'essential' },
+    { id: 'elevator', label: '엘리베이터 사용료 (두 단지)', amount: 100000, group: 'essential' },
+    { id: 'internet', label: '인터넷 이전설치', amount: 20000, group: 'essential' },
+    { id: 'washer', label: '통돌이 세탁기 (이사 후 배송)', amount: 500000, group: 'purchase', memo: '11/4~11/6 배송으로 주문' },
+    { id: 'wardrobe', label: '간이 옷장 (이사 후, 이케아 등)', amount: 200000, group: 'optional', memo: '이사 후 실측하고 구매' },
+    { id: 'hug', label: '전세보증금반환보증 보증료 (HUG 2년)', amount: 780800, group: 'optional' },
+  ];
+  function defaultLines() { return DEFAULT_LINES.map((l) => normLine(MV.clone(l))); }
+  /* v2 이전 기본 줄 — 저장된 줄이 이 값 그대로면(사용자가 한 번도 안 고침) 새 기본값으로 바꿈 */
+  const OLD_LINES = {
+    mover: { label: '이사업체 (포장이사)', group: 'essential' },
+    lg: { label: 'LG 가전 이전설치', group: 'essential' },
+    waste: { label: '대형폐기물 스티커', group: 'essential' },
+    elevator: { label: '엘리베이터 사용료 (두 단지)', group: 'essential' },
+    internet: { label: '인터넷 이전설치', amount: 20000, group: 'essential' },
+    hug: { label: '전세보증금반환보증 보증료 (HUG 2년)', group: 'optional' },
+    clean: { label: '입주청소', amount: 380000, group: 'optional', drop: true },
+    wardrobe: { label: '옷장 구매', amount: 1000000, group: 'purchase' },
+    washer: { label: '통돌이 세탁기 구매', amount: 850000, group: 'purchase' },
+    deco: { label: '커튼·소품', amount: 400000, group: 'purchase', drop: true },
+    reserve: { label: '예비비', amount: 300000, group: 'optional', drop: true },
+  };
+  /* 한 번도 안 고친 줄인지 (저장된 그대로의 줄로 판단): edited 표시가 없고,
+     이름·금액(직접 줄)·자동 여부·묶음·결제일·메모·냄·켜짐이 예전 기본값 그대로 */
+  function pristineLine(l, old) {
+    if (!l || !old || l.edited) return false;
+    if (String(l.label || '') !== old.label) return false;
+    if (old.amount != null ? num(l.amount) !== old.amount : l.auto === false) return false;
+    if (l.group != null && l.group !== old.group) return false;
+    if (l.paid || l.on === false || (l.date && String(l.date).trim()) || (l.memo && String(l.memo).trim())) return false;
+    return true;
+  }
+  /* v2 → v3: 줄 id 별로, 사용자가 안 고친 줄만 새 기본값으로 (고친 줄은 그대로 둠).
+     lines 는 저장된 줄의 얕은 복사본 (normLine 전 — 묶음이 새 GROUP_OF 로 채워지기 전에 비교) */
+  function migrateLinesV3(lines) {
+    const out = [];
+    lines.forEach((l) => {
+      const old = OLD_LINES[l.id];
+      if (!pristineLine(l, old)) { out.push(l); return; }
+      if (old.drop) return; /* 입주청소(직접 청소)·커튼·소품(지금 것 가져감)·예비비(없음) — 빼기 */
+      const def = DEFAULT_LINES.find((d) => d.id === l.id);
+      if (def) Object.assign(l, MV.clone(def));
+      out.push(l);
+    });
+    return out;
   }
   function defaultRefunds() {
     return [
@@ -306,9 +343,10 @@
       { id: 'hfFee', label: 'HF 보증료 미경과분 환급 (있으면)', amount: 0 },
     ].map(normRefund);
   }
+  const FIN_V = 3; /* 2: 임대차 신고 상태 ↔ 체크리스트 맞춤, 3: 예산 기본 줄 가족 결정 반영 */
   function defaults() {
     return {
-      v: 2,
+      v: FIN_V,
       old: { deposit: 420000000, early: 42000000, receive: 378000000 },
       loan: { original: 100000000, prepaid: 22000000, payoff: 78130000, lien: 'unknown' },
       newHome: {
@@ -339,9 +377,14 @@
     return target === undefined ? defs : target;
   }
   function withDefaults(fin) {
+    /* 저장된 기록의 버전 (없으면 v1). 새 기록(null)은 이미 최신 기본값 */
+    const rawV = fin && typeof fin === 'object' ? num(fin.v) : FIN_V;
     const f = fill(fin, defaults());
     f.budget = Object.assign({}, f.budget);
-    f.budget.lines = (Array.isArray(f.budget.lines) ? f.budget.lines : []).filter((x) => x && typeof x === 'object').map(normLine);
+    let raw = (Array.isArray(f.budget.lines) ? f.budget.lines : []).filter((x) => x && typeof x === 'object').map((x) => Object.assign({}, x));
+    if (rawV < 3) raw = migrateLinesV3(raw);
+    f.budget.lines = raw.map(normLine);
+    f.v = Math.max(rawV, FIN_V);
     f.budget.refunds = (Array.isArray(f.budget.refunds) ? f.budget.refunds : []).filter((x) => x && typeof x === 'object').map(normRefund);
     ['times', 'done', 'memo', 'prep'].forEach((k) => { if (!f.flow[k] || typeof f.flow[k] !== 'object') f.flow[k] = k === 'times' ? Object.assign({}, DEFAULT_TIMES) : {}; });
     if (!f.links || typeof f.links !== 'object' || Array.isArray(f.links)) f.links = {};
@@ -351,12 +394,11 @@
     MV.store.ensure('finance', defaults);
     const st = MV.store.get();
     const stored = st.finance && typeof st.finance === 'object' ? st.finance : null;
-    const wasV = stored ? num(stored.v) : 2;
-    const filled = withDefaults(st.finance);
+    const wasV = stored ? num(stored.v) : FIN_V;
+    const filled = withDefaults(st.finance); /* v3 예산 줄 바꿈(안 고친 줄만)도 여기서 — 버전은 FIN_V 로 */
     if (wasV < 2) {
       /* v1 → v2: 예전엔 '신고 상태'만 바꾸고 연결된 체크리스트 항목은 그대로 두는 버그가 있었음.
          그때 고른 상태(신고돼 있음/지금 신고함)를 체크리스트 항목에도 한 번만 맞춰 줌 */
-      filled.v = 2;
       MV.store.update((s) => {
         s.finance = filled;
         if (['done', 'late'].indexOf(filled.protect.rentReport) < 0) return;

@@ -65,14 +65,26 @@
     sideScroll: 0,      // 사이드바 스크롤
     unmountedAt: -1e9,  // 마지막으로 이 뷰를 닫은 시각 (같은 뷰 다시 그리기 판별)
     focusRow: null,     // 다시 그린 뒤 초점을 돌려줄 항목
+    listAnchor: {},     // 채널 → 목록 맨 위에 보이던 줄 { id, off } (데스크톱 열)
+    winAnchor: {},      // 폰 화면 키 → 맨 위에 보이던 줄 { id, off }
   };
 
   /* ---------------- 작은 도우미 ---------------- */
-  const mq = (q) => (window.matchMedia ? window.matchMedia(q) : { matches: false, addEventListener() {}, removeEventListener() {} });
+  /* MediaQueryList 는 한 번만 만들어 둠 (.matches 는 늘 최신) — 크기를 재지 않고 화면 종류를 앎 */
+  const mqCache = {};
+  const mq = (q) => mqCache[q] || (mqCache[q] = window.matchMedia ? window.matchMedia(q) : { matches: false, addEventListener() {}, removeEventListener() {} });
   const MQ_PHONE = '(max-width: 699px)';
   const MQ_DESK = '(min-width: 1100px)';
+  const MQ_TOUCH = '(pointer: coarse)';   // 손가락이 주 입력 (폰·태블릿)
   const isPhone = () => mq(MQ_PHONE).matches;
   const isDesk = () => mq(MQ_DESK).matches;
+  const isTouch = () => mq(MQ_TOUCH).matches;
+  /* 메모 입력 안내: 화면 키보드에는 쉬프트가 없어 터치 화면에서는 엔터 = 줄바꿈, 저장은 '보내기' */
+  const NOTE_PH_TOUCH = '메모 남기기… (보내기 버튼으로 저장)';
+  const NOTE_PH_KEYS = '메모 남기기… (엔터: 저장 · 쉬프트+엔터: 줄바꿈)';
+  /* 할 일 입력창 예시: 칸 너비에 맞는 것 중 가장 긴 것 (잘린 예시는 오히려 헷갈림) */
+  const COMP_PH = ['할 일 추가… 예) 우리은행 방문 ~10/15 !중요 @아내', '할 일 추가… 예) 은행 ~10/15', '할 일 추가…'];
+  const MOVE_PH = '📁 파트 옮기기';
   const isSpecial = (ch) => !!ch && ch.charAt(0) === '~';
 
   function ui() { return MV.store.ensure('checklistUI', { hideDone: true, owner: '' }); }
@@ -266,13 +278,30 @@
     node.replaceChildren(...flat);
     return node;
   }
-  function autosize(ta, max) {
-    if (!ta || !ta.isConnected || !ta.getClientRects().length) return;
-    ta.style.height = 'auto';
-    const h = ta.scrollHeight + (ta.offsetHeight - ta.clientHeight);
-    const lim = max && h > max;
-    ta.style.height = (lim ? max : h) + 'px';
-    ta.style.overflowY = lim ? 'auto' : 'hidden';
+  /* 글 높이에 맞춰 textarea 키우기. 여러 칸을 한꺼번에: 모두 쓰고(auto) → 모두 읽고 → 모두 씀 (레이아웃 계산 1번) */
+  function autosizeAll(pairs) {
+    const tas = pairs.filter((p) => p && p[0] && p[0].isConnected);
+    const prev = tas.map(([ta]) => ta.style.height);
+    tas.forEach(([ta]) => { ta.style.height = 'auto'; });
+    const hs = tas.map(([ta]) => (ta.offsetHeight || ta.clientHeight ? ta.scrollHeight + (ta.offsetHeight - ta.clientHeight) : -1));
+    tas.forEach(([ta, max], i) => {
+      const h = hs[i];
+      if (h < 0) { ta.style.height = prev[i]; return; }   // 화면에 없음 (숨김) → 그대로
+      const lim = max && h > max;
+      ta.style.height = (lim ? max : h) + 'px';
+      ta.style.overflowY = lim ? 'auto' : 'hidden';
+    });
+  }
+  function autosize(ta, max) { autosizeAll([[ta, max]]); }
+  /* 애니메이션 다시 틀기 (offsetWidth 로 강제 레이아웃을 일으키지 않음) */
+  function replayAnim(node, cls) {
+    if (!node) return;
+    if (node.classList.contains(cls) && node.getAnimations) {
+      const a = node.getAnimations().find((x) => x.animationName === cls);
+      if (a) { a.currentTime = 0; a.play(); return; }
+    }
+    node.classList.add(cls);
+    node.addEventListener('animationend', () => node.classList.remove(cls), { once: true });
   }
   /* 폰(창 전체가 스크롤): node 를 위쪽 고정 머리와 아래쪽 고정 입력창(+하단 메뉴) 사이에 보이게.
      scrollIntoView({block:'nearest'}) 는 sticky 입력창을 모르므로 새 줄·새 메모가 그 뒤에 숨었음. */
@@ -415,7 +444,10 @@
       chans,
       el('div', { class: 'ck-side-foot' },
         el('button', { type: 'button', class: 'ck-addpart', onclick: () => addPart() }, el('span', { 'aria-hidden': 'true' }, '＋'), ' 파트 추가'),
-        el('p', { class: 'ck-keys' }, el('kbd', '/'), ' 검색 · ', el('kbd', 'n'), ' 새 할 일', el('br'), el('kbd', 'j'), ' ', el('kbd', 'k'), ' 위아래 · ', el('kbd', 'Esc'), ' 상세 닫기')));
+        // 키보드 단축키 (마우스가 있는 컴퓨터에서만 보임). 한글 자판 글쇠 이름으로: ㅜ=새 할 일, ㅓ·ㅏ=아래·위
+        el('p', { class: 'ck-keys' }, el('span', { class: 'ck-keys-h' }, '단축키'), ' ',
+          el('kbd', '/'), ' 검색 · ', el('kbd', 'ㅜ'), ' 새 할 일', el('br'),
+          el('kbd', 'ㅓ'), ' ', el('kbd', 'ㅏ'), ' 아래·위 · ', el('kbd', '이스케이프'), ' 닫기')));
 
     const head = el('header', { class: 'ck-head' });
     const sub = el('div', { class: 'ck-sub' });
@@ -424,7 +456,7 @@
     const compPart = el('select', { class: 'select ck-comp-part', 'aria-label': '추가할 파트' });
     const compPartWrap = el('label', { class: 'ck-comp-pw' }, el('span', { class: 'ck-comp-pl', 'aria-hidden': 'true' }, '추가할 파트'), compPart);
     const compInput = el('input', {
-      class: 'input ck-comp-input', placeholder: '할 일 추가… 예) 우리은행 방문 ~10/15 !중요 @아내',
+      class: 'input ck-comp-input', placeholder: isPhone() ? COMP_PH[1] : COMP_PH[0],   // 칸 너비에 맞게 fitCompPh 가 고침
       'aria-label': '할 일 추가', autocomplete: 'off', enterkeyhint: 'done', maxlength: String(TITLE_MAX + 60),
     });
     const compBtn = el('button', { type: 'button', class: 'btn btn-primary ck-comp-btn', 'aria-label': '할 일 추가' }, '추가');
@@ -445,6 +477,74 @@
       if (cur.ch === '~search') return 'search';
       return 'list:' + cur.ch;
     }
+    const listKey = () => effCh() + (effCh() === '~search' ? ':' + cur.q : '');
+
+    /* ---------- 다음 프레임에 한꺼번에 ----------
+       스크롤 쓰기·크기 재기처럼 레이아웃이 필요한 일은 그리는 도중이 아니라 다음 프레임 직전에 모아서 함
+       → DOM 을 다 바꾼 뒤 레이아웃을 딱 한 번만 계산 (그리는 도중에 읽으면 줄 220개를 한 번 더 계산했음) */
+    let frameQ = null;
+    function inFrame(fn) {
+      if (!frameQ) {
+        frameQ = [];
+        requestAnimationFrame(() => {
+          const q = frameQ; frameQ = null;
+          if (!alive) return;
+          q.forEach((f) => { try { f(); } catch (e) { console.error(e); } });
+        });
+      }
+      frameQ.push(fn);
+    }
+
+    /* ---------- 스크롤 저장·복원 ----------
+       줄은 content-visibility:auto (화면 밖 줄은 그리지 않음) → 화면 밖 줄 높이는 어림값이라 픽셀만 되살리면
+       몇 줄 어긋날 수 있음 → '맨 위에 보이던 줄'(기준 줄)과 그 위치를 함께 저장해 그 줄을 같은 자리에 둠.
+       저장은 화면을 바꾸기 전에만 (레이아웃이 이미 깨끗해 읽기가 쌈) */
+    function viewTop(phone) {
+      if (!phone) return list.getBoundingClientRect().top;
+      return head.getClientRects().length ? Math.max(0, head.getBoundingClientRect().bottom) : 0;   // 폰: 위에 붙는 머리 아래
+    }
+    function anchorRow(phone) {
+      const rows = list.querySelectorAll('.ck-row[data-id]');
+      if (!rows.length || !list.getClientRects().length) return null;
+      const top = viewTop(phone);
+      let lo = 0; let hi = rows.length - 1; let ans = -1;   // 아래쪽 끝이 보이는 첫 줄 (이진 탐색)
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (rows[mid].getBoundingClientRect().bottom > top + 1) { ans = mid; hi = mid - 1; } else lo = mid + 1;
+      }
+      if (ans < 0) return null;
+      const r = rows[ans].getBoundingClientRect();
+      return r.height ? { id: rows[ans].dataset.id, off: r.top - top } : null;
+    }
+    function saveScroll(sKey, lKey) {
+      try {
+        if (isPhone()) {
+          mem.winScroll[sKey] = window.scrollY;
+          mem.winAnchor[sKey] = /^(list|search)/.test(sKey) ? anchorRow(true) : null;
+        } else {
+          mem.listScroll[lKey] = list.scrollTop;
+          mem.listAnchor[lKey] = anchorRow(false);
+        }
+      } catch (e) { /* 무시 */ }
+    }
+    /* 기준 줄을 저장 때 자리로 돌리려면 얼마나 더 내려야 하는지 (없으면 null → 픽셀로) */
+    function anchorDelta(a, phone) {
+      if (!a) return null;
+      const row = list.querySelector('.ck-row[data-id="' + cssEsc(a.id) + '"]');
+      if (!row || !row.getClientRects().length) return null;
+      return row.getBoundingClientRect().top - viewTop(phone) - a.off;
+    }
+    function restoreListScroll(key) {   // 데스크톱·태블릿: 목록 칸
+      const d = anchorDelta(mem.listAnchor[key], false);
+      const cur0 = list.scrollTop;
+      const y = d != null ? cur0 + d : (mem.listScroll[key] || 0);
+      if (Math.abs(cur0 - y) >= 1) list.scrollTop = y;
+    }
+    function restoreWinScroll(k, y) {   // 폰: 창 전체
+      const d = y ? anchorDelta(mem.winAnchor[k], true) : null;
+      window.scrollTo(0, Math.max(0, d != null ? window.scrollY + d : y));
+    }
+
     function nav(hash, opts) {
       opts = opts || {};
       if (location.hash === hash) { applyRoute(MV.parseHash().params, opts.how || 'same'); return; }
@@ -470,10 +570,7 @@
       const inPlace = how === 'init' && performance.now() - mem.unmountedAt < 120;   // 뒤로·앞으로로 같은 뷰를 다시 그림
       const prevKey = screenKey();
       const prevEff = effCh(); const prevQ = cur.q;
-      if (how !== 'init') {
-        if (isPhone()) mem.winScroll[prevKey] = window.scrollY;
-        else mem.listScroll[prevEff + (prevEff === '~search' ? ':' + prevQ : '')] = list.scrollTop;
-      }
+      if (how !== 'init') saveScroll(prevKey, listKey());   // 아직 아무것도 바꾸기 전 (레이아웃이 깨끗해 읽기가 쌈)
 
       let ch = params[0] || null; let q = ''; let itemId = null;
       if (ch === '~search') { q = params[1] || ''; itemId = params[2] || null; }
@@ -505,19 +602,23 @@
       }
       wrap.classList.toggle('ck-open', !!itemId);
       syncDrawer();
-      // 목록 스크롤은 3열(스레드 열림)·2열 배치가 정해진 뒤에 되살림 → 줄 높이가 달라져 어긋나지 않게
+      // 목록 스크롤은 다음 프레임 직전에 되살림: 3열(스레드 열림)·2열 배치, 좁은 입력창(컨테이너 쿼리)까지
+      // 모두 정해진 한 번의 레이아웃에서 → 그리는 도중에 레이아웃을 강제로 계산하지 않음 (전체 220개도 빠르게)
       if ((chChanged || how === 'init') && !isPhone()) {
-        syncNarrow();   // 좁은 입력창(두 줄)도 먼저 정해야 목록 높이가 맞음 (ResizeObserver 는 늦게 옴)
-        list.scrollTop = mem.listScroll[effCh() + (effCh() === '~search' ? ':' + cur.q : '')] || 0;
+        const key = listKey();
+        if (how !== 'init' || mem.listScroll[key] || mem.listAnchor[key]) {
+          inFrame(() => { if (listKey() === key && !isPhone()) restoreListScroll(key); });
+        }
       }
       if (chChanged) hideCompNote();
 
       if (how === 'init') {
-        chans.scrollTop = mem.sideScroll || 0;
+        const sy = mem.sideScroll || 0;
+        if (sy > 0) inFrame(() => { chans.scrollTop = sy; });
         if (inPlace && isPhone()) {
           const k = screenKey();
           const y = k.indexOf('thread:') === 0 ? 0 : (mem.winScroll[k] || 0);
-          requestAnimationFrame(() => { if (alive) window.scrollTo(0, y); });   // 셸의 scrollTo 다음에
+          inFrame(() => { if (screenKey() === k) restoreWinScroll(k, y); });   // 셸의 scrollTo 다음에
         }
         if (inPlace && mem.focusRow && !isPhone()) {
           const a = list.querySelector('.ck-row[data-id="' + cssEsc(mem.focusRow) + '"] .ck-row-title');
@@ -530,7 +631,10 @@
         const k = screenKey();
         if (k !== prevKey || how === 'history') {
           const y = how === 'history' && mem.winScroll[k] != null ? mem.winScroll[k] : 0;
-          if (!(prevKey === 'channels' && k === 'search')) window.scrollTo(0, y);
+          if (!(prevKey === 'channels' && k === 'search')) {
+            if (!y) window.scrollTo(0, 0);   // 맨 위로는 레이아웃 계산 없이 바로 됨
+            else inFrame(() => { if (screenKey() === k) restoreWinScroll(k, y); });
+          }
         }
       }
       // 태블릿 서랍: 열릴 때 초점을 서랍으로, 닫힐 때 원래 줄로
@@ -1127,10 +1231,12 @@
         const pf = pendingFlash; pendingFlash = null;
         const row = list.querySelector('.ck-row[data-id="' + cssEsc(pf.id) + '"]');
         if (row) {
-          row.classList.remove('ck-flash'); void row.offsetWidth; row.classList.add('ck-flash');
-          row.addEventListener('animationend', () => row.classList.remove('ck-flash'), { once: true });
-          if (isPhone()) revealOnPhone(row, composer, head);   // 아래 고정 입력창 뒤에 숨지 않게
-          else row.scrollIntoView({ block: 'nearest' });
+          replayAnim(row, 'ck-flash');
+          inFrame(() => {   // 보이게 스크롤은 다음 프레임에 (그리는 도중에 레이아웃을 강제로 계산하지 않게)
+            if (!row.isConnected) return;
+            if (isPhone()) revealOnPhone(row, composer, head);   // 아래 고정 입력창 뒤에 숨지 않게
+            else row.scrollIntoView({ block: 'nearest' });
+          });
         } else showCompNote(pf);   // 지금 목록에 안 보이는 곳에 추가됨 → 입력창 위에 알림 (토스트는 입력창을 가림)
       }
     }
@@ -1259,7 +1365,7 @@
       if (!raw) { compInput.focus(); return; }
       const p = parseQuick(raw);
       if (!p.title) {
-        compInput.classList.remove('ck-shake'); void compInput.offsetWidth; compInput.classList.add('ck-shake');
+        replayAnim(compInput, 'ck-shake');
         MV.ui.toast('할 일 내용을 적어 주세요');
         return;
       }
@@ -1419,7 +1525,7 @@
         const bad = (msg) => { url.focus(); url.setAttribute('aria-invalid', 'true'); hint.textContent = msg; hint.hidden = false; return false; };
         if (!u) return bad('주소를 입력해 주세요.');
         if (/^www\./i.test(u) || !/^[a-z][a-z0-9+.-]*:/i.test(u) || /^[^:/]+\.[^:/]+:\d+/.test(u)) u = 'https://' + u.replace(/^\/+/, '');
-        if (!safeUrl(u)) return bad('http(s)://, tel:, mailto: 로 시작하는 주소만 넣을 수 있어요.');
+        if (!safeUrl(u)) return bad('인터넷 주소(https://…)나 전화·메일 링크만 넣을 수 있어요.');
         const x = MV.items.get(id);
         if (!x) return true;
         const links = arr(x.links).concat([{ label: label.value.trim() || u.replace(/^https?:\/\//, '').slice(0, 40), url: u }]);
@@ -1481,7 +1587,7 @@
       f.partChip = el('button', { type: 'button', class: 'chip ck-pchip ck-th-part', onclick: () => { const x = curItem(); if (x && MV.parts.get(x.partId)) goChannel(x.partId, x.id); } });
       f.moveSel = el('select', { class: 'select ck-move', 'aria-label': '다른 파트로 옮기기', title: '다른 파트로 옮기기' });
       f.moveSel.addEventListener('change', () => { const v = f.moveSel.value; f.moveSel.value = ''; if (v) moveTo(v); });
-      f.close = el('button', { type: 'button', class: 'btn btn-ghost btn-icon ck-th-close', 'aria-label': '상세 닫기 (Esc)', title: '닫기 (Esc)', onclick: () => closeThread() }, '✕');
+      f.close = el('button', { type: 'button', class: 'btn btn-ghost btn-icon ck-th-close', 'aria-label': '상세 닫기', title: '닫기 (이스케이프 키)', onclick: () => closeThread() }, '✕');
       const headEl = f.head = el('div', { class: 'ck-th-head' }, f.back, f.partChip, el('span', { class: 'ck-spacer' }), f.moveSel, f.close);
 
       // 완료 + 제목
@@ -1569,7 +1675,7 @@
         el('div', { class: 'ck-th-danger' }, delBtn));
 
       // 메모 입력
-      f.noteInput = el('textarea', { class: 'textarea ck-note-input', rows: '1', 'aria-label': '메모 입력', placeholder: '메모 남기기… (Enter 저장 · Shift+Enter 줄바꿈)' });
+      f.noteInput = el('textarea', { class: 'textarea ck-note-input', rows: '1', 'aria-label': '메모 입력' });
       f.noteInput.value = mem.noteDrafts[id] || '';
       f.noteSend = el('button', { type: 'button', class: 'btn btn-primary ck-note-send', 'aria-label': '메모 저장' }, '보내기');
       const sendNote = () => {
@@ -1581,17 +1687,30 @@
         MV.items.addNote(id, v);
         f.noteInput.focus({ preventScroll: true });
       };
+      /* 엔터: 컴퓨터(마우스)에서는 저장·쉬프트+엔터는 줄바꿈 / 터치 화면에서는 줄바꿈 (화면 키보드엔 쉬프트가 없음) → 저장은 '보내기'.
+         어느 기기든 컨트롤(⌘)+엔터는 저장. 한글 조합 중 엔터는 건드리지 않음 */
       f.noteInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); sendNote(); }
+        if (e.key !== 'Enter' || e.isComposing || e.keyCode === 229) return;
+        if (e.ctrlKey || e.metaKey) { e.preventDefault(); sendNote(); return; }
+        if (e.shiftKey || isTouch()) return;
+        e.preventDefault(); sendNote();
       });
       f.noteInput.addEventListener('input', () => { mem.noteDrafts[id] = f.noteInput.value; autosize(f.noteInput, 160); });
       f.noteSend.addEventListener('click', sendNote);
       const foot = f.foot = el('div', { class: 'ck-th-foot' }, el('div', { class: 'ck-note-row' }, f.noteInput, f.noteSend));
+      syncNoteHint();
 
       put(thread, headEl, f.body, foot);
       syncThread(true);
-      f.body.scrollTop = 0;
-      requestAnimationFrame(() => { if (T.f === f) { autosize(f.title); autosize(f.detail, 420); autosize(f.noteInput, 160); } });
+      // (f.body 는 새로 만든 칸이라 스크롤은 이미 맨 위 — scrollTop 을 쓰면 레이아웃을 강제로 계산하게 됨)
+      inFrame(() => { if (T.f === f) autosizeAll([[f.title], [f.detail, 420], [f.noteInput, 160]]); });
+    }
+    function syncNoteHint() {
+      const ta = T.f.noteInput;
+      if (!ta) return;
+      const touch = isTouch();
+      ta.placeholder = touch ? NOTE_PH_TOUCH : NOTE_PH_KEYS;
+      ta.setAttribute('enterkeyhint', touch ? 'enter' : 'send');
     }
 
     function renderDetailPreview(text) {
@@ -1622,7 +1741,7 @@
       if (f.partChip.textContent !== pl) put(f.partChip, el('span', { class: 'ck-th-part-t' }, pl));
       f.partChip.title = p ? p.name + ' 채널 보기' : '';
       if (ae !== f.moveSel) {
-        fillPartSelect(f.moveSel, '', '📁 다른 파트로 옮기기…');
+        fillPartSelect(f.moveSel, '', MOVE_PH);   // 짧게: 서랍·폰 머리에서 잘리지 않게 (전체 뜻은 aria-label·title)
         MV.$$('option', f.moveSel).forEach((o) => { o.disabled = o.value === it.partId; });
         f.moveSel.value = '';
       }
@@ -1655,7 +1774,7 @@
         put(f.links, ...(links.length ? links.map((l) => el('div', { class: 'ck-link' },
           safeUrl(l.url)
             ? el('a', { href: safeUrl(l.url), target: '_blank', rel: 'noopener noreferrer' }, '🔗 ', str(l.label) || str(l.url))
-            : el('span', { class: 'ck-link-bad', title: '열 수 없는 주소예요 (http·https·tel·mailto 만 열려요)' }, '⚠️ ', str(l.label) || str(l.url), el('small', ' · 열 수 없는 주소')),
+            : el('span', { class: 'ck-link-bad', title: '열 수 없는 주소예요 (인터넷 주소·전화·메일 링크만 열려요)' }, '⚠️ ', str(l.label) || str(l.url), el('small', ' · 열 수 없는 주소')),
           el('button', { type: 'button', class: 'ck-x', 'aria-label': '링크 지우기: ' + (str(l.label) || str(l.url)), onclick: () => {
             const x = curItem(); if (!x) return;
             const idx = arr(x.links).findIndex((y) => y && y.url === l.url && y.label === l.label);
@@ -1690,10 +1809,12 @@
           T.scrollNotes = false;
           const last = f.notes.lastElementChild;
           if (last) {
-            last.classList.add('ck-flash');
-            last.addEventListener('animationend', () => last.classList.remove('ck-flash'), { once: true });
-            if (isPhone()) revealOnPhone(last, f.foot, f.head);   // 아래 메모 입력창·하단 메뉴에 가리지 않게
-            else f.body.scrollTop = f.body.scrollHeight;
+            replayAnim(last, 'ck-flash');
+            inFrame(() => {
+              if (!last.isConnected) return;
+              if (isPhone()) revealOnPhone(last, f.foot, f.head);   // 아래 메모 입력창·하단 메뉴에 가리지 않게
+              else f.body.scrollTop = f.body.scrollHeight;
+            });
           }
         }
       }
@@ -1806,31 +1927,65 @@
       if (id === cur.itemId) return;
       selectItem(id);
       const r = list.querySelector('.ck-row[data-id="' + cssEsc(id) + '"]');
-      if (r) { if (isPhone()) revealOnPhone(r, composer, head); else r.scrollIntoView({ block: 'nearest' }); if (isDesk()) { const a = r.querySelector('.ck-row-title'); if (a) a.focus({ preventScroll: true }); } }
+      if (!r) return;
+      if (isDesk()) { const a = r.querySelector('.ck-row-title'); if (a) a.focus({ preventScroll: true }); }
+      inFrame(() => { if (!r.isConnected) return; if (isPhone()) revealOnPhone(r, composer, head); else r.scrollIntoView({ block: 'nearest' }); });
     }
     document.addEventListener('keydown', onKey);
     ctx.onCleanup(() => document.removeEventListener('keydown', onKey));
 
     /* ---------- 화면 크기 변화 ---------- */
-    const mqP = mq(MQ_PHONE); const mqD = mq(MQ_DESK);
-    function syncNarrow() { if (!alive) return; const w = main.clientWidth; composer.classList.toggle('ck-narrow', !isPhone() && w > 0 && w < 480); }
+    const mqP = mq(MQ_PHONE); const mqD = mq(MQ_DESK); const mqT = mq(MQ_TOUCH);
+    /* 좁은 목록 열에서 입력창을 두 줄로 바꾸는 건 CSS 컨테이너 쿼리가 함 (크기를 재지 않음).
+       ResizeObserver 는 레이아웃이 끝난 뒤 크기를 알려 주므로 강제 레이아웃 없이:
+       ① 두 줄 입력창일 때 토스트를 더 위로(ck-narrow) ② 입력창 너비에 맞는 예시 문구 고르기 */
+    let compPhFont = ''; let compPhW = null;
+    function fitCompPh(w) {
+      if (!(w > 0)) return;
+      let font = '';
+      try { const cs = getComputedStyle(compInput); font = cs.fontStyle + ' ' + cs.fontWeight + ' ' + cs.fontSize + ' ' + cs.fontFamily; } catch (e) { font = ''; }
+      if (!compPhW || font !== compPhFont) {
+        compPhFont = font;
+        let c2 = null;
+        try { c2 = document.createElement('canvas').getContext('2d'); if (c2 && font) c2.font = font; } catch (e) { c2 = null; }
+        compPhW = COMP_PH.map((t) => (c2 ? c2.measureText(t).width : t.length * 15));
+      }
+      let i = compPhW.findIndex((x) => x + 2 <= w);
+      if (i < 0) i = COMP_PH.length - 1;
+      if (compInput.placeholder !== COMP_PH[i]) compInput.placeholder = COMP_PH[i];
+    }
     if (window.ResizeObserver) {
-      const ro = new ResizeObserver(() => syncNarrow());
-      ro.observe(main);
+      const ro = new ResizeObserver((entries) => {
+        if (!alive) return;
+        entries.forEach((en) => {
+          const w = en.contentRect.width;
+          if (en.target === main) composer.classList.toggle('ck-narrow', !isPhone() && w > 0 && w < 480);
+          else if (en.target === compInput) fitCompPh(w);
+        });
+      });
+      ro.observe(main); ro.observe(compInput);
       ctx.onCleanup(() => ro.disconnect());
     }
-    const onMode = () => { if (!alive) return; syncDrawer(); syncNarrow(); renderSidebar(); requestAnimationFrame(() => { if (T.f.title) { autosize(T.f.title); autosize(T.f.detail, 420); autosize(T.f.noteInput, 160); } }); };
-    try { mqP.addEventListener('change', onMode); mqD.addEventListener('change', onMode); } catch (e) { /* 옛 브라우저 */ }
-    ctx.onCleanup(() => { try { mqP.removeEventListener('change', onMode); mqD.removeEventListener('change', onMode); } catch (e) { /* 무시 */ } });
+    const onMode = () => {
+      if (!alive) return;
+      syncDrawer(); renderSidebar();
+      inFrame(() => { if (T.f.title) autosizeAll([[T.f.title], [T.f.detail, 420], [T.f.noteInput, 160]]); });
+    };
+    const onTouchMode = () => { if (alive) syncNoteHint(); };
+    try { mqP.addEventListener('change', onMode); mqD.addEventListener('change', onMode); mqT.addEventListener('change', onTouchMode); } catch (e) { /* 옛 브라우저 */ }
+    ctx.onCleanup(() => { try { mqP.removeEventListener('change', onMode); mqD.removeEventListener('change', onMode); mqT.removeEventListener('change', onTouchMode); } catch (e) { /* 무시 */ } });
+
+    /* 사이드바 스크롤은 스크롤할 때 기억 (떠날 때 읽지 않음) */
+    let sideY = mem.sideScroll || 0;
+    chans.addEventListener('scroll', () => { sideY = chans.scrollTop; }, { passive: true });
 
     ctx.onCleanup(() => {
       try { flushThread(); } catch (e) { /* 무시 */ }
+      saveScroll(screenKey(), listKey());   // alive 를 끄기 전에 (아직 화면에 붙어 있음)
       alive = false;
       lingering.forEach((t) => clearTimeout(t));
       lingering.clear();
-      if (!isPhone()) mem.listScroll[effCh() + (effCh() === '~search' ? ':' + cur.q : '')] = list.scrollTop;
-      else mem.winScroll[screenKey()] = window.scrollY;
-      mem.sideScroll = chans.scrollTop;
+      mem.sideScroll = sideY;
       mem.unmountedAt = performance.now();
     });
 
@@ -1884,7 +2039,9 @@
 .ck-side-foot { flex: none; padding: 8px; border-top: 1px solid var(--line); }
 .ck-addpart { width: 100%; min-height: 38px; display: flex; align-items: center; gap: 6px; padding: 0 10px; border: 1px dashed var(--line-2); border-radius: 10px; background: transparent; color: var(--ink-2); font: inherit; font-size: .88rem; font-weight: 700; cursor: pointer; }
 .ck-addpart:hover { background: var(--bg-2); color: var(--brand); border-color: var(--brand); }
+/* 키보드 단축키 안내: 마우스가 있는 컴퓨터에서만 (터치 화면에서는 숨김) */
 .ck-keys { display: none; margin: 8px 2px 0; font-size: .7rem; color: var(--ink-3); line-height: 1.8; }
+.ck-keys-h { font-weight: 800; color: var(--ink-2); }
 @media (hover: hover) and (pointer: fine) { .ck-keys { display: block; } }
 
 /* 채널 머리 */
@@ -1934,6 +2091,9 @@
 .ck-caret { width: 1em; display: inline-block; }
 /* 줄은 position 을 주지 않음: 위치 지정된 줄은 터치 보정(touch adjustment)에서 바로 위 줄의 칩 터치를 가로챔 */
 .ck-row { display: flex; align-items: flex-start; gap: 4px; padding: 4px 16px 6px 8px; cursor: pointer; transition: background .1s; }
+/* 화면 밖 줄은 그리지 않음 → '전체'(220개)도 빨리 열림. 높이는 어림값(한 줄짜리 64px), 한 번 그린 줄은 실제 높이를 기억 */
+.ck-row { content-visibility: auto; contain-intrinsic-size: auto 64px; }
+.ck-row .ck-cb:focus-visible { outline-offset: -2px; }   /* 줄 밖으로 나간 초점 테두리는 잘리므로 안쪽에 */
 @media (hover: hover) { .ck-row:hover { background: color-mix(in srgb, var(--bg-3) 65%, transparent); } }
 .ck-row.ck-overdue { box-shadow: inset 3px 0 0 var(--bad); }
 .ck-row.ck-sel { background: var(--brand-bg); box-shadow: inset 3px 0 0 var(--brand); }
@@ -1969,8 +2129,9 @@
 .ck-empty-act { margin-top: 12px; display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
 
 /* 최근 활동 */
-.ck-act { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 7px 16px; border: 0; background: transparent; color: var(--ink); font: inherit; text-align: left; }
+.ck-act { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 7px 16px; border: 0; background: transparent; color: var(--ink); font: inherit; text-align: left; content-visibility: auto; contain-intrinsic-size: auto 52px; }
 .ck-act-link { cursor: pointer; }
+.ck-act-link:focus-visible { outline-offset: -3px; }
 @media (hover: hover) { .ck-act-link:hover { background: color-mix(in srgb, var(--bg-3) 65%, transparent); } }
 .ck-act-ico { flex: none; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; background: var(--bg-3); font-size: .95rem; }
 .ck-act-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
@@ -1985,13 +2146,18 @@
 .ck-comp-pw[hidden] { display: none; }
 .ck-comp-pl { display: none; flex: none; font-size: .74rem; font-weight: 800; color: var(--ink-3); white-space: nowrap; }
 .ck-comp-part { flex: 1 1 auto; width: auto; min-width: 0; max-width: 100%; min-height: 44px; font-size: .85rem; }
-/* 좁은 목록 열(스레드가 열린 데스크톱 등): 파트 고르기는 윗줄로 → 입력칸을 넓게 */
-.ck-composer.ck-narrow { padding-left: 10px; padding-right: 10px; }
-.ck-narrow .ck-comp-row { flex-wrap: wrap; row-gap: 6px; }
-.ck-narrow .ck-comp-pw { flex: 1 1 100%; max-width: none; }
-.ck-narrow .ck-comp-pl { display: inline; }
-.ck-narrow .ck-comp-part { min-height: 36px; padding-top: 4px; padding-bottom: 4px; }
-.ck-narrow .ck-comp-btn { padding: 0 12px; }
+/* 좁은 목록 열(목록 열 480px 미만: 스레드가 열린 데스크톱, 좁은 태블릿 등): 파트 고르기는 윗줄로 → 입력칸을 넓게.
+   컨테이너 쿼리라 JS 로 너비를 재지 않음 (입력창 안쪽 너비 456px = 목록 열 480px − 좌우 여백 24px) */
+.ck-composer { container: ck-comp / inline-size; }
+@media (min-width: 700px) {
+  @container ck-comp (max-width: 455.98px) {
+    .ck-comp-row { flex-wrap: wrap; row-gap: 6px; }
+    .ck-comp-pw { flex: 1 1 100%; max-width: none; }
+    .ck-comp-pl { display: inline; }
+    .ck-comp-part { min-height: 36px; padding-top: 4px; padding-bottom: 4px; }
+    .ck-comp-btn { padding: 0 12px; }
+  }
+}
 .ck-comp-note { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; padding: 4px 4px 4px 10px; border-radius: 10px; background: var(--good-bg); color: var(--ink); font-size: .82rem; font-weight: 600; animation: ck-note-in .16s ease-out; }
 .ck-comp-note[hidden] { display: none; }
 .ck-comp-note-ico { flex: none; color: var(--good); font-weight: 900; }
@@ -2186,8 +2352,9 @@ body:has(.ck) .toast button { white-space: nowrap; flex: none; }
   .ck-group { margin-top: 10px; background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 4px; }
   .ck-group-sp { border-bottom: 1px solid var(--line); padding-bottom: 4px; }
   .ck-group-h { padding: 8px 10px 2px; }
-  .ck-chan { min-height: 48px; padding: 6px 10px; font-size: 1rem; border-radius: 12px; }
-  .ck-chan + .ck-chan { box-shadow: 0 -1px 0 var(--line); }
+  .ck-chan { position: relative; min-height: 48px; padding: 6px 10px; font-size: 1rem; border-radius: 12px; }
+  /* 줄 사이 구분선: 곧은 한 줄 (둥근 모서리 줄에 box-shadow 를 쓰면 양 끝이 휘어 보였음) */
+  .ck-chan + .ck-chan::before { content: ''; position: absolute; top: 0; left: 10px; right: 10px; height: 1px; background: var(--line); pointer-events: none; }
   .ck-chan.ck-active { background: transparent; color: var(--ink-2); }
   .ck-chan.ck-active .ck-chan-meta { color: var(--ink-3); opacity: 1; }
   .ck-chan.ck-active .ck-chan-badge { background: var(--bad); color: var(--on-bad); }
@@ -2206,7 +2373,7 @@ body:has(.ck) .toast button { white-space: nowrap; flex: none; }
   .ck-filters { margin-left: 0; justify-content: space-between; }
   .ck-list { overflow: visible; padding-bottom: 8px; }
   .ck-bucket-h { position: static; padding: 14px 2px 6px; background: transparent; backdrop-filter: none; }
-  .ck-row { padding: 6px 4px 8px 0; margin: 0 -4px; border-radius: 12px; }
+  .ck-row { padding: 6px 4px 8px 0; margin: 0 -4px; border-radius: 12px; contain-intrinsic-size: auto 78px; }
   .ck-row.ck-overdue { box-shadow: inset 3px 0 0 var(--bad); }
   .ck-row + .ck-row { background-image: linear-gradient(var(--line), var(--line)); background-repeat: no-repeat; background-position: 44px 0; background-size: calc(100% - 48px) 1px; }
   .ck-cb { width: 44px; height: 44px; }

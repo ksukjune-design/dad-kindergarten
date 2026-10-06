@@ -1146,7 +1146,7 @@
 .es-acmp-list li:first-child { border-top: 0; }
 .es-acmp-n { font-weight: 800; display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; min-width: 0; }
 .es-acmp-v { font-variant-numeric: tabular-nums; color: var(--ink-2); white-space: nowrap; }
-@media (max-width: 400px) { .es-tabs { gap: 2px; } .es-tabs button { padding: 6px 7px; } }
+@media (max-width: 400px) { .es-tabs { gap: 2px; } .es-tabs button { padding: 6px 5px; gap: 3px; } }
 /* 토스트 (core .toast 에 이 모듈이 붙이는 보조 클래스) — 가운데 기준으로 내용 폭만큼, 버튼은 한 줄 */
 .toast.es-toast { width: max-content; max-width: calc(100vw - 32px); box-sizing: border-box; }
 .toast.es-toast > span { min-width: 0; }

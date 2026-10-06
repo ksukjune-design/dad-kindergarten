@@ -206,7 +206,7 @@
   function viewMode() {
     if (R.blocked && sampleFn()) return 'blocked';
     if (sampleFn()) return 'chat';
-    if (hasClaude() && !R.capsSeen && !(MV.sync && MV.sync.mode === 'local' && MV.sync.status !== 'connecting' && R.capsSeen)) return 'waiting';
+    if (hasClaude() && !R.capsSeen) return 'waiting';
     return hasClaude() ? 'nocap' : 'off';
   }
   /** nav 표시를 맞추고, 바뀌었으면 true */
@@ -249,7 +249,7 @@
         type: 'button', class: 'ag-fab', 'aria-label': 'AI 비서 열기', title: 'AI 비서에게 묻기',
         onclick: () => MV.go('#/agent'),
       }, el('span', { class: 'ag-fab-ico', 'aria-hidden': 'true' }, '🤖'), el('span', { class: 'ag-fab-dot', 'aria-hidden': 'true' }));
-      MV.css('ag', CSS);
+      MV.css('ag', STYLE);
       document.body.appendChild(fab);
       try {
         fabObserver = new MutationObserver(() => updateFab());
@@ -851,9 +851,10 @@
           const v = parseAmount(a.amount, '금액');
           if (wasAuto) { patch.auto = false; patch.amount = v; diffs.push('금액 ' + krw(before) + '(자동) → ' + krw(v) + '(직접 입력)'); }
           else if (v !== Math.round(num(L.amount))) { patch.amount = v; diffs.push('금액 ' + krw(L.amount) + ' → ' + krw(v)); }
-        } else if (has(a, 'auto') && toBool(a.auto)) {
+        } else if (has(a, 'auto')) {
           if (found.refund || !AUTO_BUDGET.has(L.id)) throw new Error('“' + L.label + '”은(는) 자동 계산이 없는 항목이에요.');
-          if (L.auto === false) { patch.auto = true; diffs.push('자동 계산으로 되돌림'); }
+          if (toBool(a.auto)) { if (L.auto === false) { patch.auto = true; diffs.push('자동 계산으로 되돌림'); } }
+          else if (wasAuto) { patch.auto = false; patch.amount = before; diffs.push('자동 → 직접 입력 (' + krw(before) + ' 그대로)'); }
         }
         if (has(a, 'paid')) {
           const p = toBool(a.paid);
@@ -1314,7 +1315,7 @@
     if (bot.status === 'pending') bot.status = 'done';
     // 이전 답의 되돌리기는 이번에 데이터가 바뀌었으면 막힘
     checkUndo();
-    if (bot.changes.length) {
+    if (bot.changes.length && findMsg(bot.id)) {
       if (R.undo) { const prev = findMsg(R.undo.msgId); if (prev && prev.undo === 'avail') prev.undo = 'stale'; }
       R.undo = { msgId: bot.id, snapshot: call.snapshot, fp: fingerprint(), foreign: call.foreign };
       bot.undo = 'avail';
@@ -1326,7 +1327,7 @@
       MV.store.emit('caps', MV.sync && MV.sync.cap);
       if (R.view && R.view.root.isConnected && R.view.mode !== 'blocked') { MV.rerender(true); return; }
     }
-    paintMsg(bot.id);
+    paintAll(false);
     updateComposer();
     updateFab();
     if (R.view && document.activeElement === document.body && R.composerFocused) focusComposer();
@@ -1679,21 +1680,21 @@
     const v = R.view;
     if (!v || !v.log || !v.log.isConnected) return;
     const msgs = R.chat.msgs;
+    const stick = nearBottom(v.log);
+    const top = v.log.scrollTop;
     v.log.replaceChildren(...(msgs.length ? msgs.map(buildMsg) : [welcome()]));
     v.log.classList.toggle('ag-log-empty', !msgs.length);
     if (v.chips) v.chips.hidden = !msgs.length;
-    v.stick = true;
-    scrollDown(forceScroll !== false);
+    if (forceScroll || stick) { v.log.scrollTop = v.log.scrollHeight; v.stick = true; } else v.log.scrollTop = top;
   }
   function paintMsg(id) {
     const v = R.view;
     if (!v || !v.log || !v.log.isConnected) return;
     const m = findMsg(id);
-    const old = v.log.querySelector('[data-id="' + (window.CSS && CSS.escape ? CSS.escape(id) : id) + '"]');
+    const old = v.log.querySelector('[data-id="' + (window.CSS && window.CSS.escape ? window.CSS.escape(id) : id) + '"]');
     if (!m) { if (old) old.remove(); return; }
     if (!old) { paintAll(); return; }
     const stick = nearBottom(v.log);
-    // 선택 중인 글이 있으면 끝난 답은 다시 그리지 않음
     const node = buildMsg(m);
     old.replaceWith(node);
     if (stick) { v.log.scrollTop = v.log.scrollHeight; }
@@ -1838,7 +1839,7 @@
         if (!R.active) v.send.disabled = !v.ta.value.trim();
       });
       v.ta.addEventListener('focus', () => { R.composerFocused = true; });
-      v.ta.addEventListener('blur', () => { setTimeout(() => { if (!v.ta.isConnected || document.activeElement !== v.ta) R.composerFocused = document.activeElement === document.body && R.composerFocused && !v.ta.isConnected; }, 0); });
+      v.ta.addEventListener('blur', () => { setTimeout(() => { if (v.ta.isConnected) R.composerFocused = document.activeElement === v.ta; }, 0); });
       const composer = el('div', { class: 'ag-composer' }, v.ta, v.send);
       wrap.appendChild(v.chips);
       wrap.appendChild(composer);
@@ -1852,23 +1853,26 @@
       autosize(v.ta);
       getLimits();
       paintHeadState();
-      if (R.composerFocused || (!isTouch() && !R.chat.msgs.length)) focusComposer();
+      if (!R.active || R.composerFocused) focusComposer();
     }
     return v;
   }
 
   function render(root, params, ctx) {
-    MV.css('ag', CSS);
+    MV.css('ag', STYLE);
+    if (syncAvailability()) MV.store.emit('caps', MV.sync && MV.sync.cap);
     const mode = viewMode();
+    let alive = true;
+    ctx.onCleanup(() => { alive = false; });
     const offCaps = MV.store.on('caps', () => {
-      if (!root.isConnected) return;
-      if (viewMode() !== mode) setTimeout(() => { if (root.isConnected && viewMode() !== mode) MV.rerender(true); }, 0);
+      if (!alive) return;
+      if (viewMode() !== mode) setTimeout(() => { if (alive && MV.route.name === 'agent' && viewMode() !== mode) MV.rerender(true); }, 0);
     });
     ctx.onCleanup(offCaps);
     let waitTimer = null;
     if (mode === 'waiting') {
       // 연결 확인이 오래 걸리면(약 12초) 다시 판단
-      waitTimer = setTimeout(() => { R.capsSeen = true; if (root.isConnected) MV.rerender(true); }, 12000);
+      waitTimer = setTimeout(() => { R.capsSeen = true; if (alive && MV.route.name === 'agent') MV.rerender(true); }, 12000);
       ctx.onCleanup(() => clearTimeout(waitTimer));
     }
     ctx.onCleanup(() => {
@@ -1887,7 +1891,7 @@
   }
 
   /* ======================= 스타일 ======================= */
-  const CSS = `
+  const STYLE = `
 .view[data-view="agent"] { padding-bottom: 16px; }
 .ag { --ag-h: calc(100vh - var(--topbar-h) - 36px); height: var(--ag-h); min-height: 460px; max-width: 960px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 @supports (height: 100dvh) { .ag { --ag-h: calc(100dvh - var(--topbar-h) - 36px); } }
