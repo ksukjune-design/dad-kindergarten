@@ -1092,7 +1092,8 @@
 }
 .es-pv-lab { display: none; font-size: .68rem; color: var(--ink-3); font-weight: 700; }
 @media (max-width: 720px) { .es-pv-lab { display: block; } .es-pv-num { display: flex; flex-direction: column; gap: 2px; } }
-.es-export-ta { min-height: 300px; font-family: var(--mono); font-size: .8rem; line-height: 1.5; white-space: pre; }
+/* 업체에 보낼 짐 목록: 화면에서만 줄을 접어 보여 줘요 (폰에서 긴 줄이 잘리지 않게). 복사하는 글(value)은 그대로 */
+.es-export-ta { min-height: 300px; font-family: var(--mono); font-size: .8rem; line-height: 1.5; white-space: pre-wrap; word-break: keep-all; overflow-wrap: anywhere; overflow-x: hidden; }
 
 /* 견적: 히어로 */
 .es-hero { background: linear-gradient(135deg, var(--brand-bg) 0%, var(--bg-2) 70%); border-color: color-mix(in srgb, var(--brand) 22%, var(--line)); padding: 18px 20px; }
@@ -1978,13 +1979,54 @@
     const toks = s.split(/[\t,，;|]+|\s{2,}|\s+/).map((t) => t.trim().replace(/\s*\([^)]*\)\s*$/, '')).filter(Boolean);
     return toks.length >= 2 && toks.filter((t) => HEADER_WORD.test(t)).length >= 2;
   }
-  /* '안방:' '[거실]' 같은 위치 머리말 — 방 이름처럼 보일 때만 위치로 (예: '냉장고: LG 디오스'는 이름으로) */
+  /* '안방: 침대' '[거실] 소파' 같은 위치 머리말 — 방 이름처럼 보일 때만 위치로 (예: '냉장고: LG 디오스'는 이름으로) */
   const ROOM_WORD = /(방|거실|주방|부엌|베란다|발코니|현관|드레스룸|서재|욕실|화장실|다용도실|창고|복도|침실|팬트리|세탁실|알파룸)\s*\d*$/;
   function planRoomNames() {
     const plans = MV.plans || {};
     const out = new Set();
     [plans.old, plans.new].forEach((pl) => { ((pl && pl.rooms) || []).forEach((r) => { if (r && r.name) out.add(String(r.name).trim()); }); });
     return out;
+  }
+  /* 줄 하나가 방 이름뿐인지 볼 때 쓰는 이름 (띄어쓰기·끝 번호는 빼고 비교: '작은방 1' = '작은방1', '방2' = '방') */
+  const ROOM_NAMES = new Set(['안방', '거실', '주방', '부엌', '식당', '다이닝', '작은방', '큰방', '아이방', '공부방', '놀이방', '옷방', '손님방', '드레스룸',
+    '서재', '침실', '방', '욕실', '화장실', '안방욕실', '거실욕실', '공용욕실', '다용도실', '세탁실', '현관', '발코니', '베란다', '앞발코니', '뒷발코니',
+    '전면발코니', '앞베란다', '뒷베란다', '실외기실', '창고', '팬트리', '펜트리', '알파룸', '복도', '식당·복도']);
+  const roomKey = (s) => String(s || '').replace(/\s*\([^)]*\)\s*$/, '').replace(/\s+/g, '').replace(/\d+$/, '');
+  function isRoomName(s) {
+    const k = roomKey(s);
+    if (!k) return false;
+    if (ROOM_NAMES.has(k)) return true;
+    for (const n of planRoomNames()) { if (roomKey(n) === k) return true; }
+    return false;
+  }
+  /* 도면의 방 이름과 띄어쓰기만 다르면 도면 이름으로 ('작은방 2' → '작은방2') — 짐 목록 '지금 방순' 정렬이 섞이지 않게 */
+  function canonRoom(s) {
+    const t = String(s || '').trim();
+    const k = t.replace(/\s+/g, '');
+    for (const n of planRoomNames()) { if (n.replace(/\s+/g, '') === k) return n; }
+    return t;
+  }
+  /* 줄 앞 '안방:' 이 위치인지 — 방 낱말로 끝나면 위치 (단 '가방'·'책가방'은 물건) */
+  const roomLike = (s) => isRoomName(s) || (ROOM_WORD.test(s) && !/가방\s*\d*$/.test(s));
+  /* 위치 머리말 줄: 크기 없이 ':'로 끝나거나('안방:', '작은방 2 :'), '[거실]'만 있거나, 방 이름만 있는 줄('거실').
+     짐이 아니라 그 아래 줄들의 지금 위치예요. 머리말이면 방 이름, 아니면 null */
+  function roomHeader(line) {
+    let t = String(line || '').trim();
+    if (!t || /https?:\/\//i.test(t)) return null;
+    t = t.replace(/^(?:#{1,6}|[■□▶▷▸●○◆◇★☆※])\s*/, '');
+    let boxed = false;
+    const bm = t.match(/^(?:\[\s*([^\]]{1,20}?)\s*\]|【\s*([^】]{1,20}?)\s*】|<\s*([^>]{1,20}?)\s*>)\s*([:：]?)\s*$/);
+    if (bm) { t = bm[1] || bm[2] || bm[3] || ''; boxed = true; }
+    const colon = /[:：]\s*$/.test(t);
+    t = t.replace(/\s*[:：]\s*$/, '').trim();
+    if (!t || t.length > 20 || /[:：]/.test(t)) return null;
+    // 크기가 있으면 짐 (예: '책장 80x30x180:')
+    if (DIM_RE.test(t) || /(?:가로|폭|너비|깊이|세로|높이)\s*[:=]?\s*\d/.test(t) || (t.match(/\d+(?:\.\d+)?/g) || []).length >= 2) return null;
+    // '거실 짐:' '안방에 있는 것:' → 방 이름만
+    const base = t.replace(/\s*(?:에\s*있는|에서\s*나온|의)?\s*(?:것들?|짐|물건|가구|가전|목록|살림)$/, '').trim();
+    const name = base && isRoomName(base) ? base : t;
+    if (colon || boxed) return canonRoom(name);
+    return isRoomName(t) ? canonRoom(t) : null;
   }
   const UNIT_SCALE = { cm: 1, 센티: 1, 센치: 1, mm: 0.1, 미리: 0.1, m: 100, 미터: 100 };
   const DIM_N = '(\\d+(?:\\.\\d+)?)';
@@ -1998,6 +2040,9 @@
     if (!s) return null;
     if (isHeaderLine(s)) return null;
     s = s.replace(/^\s*(?:[-•·*▪◦]|\d+[.)])\s+/, '');
+    // '안방:'·'거실'·'[작은방1]'만 있는 줄은 짐이 아니라 그 아래 줄들의 위치 (읽어 오기에서 아래 짐에 넣어요)
+    const hd = roomHeader(s);
+    if (hd) return { header: true, room: hd };
     const out = { name: '', qty: 1, w: null, d: null, h: null, url: '', room: '', fate: 'move', note: '' };
     /* 링크: 공백까지 통째로 (쿼리의 쉼표 ‘?id=1,2’ 포함). 단, 쉼표·탭으로 칸을 나눈 줄이면 첫 쉼표까지가 링크 */
     const um = s.match(/https?:\/\/\S+/i);
@@ -2015,7 +2060,7 @@
       const m2 = s.match(/^([가-힣A-Za-z0-9][가-힣A-Za-z0-9 ]{0,9}?)\s*[:：]\s*/);
       if (m2) {
         const cand = m2[1].trim();
-        if (ROOM_WORD.test(cand) || planRoomNames().has(cand)) { out.room = cand; s = s.slice(m2[0].length); }
+        if (roomLike(cand)) { out.room = canonRoom(cand); s = s.slice(m2[0].length); }
       }
     }
     const fateWords = [['discard', /[(\[]?\s*(버림|버릴 것|버리기|폐기|처분)\s*[)\]]?/], ['buy', /[(\[]?\s*(새로 ?구매|구매 ?예정|살 것|새로 살 것)\s*[)\]]?/], ['sell', /[(\[]?\s*(판매|나눔)\s*[)\]]?/], ['undecided', /[(\[]?\s*(미정|고민)\s*[)\]]?/]];
@@ -2176,12 +2221,24 @@
       syncFoot();
     };
     readBtn.addEventListener('click', () => {
-      rows = ta.value.split(/\r?\n/).map(parseLine).filter(Boolean);
-      status.textContent = rows.length ? rows.length + '줄을 읽었어요. 아래에서 고친 뒤 추가하세요.' : '읽을 줄이 없어요.';
+      // 위치 머리말 줄('안방:', '거실')은 짐으로 넣지 않고, 다음 머리말이 나올 때까지 아래 짐의 지금 위치로 넣어요
+      rows = [];
+      let room = '';
+      let heads = 0;
+      ta.value.split(/\r?\n/).forEach((line) => {
+        const r = parseLine(line);
+        if (!r) return;
+        if (r.header) { room = r.room; heads++; return; }
+        if (!r.room && room) r.room = room;
+        rows.push(r);
+      });
+      status.textContent = rows.length
+        ? rows.length + '개를 읽었어요.' + (heads ? ' 위치 머리말 ' + heads + '줄은 아래 짐의 지금 위치로 넣었어요.' : '') + ' 아래에서 고친 뒤 추가하세요.'
+        : (heads ? '위치 머리말만 있고 짐 줄이 없어요.' : '읽을 줄이 없어요.');
       draw();
     });
     const body = el('div', { class: 'stack' },
-      el('p', { class: 'small es-muted mb-0' }, '한 줄 = 짐 하나. 이름, 크기(가로×깊이×높이 — cm가 기본, 1.6m·1600미리도 돼요), 수량(‘2개’ 또는 크기 뒤 숫자), 링크를 알아서 읽어요. 크기가 없으면 비슷한 규격을 넣고 ‘추정치’로 표시해요. 제조사(LG·삼성 등)는 이름으로 짐작해요. 줄 앞에 ‘안방:’처럼 쓰면 지금 위치로 넣어요. 엑셀 머리줄(이름·가로…)은 건너뛰어요.'),
+      el('p', { class: 'small es-muted mb-0' }, '한 줄 = 짐 하나. 이름, 크기(가로×깊이×높이 — cm가 기본, 1.6m·1600미리도 돼요), 수량(‘2개’ 또는 크기 뒤 숫자), 링크를 알아서 읽어요. 크기가 없으면 비슷한 규격을 넣고 ‘추정치’로 표시해요. 제조사(LG·삼성 등)는 이름으로 짐작해요. 줄 앞에 ‘안방:’처럼 쓰면 지금 위치로 넣고, ‘안방:’이나 ‘거실’만 한 줄로 쓰면 그 아래 짐들이 모두 그 방으로 들어가요. 엑셀 머리줄(이름·가로…)은 건너뛰어요.'),
       ta,
       el('div', { class: 'row' }, readBtn, status),
       pv);

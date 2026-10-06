@@ -2028,7 +2028,7 @@
       // 이 보기에서는 도구를 못 씀 → 이 창에서는 다음 질문부터 도구 없이 물음 ('읽기 전용' 표시)
       R.toolsOff = true;
       paintHeadState();
-      bot.note = '이 화면에서는 AI가 앱 데이터를 직접 읽고 고칠 수 없어요. 도구 없이 다시 물으면 요약 정보로만 답하고, 다음 질문부터는 처음부터 도구 없이 물어요.';
+      bot.note = '이 화면에서는 비서가 앱 데이터를 직접 읽고 고칠 수 없어요. 도구 없이 다시 물으면 요약 정보로만 답하고, 다음 질문부터는 처음부터 도구 없이 물어요.';
       bot.actions = ['notools'];
       return;
     }
@@ -2141,7 +2141,7 @@
           });
         });
         Object.keys(pre.sections || {}).forEach((path) => pathRestore(st, path, pre.sections[path]));
-      }, { log: '🤖 AI 변경 되돌리기 (' + n + '건)' });
+      }, { log: '🤖 비서 변경 되돌리기 (' + n + '건)' });
       return true;
     } catch (e) { console.error('[agent] undo', e); return false; }
   }
@@ -2158,7 +2158,7 @@
     }
     const n = m.changes.length;
     const msg = 'AI 비서가 이번 답에서 바꾼 ' + n + '건을 모두 되돌릴까요? 다른 데이터(다른 할 일·도면 사진 등)는 그대로예요.' +
-      (u.foreign ? ' AI가 답하는 동안 같은 항목을 직접 고친 것도 함께 되돌아가요.' : '') + ' 되돌린 뒤에는 다시 살릴 수 없어요.';
+      (u.foreign ? ' 비서가 답하는 동안 같은 항목을 직접 고친 것도 함께 되돌아가요.' : '') + ' 되돌린 뒤에는 다시 살릴 수 없어요.';
     MV.ui.confirm(msg, { okLabel: '모두 되돌리기', danger: true, title: '변경 되돌리기' }).then((ok) => {
       if (!ok) return;
       checkUndo();
@@ -2169,7 +2169,7 @@
       m.undo = done ? 'used' : 'stale';
       own(m);
       saveChat();
-      MV.ui.toast(done ? 'AI 변경 ' + n + '건을 되돌렸어요.' : '되돌리지 못했어요.');
+      MV.ui.toast(done ? '비서가 바꾼 ' + n + '건을 되돌렸어요.' : '되돌리지 못했어요.');
       paintMsg(msgId);
       // 눌렀던 버튼이 다시 그려져 사라졌으니 키보드 초점을 입력칸으로 (터치 화면은 키보드가 뜨지 않게 그대로)
       if (!document.activeElement || document.activeElement === document.body || !document.activeElement.isConnected) focusComposer();
@@ -2652,7 +2652,7 @@
       },
     }, '⚡ 빠른 답변');
     v.clear = el('button', { type: 'button', class: 'btn btn-sm btn-ghost', onclick: clearChat, disabled: !R.chat.msgs.length }, '🗑 대화 지우기');
-    v.ro = el('span', { class: 'chip warn', title: '이 화면에서는 AI가 앱 데이터를 직접 바꿀 수 없어요 — 바꿀 것은 화면에서 직접 고쳐 주세요', hidden: true }, '읽기 전용');
+    v.ro = el('span', { class: 'chip warn', title: '이 화면에서는 비서가 앱 데이터를 직접 바꿀 수 없어요 — 바꿀 것은 화면에서 직접 고쳐 주세요', hidden: true }, '읽기 전용');
     v.tier = el('span', { class: 'chip', title: '요금제가 빠른 모델을 지원하지 않아 다른 모델이 답해요', hidden: true }, '⚡ 이 요금제에선 빠른 답변이 안 돼요');
     const head = el('div', { class: 'ag-head' },
       el('div', { class: 'ag-title' }, el('h1', '🤖 AI 비서'), el('span', { class: 'ag-sub' }, '진척도·비용·일정을 묻고 바로 고쳐요')),
