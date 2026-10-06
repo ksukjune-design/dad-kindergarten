@@ -50,7 +50,6 @@
     const m = a.length >> 1;
     return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
   };
-  const pctOf = (x) => (x > 0 ? '+' : x < 0 ? '−' : '') + Math.abs(Math.round(x * 100)) + '%';
   function safeUrl(u) {
     u = String(u || '').trim();
     if (!u) return null;
@@ -59,6 +58,28 @@
     return null;
   }
   const isTyping = (a) => !!a && ((a.tagName === 'INPUT' && !/^(checkbox|radio|button|submit|reset|range|file|color)$/i.test(a.type || '')) || a.tagName === 'TEXTAREA' || a.isContentEditable);
+  /* 조사 붙이기: josa('4만원', '은/는') → '4만원은', josa('6톤', '으로/로') → '6톤으로'.
+     끝 글자가 숫자면 한국어로 읽은 소리(영·일·이·삼…)로 받침을 판단해요. */
+  function josa(word, pair) {
+    const w = String(word == null ? '' : word);
+    const s = w.replace(/\s*\([^)]*\)\s*$/, '').replace(/[\s'"’”)\]…]+$/, '');
+    const ch = s.charAt(s.length - 1);
+    const code = ch ? ch.charCodeAt(0) : 0;
+    let bat = false; let rieul = false;
+    if (code >= 0xAC00 && code <= 0xD7A3) { const j = (code - 0xAC00) % 28; bat = j !== 0; rieul = j === 8; }
+    else if (/[0-9]/.test(ch)) { bat = '013678'.includes(ch); rieul = '178'.includes(ch); }
+    else if (/[lmnr]/i.test(ch)) { bat = true; rieul = /[lr]/i.test(ch); }
+    const [a, b] = String(pair).split('/');
+    if (a === '으로') return w + (bat && !rieul ? '으로' : '로');
+    return w + (bat ? a : b);
+  }
+  /* 토스트: core 의 .toast-wrap 이 화면 가운데(left 50%)에 붙어 폭이 반쪽만 남는 탓에 폰에서 '되돌리기'가 두 줄로 꺾여요.
+     이 모듈 토스트에만 es-toast 를 붙여 내용 폭만큼 펼치고(최대 화면 폭 − 32px) 버튼은 한 줄로 둡니다. */
+  function toast(msg, o) {
+    const t = MV.ui.toast(msg, o);
+    try { if (t && t.classList) t.classList.add('es-toast'); } catch (e) { /* 무시 */ }
+    return t;
+  }
 
   /* ======================= 출처 ======================= */
   const SRC = {
@@ -185,6 +206,18 @@
     { k: 'lg_discount_pct', g: 'lg', label: '2개 이상 맡길 때 철거·설치비 할인', unit: '%', v: 10, conf: 'low', basis: '에어컨·정수기·빌트인 제외 (2차 출처)', src: ['lgCare'] },
     { k: 'lg_visit_fee', g: 'lg', label: 'LG 출장비 (유상수리 때)', unit: '원', v: 20000, lo: 18000, hi: 30000, money: true, ref: true, conf: 'low', basis: '출처 없는 추정. 이전설치 패키지에는 보통 포함 → 계산에 넣지 않음 (예약 때 확인)', src: [] },
   ];
+  /* 계수마다 받아 줄 수 있는 범위 — 범위 밖 값(0으로 나누기, 하한 > 상한 등)은 입력 때 막고, 저장된 값이 이상하면 기준값으로 계산 */
+  const BOUNDS = {
+    half_pct: [10, 100], general_pct: [10, 100], free_km: [0, 500], per_km: [0, 100000],
+    m3_per_ton: [1, 15], truck_margin: [0, 50], m3_per_box: [0.01, 0.5], boxes_typical: [0, 500], box_person_pct: [0, 50],
+    misc_m3: [0, 30], ac_outdoor_m3: [0, 2], fridge_large_w: [30, 200], multi_add_pct: [0, 50],
+    range_low: [0.5, 1], range_high: [1, 3], vat_pct: [0, 20], deposit_pct: [0, 100],
+  };
+  COEFS.forEach((d) => {
+    const b = BOUNDS[d.k] || (d.g === 'pack' ? [0.3, 3] : d.g === 'crew' ? [1, 20] : (d.unit === '%' || d.unit === '%p') ? [0, 100] : d.money ? [0, 50000000] : [0, 1e6]);
+    d.min = b[0]; d.max = b[1];
+  });
+  const inBounds = (d, v) => isFinite(v) && v >= d.min - 1e-9 && v <= d.max + 1e-9;
   const COEF_MAP = {};
   const DEF_COEF = {};
   COEFS.forEach((d) => { COEF_MAP[d.k] = d; DEF_COEF[d.k] = d.v; });
@@ -213,13 +246,24 @@
   /* ======================= 날짜 (음력·손없는날) =======================
      KASI 기반 korean-lunar-calendar 로 계산한 음력 1일 (리서치 검증본과 일치: 11/3 = 음력 9/24) */
   const LUNAR_STARTS = [
-    ['2026-08-13', 7], ['2026-09-11', 8], ['2026-10-11', 9], ['2026-11-09', 10], ['2026-12-09', 11],
-    ['2027-01-08', 12], ['2027-02-07', 1], ['2027-03-08', 2], ['2027-04-07', 3], ['2027-05-06', 4],
+    ['2026-07-14', 6], ['2026-08-13', 7], ['2026-09-11', 8], ['2026-10-11', 9], ['2026-11-09', 10], ['2026-12-09', 11],
+    ['2027-01-08', 12], ['2027-02-07', 1], ['2027-03-08', 2], ['2027-04-07', 3], ['2027-05-06', 4], ['2027-06-05', 5],
+    ['2027-07-04', 6], ['2027-08-02', 7], ['2027-09-01', 8], ['2027-09-30', 9], ['2027-10-29', 10], ['2027-11-28', 11],
+    ['2027-12-28', 12], ['2028-01-27', 1],
   ];
+  const LUNAR_RANGE = '2026-07 ~ 2028-01';
+  /* 2026-08 ~ 2027-12 공휴일 (대체공휴일 포함: 설·추석·어린이날·국경일·부처님오신날·성탄절이 주말과 겹치면 다음 평일) */
   const HOLIDAYS = {
+    '2026-08-15': '광복절', '2026-08-17': '광복절 대체공휴일',
     '2026-09-24': '추석 연휴', '2026-09-25': '추석', '2026-09-26': '추석 연휴', '2026-10-03': '개천절',
-    '2026-10-05': '대체공휴일', '2026-10-09': '한글날', '2026-12-25': '성탄절', '2027-01-01': '신정',
+    '2026-10-05': '개천절 대체공휴일', '2026-10-09': '한글날', '2026-12-25': '성탄절',
+    '2027-01-01': '신정', '2027-02-06': '설 연휴', '2027-02-07': '설날', '2027-02-08': '설 연휴', '2027-02-09': '설 대체공휴일',
+    '2027-03-01': '삼일절', '2027-05-05': '어린이날', '2027-05-13': '부처님오신날', '2027-06-06': '현충일',
+    '2027-08-15': '광복절', '2027-08-16': '광복절 대체공휴일', '2027-09-14': '추석 연휴', '2027-09-15': '추석', '2027-09-16': '추석 연휴',
+    '2027-10-03': '개천절', '2027-10-04': '개천절 대체공휴일', '2027-10-09': '한글날', '2027-10-11': '한글날 대체공휴일',
+    '2027-12-25': '성탄절', '2027-12-27': '성탄절 대체공휴일',
   };
+  const HOLIDAY_RANGE = ['2026-08-01', '2027-12-31'];
   function lunarOf(ds) {
     ds = normDate(ds);
     if (!ds) return null;
@@ -250,7 +294,8 @@
       const x = D.add(ds, k);
       if (k !== 0 && isSohn(lunarOf(x))) nearby.push(x);
     }
-    return { date: ds, weekday: wd, holiday, weekend, monthStart, monthEnd, lunar, sohn, flags, nearby };
+    const holidayKnown = ds >= HOLIDAY_RANGE[0] && ds <= HOLIDAY_RANGE[1];
+    return { date: ds, weekday: wd, holiday, holidayKnown, weekend, monthStart, monthEnd, lunar, sohn, flags, nearby };
   }
   const FLAG_PCT = { sohn: 'sohn_pct', weekend: 'weekend_pct', monthEnd: 'month_end_pct', monthStart: 'month_start_pct' };
   function surchargeOf(flags, c) {
@@ -314,9 +359,8 @@
     const out = Object.assign({}, DEF_COEF);
     const src = est && est.coef;
     if (src && typeof src === 'object') {
-      Object.keys(DEF_COEF).forEach((k) => { const v = num(src[k], NaN); if (isFinite(v) && v >= 0) out[k] = v; });
+      Object.keys(DEF_COEF).forEach((k) => { const v = num(src[k], NaN); if (inBounds(COEF_MAP[k], v)) out[k] = v; });
     }
-    if (!(out.m3_per_ton > 0)) out.m3_per_ton = DEF_COEF.m3_per_ton;
     return out;
   }
   function inputsOf(est) {
@@ -337,7 +381,7 @@
   function calibOf(est) {
     const c = est && est.calib;
     const f = num(c && c.factor, 1);
-    return { factor: f > 0 ? f : 1, at: (c && c.at) || null, median: num(c && c.median, null), n: num(c && c.n, 0), base: num(c && c.base, null) };
+    return { factor: f > 0 ? f : 1, at: (c && c.at) || null, median: num(c && c.median, null), n: num(c && c.n, 0), base: num(c && c.base, null), basis: (c && c.basis) || null };
   }
   function quotesOf(est) { return (est && Array.isArray(est.quotes)) ? est.quotes.filter((q) => q && typeof q === 'object') : []; }
 
@@ -587,20 +631,25 @@
     const arrangeN = inp.arrange ? Math.max(0, Math.round(num(inp.arrangeCount, 1))) : 0;
     if (arrangeN > 0) add('arrange', '정리수납 추가 인력 ' + arrangeN + '명', arrangeN * c.arrange_person, arrangeN + '명 × ' + won(c.arrange_person), 'special');
 
+    /* 부가세 기준: 리서치 모델의 기준가는 ‘부가세 별도’ 시세예요 (별도 견적이면 ×1.1).
+       보정(방문견적 중앙값)은 언제나 부가세 별도 금액에 곱하고, 부가세는 그 위에 붙여요.
+       그래서 ‘부가세 더하기’를 켜고 꺼도 보정 비율은 그대로이고, 업체 견적도 같은 기준으로 바꿔 비교해요. */
     const subtotal = sum(lines, (l) => l.typical);
+    const vatRate = c.vat_pct / 100;
+    const vatMul = inp.vat ? 1 + vatRate : 1;
     let total = subtotal;
-    const vatMul = inp.vat ? 1 + c.vat_pct / 100 : 1;
-    if (inp.vat) {
-      const v = subtotal * c.vat_pct / 100;
-      add('vat', '부가세 ' + r1(c.vat_pct) + '%', v, '부가세 별도 시세에 더함', 'tax');
-      total += v;
-    }
-    const typicalRaw = Math.round(total);
+    const typicalRaw = Math.round(subtotal * vatMul);
     const calib = calibOf(est);
     const useCalib = opt.calib !== false && Math.abs(calib.factor - 1) > 1e-6;
     if (useCalib) {
-      const v = total * (calib.factor - 1);
-      lines.push({ key: 'calib', label: '방문견적 보정 (×' + calib.factor.toFixed(2) + ')', typical: Math.round(v), detail: '입력한 방문견적 ' + calib.n + '곳의 중앙값 ' + won(calib.median) + '에 맞춤', group: 'calib' });
+      const v = subtotal * (calib.factor - 1);
+      lines.push({ key: 'calib', label: '방문견적 보정 (×' + calib.factor.toFixed(2) + ')', typical: Math.round(v),
+        detail: '방문견적 ' + calib.n + '곳 중앙값(부가세 별도로 환산) ' + won(calib.median) + '에 맞춤', group: 'calib' });
+      total += v;
+    }
+    if (inp.vat) {
+      const v = total * vatRate;
+      add('vat', '부가세 ' + r1(c.vat_pct) + '%', v, (useCalib ? '보정한 금액' : '부가세 별도 시세') + ' ' + won(total) + ' × ' + r1(c.vat_pct) + '%', 'tax');
       total += v;
     }
     lines.forEach((l) => { l.low = Math.round(l.typical * c.range_low); l.high = Math.round(l.typical * c.range_high); });
@@ -608,12 +657,15 @@
     const low = Math.round(total * c.range_low);
     const high = Math.round(total * c.range_high);
     const lineVal = (k) => sum(lines.filter((l) => l.key === k), (l) => l.typical);
-    const parts = {
-      ladder: ((lf.method === 'ladder' ? lineVal('liftFrom') : 0) + (lt.method === 'ladder' ? lineVal('liftTo') : 0)) * vatMul,
-      aircon: lineVal('aircon') * vatMul,
-      waste: lineVal('waste') * vatMul,
-      arrange: lineVal('arrange') * vatMul,
+    /* 업체 견적에 빠진 항목을 채울 때 쓰는 모델 금액 — partsEx 는 부가세 별도, parts 는 지금 화면 기준 */
+    const partsEx = {
+      ladder: (lf.method === 'ladder' ? lineVal('liftFrom') : 0) + (lt.method === 'ladder' ? lineVal('liftTo') : 0),
+      aircon: lineVal('aircon'),
+      waste: lineVal('waste'),
+      arrange: lineVal('arrange'),
     };
+    const parts = {};
+    Object.keys(partsEx).forEach((k) => { parts[k] = partsEx[k] * vatMul; });
 
     /* 4) 다음 차량 등급까지 */
     let next = null;
@@ -625,7 +677,7 @@
       const dBase = ((nt.t - tons) * c.base_per_ton + (nCrew - crew) * c.crew_day_rate) * packMul * (1 + surPct / 100);
       const dLift = (lf.method === 'ladder' ? ladderCost(fromFloor, nt.t, c) - ladderCost(fromFloor, tons, c) : 0) +
         (lt.method === 'ladder' ? ladderCost(toFloor, nt.t, c) - ladderCost(toFloor, tons, c) : 0);
-      next = { tons: nt.t, label: nt.label, crew: nCrew, headroom, boxes: Math.ceil(headroom / c.m3_per_box), delta: Math.round((dBase + dLift) * vatMul * (useCalib ? calib.factor : 1)) };
+      next = { tons: nt.t, label: nt.label, crew: nCrew, headroom, boxes: c.m3_per_box > 0 ? Math.ceil(headroom / c.m3_per_box) : 0, delta: Math.round((dBase + dLift) * vatMul * (useCalib ? calib.factor : 1)) };
     }
 
     /* 5) LG */
@@ -647,7 +699,8 @@
 
     return {
       tons, crew, volume: r1(volume), low, typical, high, lines, lgCost, notes,
-      typicalRaw, calibFactor: useCalib ? calib.factor : 1, calib,
+      typicalRaw, subtotalEx: Math.round(subtotal), vatIncl: !!inp.vat, vatMul: 1 + vatRate, partsEx,
+      calibFactor: useCalib ? calib.factor : 1, calib,
       truckLabel: truck.label, crewLabel: crewLabel(crew), tonsNeed, tonsMargin,
       volumeParts: { furnRaw, furnEff, boxes, boxM3, miscM3, items: mover.length, units: sum(mover, qtyOf) },
       surchargePct: surPct, dateLabel, dateInfo: di, flags, packType: packType.id,
@@ -658,27 +711,40 @@
     };
   }
 
-  /* 업체 견적 → 같은 조건으로 환산 (빠진 항목은 모델 금액을 더함) */
+  /* 업체 견적 → 모델과 같은 조건·같은 부가세 기준으로 환산 (빠진 항목은 모델 금액을 더함)
+     ex: 부가세 별도 기준 / inc: 부가세 포함 기준 / amount: 지금 모델 기준(‘부가세 더하기’ 켜면 inc, 끄면 ex) */
   function normQuote(q, raw) {
     const amt = num(q && q.amount, 0);
     if (!(amt > 0)) return null;
     const c = raw.coef;
-    let base = amt;
+    const vm = 1 + c.vat_pct / 100;
+    const incl = raw.vatIncl;
+    const quoteIncl = q.vatIncluded !== false;
+    const exAmt = quoteIncl ? amt / vm : amt;
     const adds = [];
-    if (q.vatIncluded === false) { const v = amt * c.vat_pct / 100; base += v; adds.push({ label: '부가세 ' + r1(c.vat_pct) + '%', v }); }
-    if (!q.ladder && raw.parts.ladder > 0) adds.push({ label: '사다리차', v: raw.parts.ladder });
-    if (!q.aircon && raw.parts.aircon > 0) adds.push({ label: '에어컨 이전', v: raw.parts.aircon });
-    if (!q.waste && raw.parts.waste > 0) adds.push({ label: '폐기물', v: raw.parts.waste });
-    if (!q.arrange && raw.parts.arrange > 0) adds.push({ label: '정리 인력', v: raw.parts.arrange });
-    const extra = sum(adds.filter((a) => a.label.indexOf('부가세') !== 0), (a) => a.v);
-    return { amount: Math.round(base + extra), adds };
+    if (quoteIncl && !incl) adds.push({ label: '부가세 빼기', v: exAmt - amt, vat: true });
+    if (!quoteIncl && incl) adds.push({ label: '부가세 ' + r1(c.vat_pct) + '%', v: amt * (vm - 1), vat: true });
+    const pe = raw.partsEx || {};
+    const missing = [];
+    if (!q.ladder && pe.ladder > 0) missing.push(['사다리차', pe.ladder]);
+    if (!q.aircon && pe.aircon > 0) missing.push(['에어컨 이전', pe.aircon]);
+    if (!q.waste && pe.waste > 0) missing.push(['폐기물', pe.waste]);
+    if (!q.arrange && pe.arrange > 0) missing.push(['정리 인력', pe.arrange]);
+    missing.forEach(([label, v]) => adds.push({ label, v: v * (incl ? vm : 1) }));
+    const ex = exAmt + sum(missing, (m) => m[1]);
+    const inc = ex * vm;
+    return { amount: Math.round(incl ? inc : ex), ex: Math.round(ex), inc: Math.round(inc), adds, basis: incl ? 'inc' : 'ex' };
   }
+  const basisLabel = (incl) => (incl ? '부가세 포함' : '부가세 별도');
 
   MV.calc.moveEstimate = function moveEstimate(state) { return compute(state || (MV.store && MV.store.get && MV.store.get())); };
 
   /* ======================= 스타일 ======================= */
   MV.css('es', `
 .es-region { display: contents; }
+/* 터치 대상 최소 36px */
+.es-body .btn-sm, .es-head .btn-sm, .es-pv .btn-sm { min-height: 36px; }
+.es-body .btn-sm.btn-icon, .es-pv .btn-sm.btn-icon { width: 36px; }
 .es-body { display: flex; flex-direction: column; gap: 14px; }
 .es-body .card + .card { margin-top: 0; }
 .es-head .sub b { color: var(--ink-2); }
@@ -697,9 +763,8 @@
 .es-h2 .es-h2-act { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
 .card .es-h3, .es-h3 { font-size: .88rem; font-weight: 800; color: var(--ink-2); margin: 18px 0 10px; padding-top: 14px; border-top: 1px solid var(--line); display: flex; align-items: center; gap: 6px; }
 .card .es-h3.es-h3-first { margin-top: 4px; padding-top: 0; border-top: 0; }
-.es-why .es-h3, .card .es-h3.es-h3-plain { border-top: 0; padding-top: 0; }
+.es-why .es-h3 { border-top: 0; padding-top: 0; }
 .es-muted { color: var(--ink-3); }
-.es-linkbtn { background: none; border: 0; padding: 0; font: inherit; color: var(--brand); font-weight: 700; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
 .es-srcs { display: inline-flex; flex-wrap: wrap; gap: 4px 8px; margin-left: 4px; }
 .es-srcs a { font-size: .74rem; white-space: nowrap; }
 .es-disclaimer { display: flex; gap: 10px; align-items: flex-start; }
@@ -746,7 +811,7 @@
 /* 짐 목록: 표 */
 .es-tbl td { vertical-align: middle; }
 .es-tbl td.es-ico { width: 34px; font-size: 1.15rem; text-align: center; padding-right: 0; }
-.es-namebtn { background: none; border: 0; padding: 4px 0; margin: 0; font: inherit; font-weight: 750; color: var(--ink); text-align: left; cursor: pointer; line-height: 1.35; min-height: 32px; }
+.es-namebtn { background: none; border: 0; padding: 4px 0; margin: 0; font: inherit; font-weight: 750; color: var(--ink); text-align: left; cursor: pointer; line-height: 1.35; min-height: 36px; }
 .es-namebtn:hover { color: var(--brand); text-decoration: underline; text-underline-offset: 3px; }
 .es-namecell { min-width: 150px; }
 .es-namewrap { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; }
@@ -792,7 +857,7 @@
   .es-pv-head { display: none; }
   .es-pv-row { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .es-pv-row .es-pv-name { grid-column: 1 / span 3; }
-  .es-pv-row .es-pv-del { grid-column: 4; justify-self: end; }
+  .es-pv-row .es-pv-del { grid-column: 4; grid-row: 1; justify-self: end; }
   .es-pv-row .es-pv-cat { grid-column: 1 / span 2; }
   .es-pv-row .es-pv-fate { grid-column: 3 / span 2; }
 }
@@ -833,6 +898,8 @@
 @media (max-width: 420px) { .es-fgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .es-field { min-width: 0; }
 .es-field .input, .es-field .select { min-height: 40px; }
+/* 금액 칸 아래 안내(예: 260만원)가 입력 직후 생기며 아래 칸을 밀어 터치가 빗나가지 않게 자리를 미리 잡아 둠 */
+.es-field .money-input .hint, .es-coef-ctl .money-input .hint { display: block; min-height: 1.3em; }
 .es-seg { display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 4px; background: var(--bg-3); border-radius: 12px; max-width: 100%; }
 .es-seg-b { border: 0; background: transparent; color: var(--ink-2); font: inherit; font-weight: 700; font-size: .86rem; padding: 6px 12px; min-height: 36px; border-radius: 9px; cursor: pointer; }
 .es-seg-b.is-on { background: var(--bg-2); color: var(--ink); box-shadow: var(--shadow); }
@@ -856,7 +923,7 @@
 .es-autorow:first-child { border-top: 0; }
 .es-autorow .es-al { font-size: .9rem; font-weight: 700; }
 .es-autorow .es-ah { grid-column: 1 / -1; font-size: .76rem; color: var(--ink-3); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-.es-autorow .es-ah .btn { min-height: 28px; }
+.es-autorow .es-ah .btn { min-height: 36px; }
 .es-checks { display: flex; flex-direction: column; gap: 8px; }
 .es-check { min-height: 36px; }
 .es-sub { margin: 6px 0 0 26px; }
@@ -935,8 +1002,14 @@
 .es-qwarns li.is-info { background: var(--bg); border-color: var(--kid); }
 .es-qnorm { font-size: .78rem; color: var(--ink-3); margin-top: 4px; }
 .es-qtbl td.es-qbest { font-weight: 800; }
+.es-qco { overflow-wrap: anywhere; word-break: break-word; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.es-qtbl td.es-qco-td { max-width: 240px; min-width: 120px; }
+.es-qcmp-card .es-qco { -webkit-line-clamp: 2; }
+.es-qcard-head .es-qname { min-width: 0; }
 .es-qtbl td { vertical-align: top; }
 .es-qtbl td .chip { margin-top: 2px; }
+.es-qtbl td .es-qbadges { gap: 4px; }
+.es-qtbl td:last-child .chip { font-size: .72rem; padding: 0 7px; }
 .es-qcmp-cards { display: none; flex-direction: column; gap: 8px; }
 @media (max-width: 760px) { .es-qcmp-tbl { display: none; } .es-qcmp-cards { display: flex; } }
 .es-qcmp-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); }
@@ -1008,6 +1081,8 @@
   ];
 
   /* ---------- 상태 읽기·쓰기 ---------- */
+  /* 짐 목록 읽기 — 깨진 항목(null 등)은 건너뜀 */
+  const invItems = (f) => MV.inv.list((x) => !!x && typeof x === 'object' && (!f || f(x)));
   const stGet = () => MV.store.get();
   const estSt = () => stGet().estimate || {};
   const inpNow = () => inputsOf(estSt());
@@ -1161,7 +1236,7 @@
           : '계수(톤당 8만원, 1인 21만원, 할증률, 품목 부피 등) 대부분이 리서치 신뢰도 ‘낮음’이에요. 방문견적 3곳을 받아 ‘업체 견적 비교’에 넣고 ‘견적으로 보정’하세요. 업체에 ‘적정가’라고 내미는 근거로 쓰지는 마세요.'));
   }
   function copyText(text, ta) {
-    const done = () => MV.ui.toast('복사했어요. 문자·카톡에 붙여 넣으세요.');
+    const done = () => toast('복사했어요. 문자·카톡에 붙여 넣으세요.');
     const fallback = () => {
       try {
         const t = ta || el('textarea', { style: { position: 'fixed', left: '-9999px', top: '0' } }, text);
@@ -1169,8 +1244,8 @@
         t.focus(); t.select();
         const ok = document.execCommand('copy');
         if (!ta) t.remove();
-        if (ok) done(); else MV.ui.toast('복사하지 못했어요. 글자를 길게 눌러 직접 복사하세요.');
-      } catch (e) { MV.ui.toast('복사하지 못했어요. 글자를 길게 눌러 직접 복사하세요.'); }
+        if (ok) done(); else toast('복사하지 못했어요. 글자를 길게 눌러 직접 복사하세요.');
+      } catch (e) { toast('복사하지 못했어요. 글자를 길게 눌러 직접 복사하세요.'); }
     };
     if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, fallback);
     else fallback();
@@ -1180,7 +1255,7 @@
   function headEl() {
     return region(() => {
       const est = R.est;
-      const n = MV.inv.list().length;
+      const n = invItems().length;
       return el('div', { class: 'view-head es-head' },
         el('div',
           el('h1', '🚚 짐·견적'),
@@ -1192,7 +1267,7 @@
   }
   function tabsEl(cur) {
     const est = estSt();
-    const counts = { inventory: MV.inv.list().length, quotes: quotesOf(est).length };
+    const counts = { inventory: invItems().length, quotes: quotesOf(est).length };
     const bar = el('div', { class: 'tabs es-tabs', role: 'tablist', 'aria-label': '짐·견적 화면' },
       TABS.map((t) => el('button', {
         type: 'button', role: 'tab', class: t.id === cur ? 'active' : '', 'aria-selected': String(t.id === cur),
@@ -1202,7 +1277,7 @@
       counts[t.id] ? el('span', { class: 'es-tn' }, String(counts[t.id])) : null)));
     upd(() => {
       const e = estSt();
-      const cs = { inventory: MV.inv.list().length, quotes: quotesOf(e).length };
+      const cs = { inventory: invItems().length, quotes: quotesOf(e).length };
       bar.querySelectorAll('button[data-tab]').forEach((b) => {
         const id = b.dataset.tab;
         let tn = b.querySelector('.es-tn');
@@ -1221,7 +1296,7 @@
   }
   function invFiltered() {
     const q = mem.q.trim().toLowerCase();
-    let list = MV.inv.list((it) => {
+    let list = invItems((it) => {
       const f = FATE_IDS.has(it.fate) ? it.fate : 'undecided';
       if (mem.fates.size && !mem.fates.has(f)) return false;
       if (mem.cat && it.cat !== mem.cat) return false;
@@ -1254,7 +1329,7 @@
   }
 
   function invSummary() {
-    const inv = MV.inv.list();
+    const inv = invItems();
     const fc = fateCounts(inv);
     const moveVol = sum(inv.filter((it) => it.fate === 'move'), (it) => MV.inv.volume(it));
     const assumed = inv.filter((it) => it.assumed).length;
@@ -1284,7 +1359,7 @@
     search.addEventListener('input', () => { mem.q = search.value; deb(); });
     search.addEventListener('keydown', (e) => { if (e.key === 'Escape' && search.value) { e.preventDefault(); search.value = ''; mem.q = ''; refreshNamed(['invlist']); } });
     const counts = {};
-    MV.inv.list().forEach((it) => { counts[it.cat] = (counts[it.cat] || 0) + 1; });
+    invItems().forEach((it) => { counts[it.cat] = (counts[it.cat] || 0) + 1; });
     const cat = el('select', { class: 'select', 'aria-label': '분류', 'data-fk': 'inv-cat' },
       el('option', { value: '' }, '모든 분류'),
       MV.inv.CATS.map((c) => el('option', { value: c.id, selected: mem.cat === c.id }, c.icon + ' ' + c.label + (counts[c.id] ? ' (' + counts[c.id] + ')' : ''))));
@@ -1295,7 +1370,7 @@
     if (R) { R.searchInput = search; R.catSelect = cat; }
     upd(() => {
       const cs = {};
-      MV.inv.list().forEach((it) => { cs[it.cat] = (cs[it.cat] || 0) + 1; });
+      invItems().forEach((it) => { cs[it.cat] = (cs[it.cat] || 0) + 1; });
       Array.from(cat.options).forEach((o) => {
         if (!o.value) return;
         const cc = MV.inv.cat(o.value);
@@ -1370,7 +1445,7 @@
     return el('button', { type: 'button', class: 'es-namebtn', 'data-fk': 'name-' + it.id, title: '눌러서 고치기', onclick: () => MV.inv.editor(it.id) }, nm(it) || '이름 없는 짐');
   }
   function invList() {
-    const all = MV.inv.list();
+    const all = invItems();
     if (!all.length) {
       return el('section', { class: 'card' }, el('div', { class: 'empty' },
         el('span', { class: 'big', 'aria-hidden': 'true' }, '📦'),
@@ -1579,7 +1654,7 @@
       actions: [
         { label: '취소', kind: 'ghost' },
         { label: '추가', kind: 'primary', onClick: () => {
-          if (!rows.length) { MV.ui.toast('먼저 ‘읽어 오기’를 눌러 주세요.'); return false; }
+          if (!rows.length) { toast('먼저 ‘읽어 오기’를 눌러 주세요.'); return false; }
           const items = rows.map((r) => ({
             id: MV.uid('inv'), name: String(r.name || '').trim() || '이름 없는 짐', cat: r.cat, fate: r.fate, qty: Math.max(0, Math.round(num(r.qty, 1))),
             w: Math.max(0, num(r.w, 0)), d: Math.max(0, num(r.d, 0)), h: Math.max(0, num(r.h, 0)),
@@ -1587,7 +1662,7 @@
             tag: r.tag || '', note: '', assumed: !!r.assumed, seed: false,
           }));
           MV.store.update((st) => { st.inventory = st.inventory || []; items.forEach((it) => st.inventory.push(it)); }, { log: '짐 ' + items.length + '개를 붙여넣기로 추가' });
-          MV.ui.toast('짐 ' + items.length + '개를 추가했어요.');
+          toast('짐 ' + items.length + '개를 추가했어요.');
           return undefined;
         } },
       ],
@@ -1658,7 +1733,7 @@
       el('p', { class: 'small es-muted mb-0' }, '방문견적 업체 3곳에 똑같이 보내세요. 버릴 짐과 LG가 옮길 가전은 따로 표시돼요.'),
       el('div', { class: 'row' },
         el('button', { type: 'button', class: 'btn btn-primary', onclick: () => copyText(ta.value, ta) }, '📋 복사'),
-        el('button', { type: 'button', class: 'btn', onclick: () => { MV.ui.download('move-inventory-' + D.today() + '.csv', '﻿' + data.csv, 'text/csv;charset=utf-8'); MV.ui.toast('CSV 파일을 저장했어요.'); } }, '⬇ CSV 저장')),
+        el('button', { type: 'button', class: 'btn', onclick: () => { MV.ui.download('move-inventory-' + D.today() + '.csv', '﻿' + data.csv, 'text/csv;charset=utf-8'); toast('CSV 파일을 저장했어요.'); } }, '⬇ CSV 저장')),
       ta);
     MV.ui.modal({ title: '업체에 보낼 짐 목록', wide: true, body, actions: [{ label: '닫기', kind: 'ghost' }] });
   }
@@ -1681,29 +1756,39 @@
     const raw = rawEst();
     return quotesOf(estSt()).map((q) => normQuote(q, raw)).filter(Boolean).map((n) => n.amount);
   }
+  /* 보정 비율은 부가세 별도 금액끼리 나눠요 (견적 중앙값 ÷ 모델 기준가) — ‘부가세 더하기’를 켜고 꺼도 같은 값 */
+  function calibTarget(raw, est) {
+    const nq = quotesOf(est).map((q) => normQuote(q, raw)).filter(Boolean);
+    const medEx = median(nq.map((n) => n.ex));
+    const med = median(nq.map((n) => n.amount));
+    return { nq, ns: nq.map((n) => n.amount), med, medEx, f: medEx && raw.subtotalEx ? medEx / raw.subtotalEx : null };
+  }
   function calibBox(compact) {
     const raw = rawEst();
-    const qs = quotesOf(estSt());
-    const ns = qs.map((q) => normQuote(q, raw)).filter(Boolean).map((n) => n.amount);
+    const t = calibTarget(raw, estSt());
+    const ns = t.ns;
     const cal = calibOf(estSt());
     const applied = Math.abs(cal.factor - 1) > 1e-6;
-    const med = median(ns);
-    const f = med && raw.typical ? med / raw.typical : null;
+    const med = t.med;
+    const f = t.f;
+    const bl = basisLabel(raw.vatIncl);
     const box = el('div', { class: 'es-calib', 'aria-label': '견적으로 보정' });
     box.appendChild(el('div', { class: 'es-calib-top' }, el('b', '🎯 견적으로 보정'),
       applied ? el('span', { class: 'chip think' }, '적용 중 ×' + cal.factor.toFixed(2)) : el('span', { class: 'chip' }, '보정 없음')));
     if (applied) {
-      box.appendChild(el('p', (cal.at ? MV.date.time(cal.at) + ' · ' : '') + '방문견적 ' + cal.n + '곳 중앙값 ' + won(cal.median) + '에 맞춰 모델 금액을 ×' + cal.factor.toFixed(2) + ' 했어요. 짐이나 조건을 바꾸면 같은 비율로 따라가요.'));
-      const changed = f && Math.abs(f - cal.factor) / cal.factor > 0.01;
+      const shownMed = isNum(cal.median) ? cal.median * (raw.vatIncl ? raw.vatMul : 1) : null;
+      box.appendChild(el('p', (cal.at ? MV.date.time(cal.at) + ' · ' : '') + '방문견적 ' + cal.n + '곳 중앙값' + (shownMed ? ' ' + won(shownMed) + '(' + bl + ' 기준)' : '') + '에 맞춰 모델 금액을 ×' + cal.factor.toFixed(2) + ' 했어요. 짐이나 조건을 바꾸면 같은 비율로 따라가고, ‘부가세 더하기’를 켜고 꺼도 비율은 그대로예요.'));
+      if (!ns.length) box.appendChild(el('p', { class: 'small', style: { color: 'var(--bad)', fontWeight: '700' } }, '⚠ 보정에 쓴 견적이 지금은 하나도 없어요. 보정을 해제하는 게 좋아요.'));
+      const changed = ns.length && f && Math.abs(f - cal.factor) / cal.factor > 0.01;
       box.appendChild(el('div', { class: 'row' },
         changed ? el('button', { type: 'button', class: 'btn btn-sm btn-primary', onclick: applyCalibration }, '견적이 바뀌었어요 — 다시 맞추기 (×' + MV.clamp(f, 0.5, 2).toFixed(2) + ')') : null,
-        el('button', { type: 'button', class: 'btn btn-sm', onclick: clearCalibration }, '보정 해제')));
+        el('button', { type: 'button', class: 'btn btn-sm' + (!ns.length ? ' btn-primary' : ''), onclick: clearCalibration }, '보정 해제')));
     } else if (!ns.length) {
       box.appendChild(el('p', '방문견적을 1곳 이상 ‘업체 견적 비교’에 넣으면, 모델의 기준가를 실제 견적 중앙값에 맞출 수 있어요. 언제든 해제할 수 있어요.'));
       if (compact) box.appendChild(el('div', { class: 'row' }, el('button', { type: 'button', class: 'btn btn-sm', onclick: () => goTab('quotes') }, '업체 견적 넣으러 가기 →')));
     } else {
       const diff = f - 1;
-      box.appendChild(el('p', '견적 ' + ns.length + '곳(같은 조건 환산) 중앙값 ', el('b', won(med)), ' — 지금 모델 기준가 ' + won(raw.typical) + '보다 ' + pctOf(diff) + (diff >= 0 ? ' 높아요.' : ' 낮아요.') +
+      box.appendChild(el('p', '견적 ' + ns.length + '곳(같은 조건·' + bl + ' 환산) 중앙값 ', el('b', won(med)), (Math.abs(diff) < 0.005 ? ' — 지금 모델 기준가 ' + josa(won(raw.typical), '과/와') + ' 거의 같아요.' : ' — 지금 모델 기준가 ' + won(raw.typical) + '보다 ' + Math.abs(Math.round(diff * 100)) + '%' + (diff > 0 ? ' 높아요.' : ' 낮아요.')) +
         (ns.length < 3 ? ' 견적이 3곳 모이면 더 믿을 만해요.' : '')));
       if (f < 0.5 || f > 2) box.appendChild(el('p', { class: 'small', style: { color: 'var(--bad)' } }, '차이가 너무 커요(×' + f.toFixed(2) + '). 금액·포함 항목을 다시 확인하세요. 보정은 ×0.5~×2 사이로만 해요.'));
       box.appendChild(el('div', { class: 'row' }, el('button', { type: 'button', class: 'btn btn-sm btn-primary', onclick: applyCalibration }, '모델을 견적에 맞추기 (×' + MV.clamp(f, 0.5, 2).toFixed(2) + ')')));
@@ -1713,19 +1798,18 @@
   function applyCalibration() {
     const st = stGet();
     const raw = compute(st, { calib: false });
-    const ns = quotesOf(st.estimate).map((q) => normQuote(q, raw)).filter(Boolean).map((n) => n.amount);
-    const med = median(ns);
-    if (!med || !raw.typical) { MV.ui.toast('금액이 들어간 견적이 없어요.'); return; }
-    const factor = Math.round(MV.clamp(med / raw.typical, 0.5, 2) * 1000) / 1000;
+    const t = calibTarget(raw, st.estimate);
+    if (!t.medEx || !raw.subtotalEx) { toast('금액이 들어간 견적이 없어요.'); return; }
+    const factor = Math.round(MV.clamp(t.f, 0.5, 2) * 1000) / 1000;
     const prev = MV.clone(calibOf(st.estimate));
-    MV.store.update((s) => { ensureEst(s).calib = { factor, at: MV.nowISO(), median: Math.round(med), n: ns.length, base: raw.typical }; },
-      { log: '이사 견적 모델을 방문견적 ' + ns.length + '곳 중앙값(' + won(med) + ')에 맞춤 ×' + factor.toFixed(2) });
-    MV.ui.toast('모델을 견적 중앙값에 맞췄어요 (×' + factor.toFixed(2) + ').', { action: { label: '되돌리기', onClick: () => MV.store.update((s) => { ensureEst(s).calib = prev; }, { log: '견적 보정 되돌림' }) } });
+    MV.store.update((s) => { ensureEst(s).calib = { factor, at: MV.nowISO(), median: Math.round(t.medEx), n: t.nq.length, base: raw.subtotalEx, basis: 'ex' }; },
+      { log: '이사 견적 모델을 방문견적 ' + t.nq.length + '곳 중앙값(' + won(t.med) + ', ' + basisLabel(raw.vatIncl) + ')에 맞춤 ×' + factor.toFixed(2) });
+    toast('견적에 맞췄어요 ×' + factor.toFixed(2), { action: { label: '되돌리기', onClick: () => MV.store.update((s) => { ensureEst(s).calib = prev; }, { log: '견적 보정 되돌림' }) } });
   }
   function clearCalibration() {
     const prev = MV.clone(calibOf(estSt()));
     MV.store.update((s) => { ensureEst(s).calib = { factor: 1, at: null, median: null, n: 0, base: null }; }, { log: '이사 견적 보정 해제' });
-    MV.ui.toast('보정을 해제했어요.', { action: { label: '되돌리기', onClick: () => MV.store.update((s) => { ensureEst(s).calib = prev; }, { log: '견적 보정 다시 적용' }) } });
+    toast('보정을 해제했어요.', { action: { label: '되돌리기', onClick: () => MV.store.update((s) => { ensureEst(s).calib = prev; }, { log: '견적 보정 다시 적용' }) } });
   }
   function heroCard() {
     const est = R.est;
@@ -1745,7 +1829,7 @@
             el('span', { class: 'chip' }, '👷 ' + est.crewLabel),
             el('span', { class: 'chip' + (est.surchargePct ? ' warn' : ' good') }, '📅 ' + est.dateLabel + (est.surchargePct ? ' +' + r1(est.surchargePct) + '%' : ' 할증 없음')),
             el('span', { class: 'chip' }, '❄️ 에어컨 ' + (acInc ? '포함 (' + est.counts.acN + '대)' : '제외')),
-            est.inputs.vat ? el('span', { class: 'chip' }, '부가세 포함') : null)),
+            el('span', { class: 'chip', title: est.vatIncl ? '부가세 10%를 더한 금액이에요' : '리서치 시세는 부가세 별도예요. ‘이사 견적’에서 ‘부가세 10% 더하기’를 켜면 포함 금액으로 봐요' }, '🧾 ' + basisLabel(est.vatIncl)))),
         el('div', { class: 'es-hero-side' },
           lg && lg.typical > 0 ? el('div', { class: 'es-lgsum' }, '🔌 LG로 옮기는 가전 ' + lg.count + '대 별도 ', el('b', '약 ' + won(lg.typical)),
             el('span', '→ 이사 전체 약 ' + won(est.typical + lg.typical))) : null,
@@ -1764,19 +1848,28 @@
       min: o.min != null ? String(o.min) : '0', max: o.max != null ? String(o.max) : null, step: String(o.step || 1),
       'data-fk': 'in-' + key, placeholder: o.placeholder || null, 'aria-label': o.aria || null,
     });
-    const commit = () => {
+    const mn = o.min != null ? o.min : 0;
+    const shown = () => { const v = inpNow()[key]; return v == null ? '' : String(v); };
+    /* final=true(칸을 떠날 때): 비웠거나 범위를 넘으면 실제 계산에 쓰는 값으로 칸을 되돌려 화면과 계산이 어긋나지 않게 */
+    const commit = (final) => {
       const raw = input.value.trim();
-      if (raw === '') { if (o.nullable && inpNow()[key] !== null) setInput(key, null); return; }
+      if (raw === '') {
+        if (o.nullable) { if (inpNow()[key] !== null) setInput(key, null); }
+        else if (final) input.value = shown();
+        return;
+      }
       let v = parseFloat(raw);
-      if (!isFinite(v)) return;
-      if (o.min != null) v = Math.max(o.min, v);
+      if (!isFinite(v)) { if (final) input.value = shown(); return; }
+      v = Math.max(mn, v);
       if (o.max != null) v = Math.min(o.max, v);
       v = o.decimal ? Math.round(v * 100) / 100 : Math.round(v);
       if (inpNow()[key] !== v) setInput(key, v);
+      if (final && input.value !== String(v)) input.value = String(v);
     };
-    const deb = MV.debounce(commit, 350);
+    const deb = MV.debounce(() => commit(false), 350);
     input.addEventListener('input', deb);
-    input.addEventListener('change', () => { deb.flush(); commit(); });
+    input.addEventListener('change', () => { deb.flush(); commit(true); });
+    input.addEventListener('blur', () => { deb.flush(); commit(true); });
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); input.blur(); } });
     upd(() => { if (document.activeElement !== input) { const v = inpNow()[key]; input.value = v == null ? '' : String(v); } });
     return input;
@@ -1847,7 +1940,8 @@
           di.holiday ? ' · ' + di.holiday : '', di.monthStart ? ' · 월초' : di.monthEnd ? ' · 월말' : ''),
         el('div', { class: 'es-note' }, di.date === '2026-11-03'
           ? '근거: KASI 기반 음력 라이브러리로 리서치 검증자가 다시 계산 (신뢰도 높음). 11/2(월)은 음력 9/23. 일부 블로그·중국 기준 음력은 11월 손없는날을 하루씩 틀리게 안내해요.'
-          : '앱에 넣은 음력표(KASI 기반, 2026-08 ~ 2027-05)로 계산했어요.', ' ', srcLinks(['lunar', 'lunarDay'])),
+          : '앱에 넣은 음력표(KASI 기반, ' + LUNAR_RANGE + ')와 공휴일표(대체공휴일 포함, 2026-08 ~ 2027-12)로 계산했어요.' +
+            (di.holidayKnown ? '' : ' 이 날짜는 공휴일표 밖이라 공휴일이면 날짜 유형을 ‘주말·공휴일’로 직접 고르세요.'), ' ', srcLinks(['lunar', 'lunarDay'])),
         di.nearby.length ? el('div', { class: 'es-sohn' }, el('span', { class: 'small strong' }, '가까운 손없는날:'),
           di.nearby.map((x) => el('span', { class: 'chip bad', title: '손없는날은 +' + r1(c.sohn_pct) + '% 안팎 비싸고 예약이 빨리 차요' }, D.fmt(x)))) : null,
         di.date === '2026-11-03' ? el('div', { class: 'es-note' }, '11/3은 평일이라 가격은 유리하지만 월초·가을 이사철이 겹쳐 인기 업체와 사다리차가 빨리 마감돼요. 10/17까지 계약을 권해요.') : null);
@@ -1926,12 +2020,12 @@
     upd(() => {
       const est = R.est;
       const u = est.counts.acUnits;
-      const lgAc = MV.inv.list((it) => isAircon(it) && it.lg && isGoing(it, est.inputs)).reduce((s, it) => s + qtyOf(it), 0);
+      const lgAc = invItems((it) => isAircon(it) && it.lg && isGoing(it, est.inputs)).reduce((s, it) => s + qtyOf(it), 0);
       setKids(acBox,
         el('div', el('b', '❄️ 에어컨 이전 (짐 목록에서 자동): '),
           est.counts.acN ? AC_T.filter((t) => u[t]).map((t) => AC_LABEL[t] + ' ' + u[t] + '대').join(', ') + ' — 이삿짐센터 협력 기사' : '이삿짐센터가 옮길 에어컨 없음'),
-        el('div', { class: 'es-note' }, lgAc ? 'LG 서비스로 옮기는 에어컨 ' + lgAc + '대는 빠져 있어요. ' : '',
-          '누가 옮길지는 ', el('button', { type: 'button', class: 'es-linkbtn', onclick: () => goTab('lg') }, 'LG vs 이삿짐센터'), '에서 정해요.'));
+        el('div', { class: 'es-note' }, lgAc ? 'LG 서비스로 옮기는 에어컨 ' + lgAc + '대는 빠져 있어요. ' : '', '누가 옮길지는 ‘LG vs 이삿짐센터’에서 정해요.'),
+        el('div', { class: 'mt-8' }, el('button', { type: 'button', class: 'btn btn-sm', onclick: () => goTab('lg') }, '🔌 누가 옮길지 정하기 →')));
     });
     card.appendChild(acBox);
     card.appendChild(el('div', { class: 'es-fgrid mt-8' },
@@ -2065,7 +2159,7 @@
       inner.appendChild(el('div', { class: 'row' },
         el('button', { type: 'button', class: 'btn btn-danger btn-sm', onclick: () => {
           MV.ui.confirm('계산 기준(계수)을 모두 리서치 기준값으로 되돌릴까요? 견적 보정·입력값은 그대로예요.', { okLabel: '기준값으로 되돌리기', danger: true }).then((ok) => {
-            if (ok) { MV.store.update((st) => { ensureEst(st).coef = Object.assign({}, DEF_COEF); }, { log: '이사 견적 계산 기준을 기준값으로 되돌림' }); MV.ui.toast('기준값으로 되돌렸어요.'); }
+            if (ok) { MV.store.update((st) => { ensureEst(st).coef = Object.assign({}, DEF_COEF); }, { log: '이사 견적 계산 기준을 기준값으로 되돌림' }); toast('기준값으로 되돌렸어요.'); }
           });
         } }, '↺ 기준값으로 되돌리기')));
       GROUPS.forEach((g) => {
@@ -2151,7 +2245,10 @@
     if (!q.aircon && raw.parts.aircon > 0) out.warns.push({ t: '에어컨 이전 미포함(또는 미확인) — 약 ' + won(raw.parts.aircon) + ' (환산에 더했어요).', k: 'warn' });
     if (!q.waste && raw.parts.waste > 0) out.warns.push({ t: '폐기물 처리 미포함 — 약 ' + won(raw.parts.waste) + ' (환산에 더했어요).', k: 'warn' });
     if (!q.arrange && raw.parts.arrange > 0) out.warns.push({ t: '정리 인력 미포함 — 약 ' + won(raw.parts.arrange) + ' (환산에 더했어요).', k: 'warn' });
-    if (q.vatIncluded === false) out.warns.push({ t: '부가세 별도 → ' + r1(c.vat_pct) + '%를 더해 비교했어요. 계약은 ‘부가세 포함 총액, 결제수단 무관’으로 하세요.', k: 'info' });
+    if (q.vatIncluded === false) {
+      out.warns.push({ t: (raw.vatIncl ? '부가세 별도 견적 → ' + r1(c.vat_pct) + '%를 더해 비교했어요.' : '부가세 별도 견적 — 모델도 부가세 별도라 그대로 비교했어요. 실제로 낼 돈은 약 ' + won(num(q.amount, 0) * raw.vatMul) + '(부가세 포함)이에요.') +
+        ' 계약은 ‘부가세 포함 총액, 결제수단 무관’으로 하세요.', k: 'info' });
+    }
     const qt = num(q.tons, 0);
     if (qt > 0 && qt < est.tons) out.warns.push({ t: '차량 ' + tonsLabel(qt) + '은 모델(' + tonsLabel(est.tons) + ')보다 작아요 — 당일 증차 요구 위험.', k: 'warn' });
     const qc = num(q.crew, 0);
@@ -2189,7 +2286,8 @@
         el('span', { class: 'small es-muted' }, won(est.low) + ' ~ ' + won(est.high) + ' · ' + est.truckLabel + ' · ' + est.crewLabel +
           ' · 사다리차 ' + (est.parts.ladder > 0 ? '포함' : '없음') + ' · 에어컨 ' + (est.counts.acN ? est.counts.acN + '대 포함' : '제외'))),
       el('div', { class: 'mt-12' }, calibBox(false)),
-      el('p', { class: 'small es-muted mt-8 mb-0' }, '업체 견적에 빠진 항목(사다리차·에어컨 등)은 모델 금액을 더해 ‘같은 조건 환산’으로 비교해요. 부가세 별도면 10%를 더해요.'));
+      el('p', { class: 'small es-muted mt-8 mb-0' }, '업체 견적에 빠진 항목(사다리차·에어컨 등)은 모델 금액을 더해 ‘같은 조건 환산’으로 비교해요. 부가세도 모델과 같은 기준으로 맞춰요 — 지금 모델은 ',
+        el('b', basisLabel(est.vatIncl)), est.vatIncl ? ' 금액이라 ‘부가세 별도’ 견적에 ' + r1(est.coef.vat_pct) + '%를 더해요.' : ' 시세라 ‘부가세 포함’ 견적에서 부가세를 빼고 비교해요. 실제로 낼 돈은 ‘이사 견적’에서 ‘부가세 10% 더하기’를 켜면 보여요.'));
   }
   function quotesCompare() {
     const est = R.est;
@@ -2209,21 +2307,21 @@
     const incl = (q) => [['ladder', '사다리차'], ['aircon', '에어컨'], ['arrange', '정리'], ['waste', '폐기물']].filter(([k]) => q[k]).map(([, l]) => l);
     const checks = (q) => [['visitDone', '방문'], ['licenseChecked', '허가'], ['insuranceChecked', '보험']].map(([k, l]) => el('span', { class: 'chip ' + (q[k] ? 'good' : ''), title: q[k] ? l + ' 확인함' : l + ' 확인 전' }, (q[k] ? '✓ ' : '') + l));
     const tbl = el('table', { class: 'tbl es-qtbl' },
-      el('thead', el('tr', el('th', '업체'), el('th', { class: 'num' }, '같은 조건 환산'), el('th', '모델·다른 견적 대비'), el('th', '포함 · 확인'))),
+      el('thead', el('tr', el('th', '업체'), el('th', { class: 'num' }, '같은 조건 환산', el('span', { class: 'tiny es-muted', style: { display: 'block', fontWeight: '600' } }, basisLabel(raw.vatIncl))), el('th', '모델·다른 견적 대비'), el('th', '포함 · 확인'))),
       el('tbody', rows.map(({ q, ev }) => el('tr',
-        el('td', { class: best && best.id === q.id ? 'es-qbest' : '' }, el('div', q.company || '이름 없는 업체'),
+        el('td', { class: 'es-qco-td' + (best && best.id === q.id ? ' es-qbest' : '') }, el('div', { class: 'es-qco', title: q.company || '' }, q.company || '이름 없는 업체'),
           best && best.id === q.id ? el('span', { class: 'chip good' }, '⭐ 추천') : null,
           el('div', { class: 'tiny es-muted' }, (num(q.tons, 0) ? tonsLabel(num(q.tons, 0)) : '톤 —') + ' · ' + (num(q.crew, 0) ? q.crew + '명' : '인원 —') + (q.date ? ' · ' + D.fmt(q.date) : ''))),
         el('td', { class: 'num' }, el('b', ev.n ? won(ev.n.amount) : '—'), el('div', { class: 'tiny es-muted' }, '견적 ' + (num(q.amount, 0) > 0 ? won(q.amount) : '—'))),
         el('td', el('div', { class: 'es-qbadges', style: { marginTop: 0 } }, ev.badges.map((b) => el('span', { class: 'chip ' + b.cls }, b.t)))),
         el('td', el('div', { class: 'small' }, incl(q).length ? '포함: ' + incl(q).join('·') : '포함 항목 미확인'), el('div', { class: 'es-qbadges', style: { marginTop: '4px' } }, checks(q)))))));
     const cards = el('div', { class: 'es-qcmp-cards' }, rows.map(({ q, ev }) => el('div', { class: 'es-qcmp-card' },
-      el('div', { class: 'strong' }, q.company || '이름 없는 업체', best && best.id === q.id ? el('span', { class: 'chip good', style: { marginLeft: '6px' } }, '⭐ 추천') : null),
+      el('div', { class: 'strong', style: { minWidth: '0' } }, el('span', { class: 'es-qco', title: q.company || '' }, q.company || '이름 없는 업체'), best && best.id === q.id ? el('span', { class: 'chip good', style: { marginLeft: '6px' } }, '⭐ 추천') : null),
       el('div', { class: 'es-qc-amt' }, ev.n ? won(ev.n.amount) : '—'),
       el('div', { class: 'es-qc-sub' }, ev.badges.map((b) => el('span', { class: 'chip ' + b.cls }, b.t)),
         el('span', '견적 ' + (num(q.amount, 0) > 0 ? won(q.amount) : '—') + ' · ' + (num(q.tons, 0) ? tonsLabel(num(q.tons, 0)) : '톤 —') + ' · ' + (num(q.crew, 0) ? q.crew + '명' : '인원 —'))))));
     return el('section', { class: 'card', 'aria-label': '견적 비교표' },
-      sectionHead('📊', '견적 비교', '같은 조건 환산 금액 순'),
+      sectionHead('📊', '견적 비교', '같은 조건·' + basisLabel(raw.vatIncl) + ' 환산 금액 순'),
       el('div', { class: 'table-wrap es-qcmp-tbl' }, tbl), cards,
       best ? el('p', { class: 'small mt-8 mb-0' }, '⭐ 추천 기준: ' + best.basis + '. 가장 싼 곳이 아니라 ‘빠진 것 없이 믿을 만한 곳’을 고르세요.') : null);
   }
@@ -2238,17 +2336,31 @@
     const card = el('article', { class: 'card es-qcard', 'data-qid': id, 'aria-label': '업체 견적' });
     const company = el('input', { class: 'input es-qname', value: q0.company || '', placeholder: '업체명 (예: ○○익스프레스)', 'aria-label': '업체명', 'data-fk': 'q-' + id + '-company' });
     textCommit(company, (v) => updQuote(id, { company: v.trim() }));
-    const del = el('button', { type: 'button', class: 'btn btn-sm btn-ghost btn-icon', 'aria-label': '이 견적 지우기', title: '지우기', onclick: () => {
+    const del = el('button', { type: 'button', class: 'btn btn-ghost btn-icon', 'aria-label': '이 견적 지우기', title: '지우기', onclick: () => {
       const q = getQuote(id);
-      MV.ui.confirm('“' + ((q && q.company) || '이름 없는 업체') + '” 견적을 지울까요?', { danger: true, okLabel: '지우기' }).then((ok) => {
-        if (ok) MV.store.update((st) => { const e = ensureEst(st); e.quotes = e.quotes.filter((x) => x && x.id !== id); }, { log: '업체 견적 삭제: ' + ((q && q.company) || '이름 없는 업체') });
+      MV.ui.confirm('“' + clip((q && q.company) || '이름 없는 업체', 40) + '” 견적을 지울까요?', { danger: true, okLabel: '지우기' }).then((ok) => {
+        if (!ok) return;
+        const before = MV.clone(quotesOf(estSt()));
+        const prevCal = MV.clone(calibOf(estSt()));
+        let cleared = false;
+        MV.store.update((st) => {
+          const e = ensureEst(st);
+          e.quotes = e.quotes.filter((x) => x && x.id !== id);
+          // 보정 근거였던 견적(금액 있는 것)이 하나도 안 남으면 보정도 함께 해제 — 되돌리기로 둘 다 복구
+          const left = e.quotes.filter((x) => x && num(x.amount, 0) > 0).length;
+          if (!left && Math.abs(calibOf(e).factor - 1) > 1e-6) { e.calib = { factor: 1, at: null, median: null, n: 0, base: null }; cleared = true; }
+        }, { log: '업체 견적 삭제: ' + clip((q && q.company) || '이름 없는 업체', 40) + (cleared ? ' (남은 견적이 없어 보정도 해제)' : '') });
+        const undo = { label: '되돌리기', onClick: () => MV.store.update((st) => { const e = ensureEst(st); e.quotes = before; if (cleared) e.calib = prevCal; }, { log: '견적 삭제 되돌림' }) };
+        toast(cleared ? '견적을 지우고, 남은 견적이 없어 보정도 해제했어요.' : '견적을 지웠어요.', { action: undo });
       });
     } }, '🗑');
     const date = el('input', { class: 'input', type: 'date', value: q0.date || '', 'aria-label': '방문견적일', 'data-fk': 'q-' + id + '-date' });
     date.addEventListener('change', () => updQuote(id, { date: date.value }));
-    const amount = MV.ui.moneyInput(isNum(q0.amount) ? q0.amount : null, (v) => updQuote(id, { amount: Math.max(0, v) || null }), { placeholder: '예: 210만' });
+    /* 금액을 지우면 core 입력칸은 '0'·'0원'을 보여 주지만 저장값은 null(금액 없음) — 칸도 비워 맞춤 */
+    const blankIfNone = (w, v) => { if (!(v > 0)) { w.input.value = ''; const h = w.querySelector('.hint'); if (h) h.textContent = ''; } };
+    const amount = MV.ui.moneyInput(isNum(q0.amount) ? q0.amount : null, (v) => { blankIfNone(amount, v); updQuote(id, { amount: Math.max(0, v) || null }); }, { placeholder: '예: 210만' });
     amount.input.setAttribute('aria-label', '견적 금액'); amount.input.dataset.fk = 'q-' + id + '-amount';
-    const deposit = MV.ui.moneyInput(isNum(q0.deposit) ? q0.deposit : null, (v) => updQuote(id, { deposit: Math.max(0, v) || null }), { placeholder: '예: 20만' });
+    const deposit = MV.ui.moneyInput(isNum(q0.deposit) ? q0.deposit : null, (v) => { blankIfNone(deposit, v); updQuote(id, { deposit: Math.max(0, v) || null }); }, { placeholder: '예: 20만' });
     deposit.input.setAttribute('aria-label', '계약금'); deposit.input.dataset.fk = 'q-' + id + '-deposit';
     const vat = el('select', { class: 'select', 'aria-label': '부가세', 'data-fk': 'q-' + id + '-vat' },
       el('option', { value: 'in' }, '부가세 포함'), el('option', { value: 'ex' }, '부가세 별도'));
@@ -2297,7 +2409,8 @@
       card.classList.toggle('is-cheap', ev.tooCheap);
       badges.replaceChildren(...ev.badges.map((b) => el('span', { class: 'chip ' + b.cls }, b.t)),
         ...(best && best.id === id ? [el('span', { class: 'chip good' }, '⭐ 추천')] : []));
-      normTxt.textContent = ev.n ? '같은 조건 환산 ' + won(ev.n.amount) + (ev.n.adds.length ? ' (= 견적 ' + won(q.amount) + ' + ' + ev.n.adds.map((a) => a.label + ' ' + won(a.v)).join(' + ') + ')' : '') + ' · 모델 기준 ' + won(est.typical) : '';
+      normTxt.textContent = ev.n ? '같은 조건 환산 ' + won(ev.n.amount) + ' (' + basisLabel(raw.vatIncl) + ' 기준' +
+        (ev.n.adds.length ? ' = 견적 ' + won(q.amount) + ev.n.adds.map((a) => (a.v < 0 ? ' − ' : ' + ') + a.label.replace(/ 빼기$/, '') + ' ' + won(Math.abs(a.v))).join('') : '') + ') · 모델 기준 ' + won(est.typical) : '';
       warns.replaceChildren(...ev.warns.map((w) => el('li', { class: 'is-' + w.k }, w.t)));
       if (document.activeElement !== company && company.value !== (q.company || '')) company.value = q.company || '';
       ['ladder', 'aircon', 'arrange', 'waste', 'visitDone', 'licenseChecked', 'insuranceChecked'].forEach((k) => {
@@ -2306,7 +2419,11 @@
     }, card);
     return card;
   }
+  let lastAddAt = 0;
   function addQuote() {
+    // 두 번 빠르게 누르면(빈 화면 → 다시 그린 머리말의 ‘+ 견적 추가’ 위로 두 번째 탭이 떨어짐) 하나만 추가
+    if (Date.now() - lastAddAt < 700) return;
+    lastAddAt = Date.now();
     const q = newQuote();
     mem.focusQuote = q.id;
     MV.store.update((st) => { ensureEst(st).quotes.push(q); }, { log: '업체 견적 칸 추가' });
@@ -2360,7 +2477,7 @@
   }
 
   /* ======================= 4) LG vs 이삿짐센터 ======================= */
-  function lgCandidates() { return MV.inv.list((it) => it.fate === 'move' && qtyOf(it) > 0 && isApplianceLike(it)); }
+  function lgCandidates() { return invItems((it) => it.fate === 'move' && qtyOf(it) > 0 && isApplianceLike(it)); }
   function lgScenarios() {
     const st = stGet();
     const inv = (st.inventory || []).filter((x) => x && typeof x === 'object');

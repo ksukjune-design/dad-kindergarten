@@ -9,6 +9,8 @@
             planEdits = { old: { rooms: { <roomId>: {x,y,w,h,name} } }, new: {...} }
                         실측값으로 방 치수를 덮어씀 (MV.plans 는 절대 수정하지 않음)
             ui.plan   = { grid, snap, zoom:{new,old}, filter, infoOpen, laundryRoom }
+   조작     끌기(마우스·터치·펜, 도면 밖으로는 못 나감 · 가장자리에서 자동 스크롤) · 두 손가락 확대/축소(도면만)
+            키보드 단축키는 도면에 초점이 있거나 마우스가 도면 위에 있을 때만 (방향키·R·Delete·Esc)
    제공     MV.calc.planSummary() → { new:{placed,needed,bad,warn}, old:{...}, closet:{...} }
    ============================================================ */
 (function () {
@@ -61,17 +63,25 @@
     return String(x.label || x.title || x.text || x.name || x.what || Object.values(x).filter((v) => typeof v !== 'object').join(' · '));
   };
   /** 받침 유무로 조사 고르기: jo('침대', '과', '와') → '와' */
-  function jo(word, withBatchim, without) {
+  // 숫자로 끝나면 읽는 소리로 받침 판단 (영·일·삼·육·칠·팔 = 받침 있음, 일·칠·팔 = ㄹ 받침)
+  const DIGIT_JONG = { 0: 21, 1: 8, 2: 0, 3: 16, 4: 0, 5: 0, 6: 1, 7: 8, 8: 8, 9: 0 };
+  function jong(word) {
     const a = Array.from(String(word || '').replace(/[\s)\]」』"'…]+$/, ''));
-    const c = a.length ? a[a.length - 1].codePointAt(0) : 0;
-    if (c >= 0xac00 && c <= 0xd7a3) return ((c - 0xac00) % 28) ? withBatchim : without;
+    const ch = a.length ? a[a.length - 1] : '';
+    const c = ch ? ch.codePointAt(0) : 0;
+    if (c >= 0xac00 && c <= 0xd7a3) return (c - 0xac00) % 28;
+    if (/[0-9]/.test(ch)) return DIGIT_JONG[ch];
+    return -1;
+  }
+  function jo(word, withBatchim, without) {
+    const j = jong(word);
+    if (j >= 0) return j ? withBatchim : without;
     return withBatchim + '(' + without + ')';
   }
   /** '(으)로': 받침이 있으면 '으로' (단, ㄹ 받침은 '로') */
   function joRo(word) {
-    const a = Array.from(String(word || '').replace(/[\s)\]」』"'…]+$/, ''));
-    const c = a.length ? a[a.length - 1].codePointAt(0) : 0;
-    if (c >= 0xac00 && c <= 0xd7a3) { const j = (c - 0xac00) % 28; return j && j !== 8 ? '으로' : '로'; }
+    const j = jong(word);
+    if (j >= 0) return j && j !== 8 ? '으로' : '로';
     return '(으)로';
   }
   const q = (it) => '「' + shortName(it.name, 14) + '」';
@@ -1097,7 +1107,7 @@
 
     // ---- 다시 그리기 ----
     function refresh() {
-      if (drag) { pending = true; return; }
+      if (drag || pinch) { pending = true; return; }
       pending = false;
       const plan = getPlan(key);
       if (!plan) return;
@@ -1113,7 +1123,9 @@
       const { plan, items, v } = cur;
       if (!lastW) lastW = scroll.clientWidth;
       const cw = lastW || planCard.clientWidth || 340;
-      const maxH = Math.max(300, window.innerHeight - 190);
+      // 도면 창의 CSS 최대 높이와 맞춰야 100%(맞춤)에서 창 안쪽 스크롤이 생기지 않음 (생기면 첫 손가락 쓸기가 페이지 대신 도면 창을 굴림)
+      const cssMax = parseFloat(getComputedStyle(scroll).maxHeight);
+      const maxH = Math.max(300, Math.min(window.innerHeight - 190, isFinite(cssMax) ? cssMax - 2 : Infinity));
       const vb = viewBoxFor(plan, items);
       const fitS = Math.max(0.08, Math.min(cw / vb.w, maxH / vb.h));
       const s = fitS * curZoom();
@@ -1158,7 +1170,7 @@
           sb('del', '🗑', '도면에서 빼기', removeSel, { class: 'btn btn-danger', short: '빼기', title: '도면에서 빼기 (Delete)' }),
           el('button', { type: 'button', class: 'btn btn-ghost btn-icon', 'data-act': 'close', onclick: () => { sel = null; refresh(); }, 'aria-label': '선택 해제' }, '✕')));
       selBar.hidden = false;
-      selBar.style.visibility = 'hidden';
+      selBar.style.opacity = '0';   // 자리 잡기 전 한 프레임 숨김 (visibility 와 달리 초점은 받을 수 있음)
       const vb = cur.vb || plan.vb;
       const x0 = (o.r.x - vb.x) * s, y0 = (o.r.y - vb.y) * s, w0 = o.r.w * s, h0 = o.r.h * s;
       const pid = o.p.id;
@@ -1174,7 +1186,7 @@
         const left = MV.clamp(x0 + w0 / 2 - bw / 2, 0, Math.max(0, sw - bw));
         selBar.style.left = Math.round(left) + 'px';
         selBar.style.top = Math.round(top) + 'px';
-        selBar.style.visibility = '';
+        selBar.style.opacity = '';
       });
     }
     function drawChips() {
@@ -1669,8 +1681,9 @@
         const out = [];
         if (!(v.w > 0)) out.push([f.w, '가로를 넣어 주세요']); else if (v.w < 30 || v.w > maxDim) out.push([f.w, '가로 ' + Math.round(v.w) + 'cm — 30~' + maxDim + 'cm 사이로 넣어 주세요']);
         if (!(v.h > 0)) out.push([f.h, '세로를 넣어 주세요']); else if (v.h < 30 || v.h > maxDim) out.push([f.h, '세로 ' + Math.round(v.h) + 'cm — 30~' + maxDim + 'cm 사이로 넣어 주세요']);
-        if (!isFinite(v.x)) out.push([f.x, 'X를 넣어 주세요']); else if (v.x < ob.x0 - PAD || (v.w > 0 && v.x + v.w > ob.x1 + PAD)) out.push([f.x, 'X 위치가 도면에서 너무 멀어요 (' + Math.round(ob.x0 - PAD) + '~' + Math.round(ob.x1 + PAD) + 'cm 안)']);
-        if (!isFinite(v.y)) out.push([f.y, 'Y를 넣어 주세요']); else if (v.y < ob.y0 - PAD || (v.h > 0 && v.y + v.h > ob.y1 + PAD)) out.push([f.y, 'Y 위치가 도면에서 너무 멀어요 (' + Math.round(ob.y0 - PAD) + '~' + Math.round(ob.y1 + PAD) + 'cm 안)']);
+        const okW = v.w >= 30 && v.w <= maxDim, okH = v.h >= 30 && v.h <= maxDim;
+        if (!isFinite(v.x)) out.push([f.x, 'X를 넣어 주세요']); else if (v.x < ob.x0 - PAD || (okW && v.x + v.w > ob.x1 + PAD)) out.push([f.x, 'X 위치가 도면에서 너무 멀어요 (' + Math.round(ob.x0 - PAD) + '~' + Math.round(ob.x1 + PAD) + 'cm 안)']);
+        if (!isFinite(v.y)) out.push([f.y, 'Y를 넣어 주세요']); else if (v.y < ob.y0 - PAD || (okH && v.y + v.h > ob.y1 + PAD)) out.push([f.y, 'Y 위치가 도면에서 너무 멀어요 (' + Math.round(ob.y0 - PAD) + '~' + Math.round(ob.y1 + PAD) + 'cm 안)']);
         return out;
       };
       const upd = () => {
@@ -1783,7 +1796,7 @@
       autoRaf = 0;
       if (!drag || !drag.moved || !root.isConnected) return;
       const E = 44;
-      const sp = (dist) => Math.round(MV.clamp(3 + dist * 0.35, 3, 22));
+      const sp = (dist) => Math.round(MV.clamp(2 + dist * 0.25, 2, 16));
       const { cx, cy } = drag;
       const sr = scroll.getBoundingClientRect();
       let vx = 0, vy = 0, wy = 0;
@@ -1796,16 +1809,19 @@
       const topLim = pxv('--topbar-h', 56) + E, botLim = window.innerHeight - pxv('--bottom-h', 0) - E;
       if (cy < topLim && sr.top < topLim - E) wy = -sp(topLim - cy);
       else if (cy > botLim && sr.bottom > botLim + E) wy = sp(cy - botLim);
-      let moved = false;
+      let moved = false, movedY = false;
       if (vx || vy) {
         const l0 = scroll.scrollLeft, t0 = scroll.scrollTop;
         scroll.scrollLeft = l0 + vx; scroll.scrollTop = t0 + vy;
-        moved = scroll.scrollLeft !== l0 || scroll.scrollTop !== t0;
+        movedY = scroll.scrollTop !== t0;
+        moved = scroll.scrollLeft !== l0 || movedY;
       }
-      if (wy) { const y0 = window.scrollY; window.scrollBy(0, wy); moved = moved || window.scrollY !== y0; }
+      // 화면(페이지)은 도면 창이 더 굴러가지 않을 때만 — 둘이 함께 굴러 너무 빨라지지 않게
+      if (wy && !movedY) { const y0 = window.scrollY; window.scrollBy(0, wy); moved = moved || window.scrollY !== y0; }
       if (moved) dragPos();
       if (moved || vx || vy || wy) autoRaf = requestAnimationFrame(autoTick);
     }
+    /** 끌기 취소 (두 번째 손가락이 닿아 확대로 바뀔 때). 다시 그리면 터치 대상이 사라지므로 제자리로만 돌려 놓음 */
     function cancelDrag() {
       if (!drag) return;
       const d = drag;
@@ -1813,8 +1829,8 @@
       stopAuto();
       try { stage.releasePointerCapture(d.id); } catch (err) { /* 무시 */ }
       if (svgEl) svgEl.classList.remove('is-dragging');
+      d.g.setAttribute('transform', 'translate(' + r1(d.x0) + ' ' + r1(d.y0) + ')');
       lastUp = Date.now();
-      refresh();
     }
     stage.addEventListener('pointerdown', (e) => {
       if (editMode || !cur || !svgEl || drag || pinch) return;
@@ -1864,7 +1880,8 @@
     }, { passive: false });
     stage.addEventListener('click', (e) => {
       if (Date.now() - lastUp < 350) return;
-      if (e.target.closest && e.target.closest('.fp-selbar')) return;
+      // 선택 도구 단추는 누르자마자 다시 그려져 문서에서 떨어져 나가므로 경로로 판단
+      if (!e.target.isConnected || e.composedPath().includes(selBar)) return;
       if (editMode) {
         const rr = e.target.closest && e.target.closest('[data-rid]');
         if (rr) openRoomEditor(rr.getAttribute('data-rid'));
@@ -1882,8 +1899,32 @@
     // ---- 두 손가락으로 확대·축소 (태블릿·폰): 페이지 전체가 아니라 도면만 ----
     const tDist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
     const tMid = (t) => ({ x: (t[0].clientX + t[1].clientX) / 2, y: (t[0].clientY + t[1].clientY) / 2 });
+    // 손가락 이동·뗌은 문서 전체에서 받음 (터치를 시작한 요소가 다시 그려져 문서에서 빠져도 계속 받도록) — 확대 중에만 등록
+    const onPinchMove = (e) => {
+      if (!pinch || e.touches.length < 2) return;
+      if (e.cancelable) e.preventDefault();
+      pinch.ratio = MV.clamp(tDist(e.touches) / pinch.d0, 0.5 / pinch.z0, 5 / pinch.z0);
+      stage.style.transform = 'scale(' + r2(pinch.ratio) + ')';
+    };
+    const unhookPinch = () => {
+      document.removeEventListener('touchmove', onPinchMove, { passive: false });
+      document.removeEventListener('touchend', endPinch);
+      document.removeEventListener('touchcancel', endPinch);
+    };
+    function endPinch(e) {
+      if (!pinch || (e && e.touches && e.touches.length >= 2)) return;
+      const p = pinch;
+      pinch = null;
+      unhookPinch();
+      lastUp = Date.now();
+      stage.style.transform = ''; stage.style.transformOrigin = ''; stage.style.willChange = '';
+      if (Math.abs(p.ratio - 1) > 0.03) setZoom(p.z0 * p.ratio, p.at, p.pt);
+      else if (pending) refresh();
+      else drawSelBar();
+    }
+    ctx.onCleanup(() => { pinch = null; unhookPinch(); });
     scroll.addEventListener('touchstart', (e) => {
-      if (e.touches.length !== 2 || !cur || !svgEl) return;
+      if (e.touches.length !== 2 || !cur || !svgEl || pinch) return;
       if (e.cancelable) e.preventDefault();
       if (drag) cancelDrag();
       const m = tMid(e.touches);
@@ -1892,24 +1933,10 @@
       selBar.hidden = true;
       stage.style.transformOrigin = Math.round(m.x - r.left) + 'px ' + Math.round(m.y - r.top) + 'px';
       stage.style.willChange = 'transform';
+      document.addEventListener('touchmove', onPinchMove, { passive: false });
+      document.addEventListener('touchend', endPinch);
+      document.addEventListener('touchcancel', endPinch);
     }, { passive: false });
-    scroll.addEventListener('touchmove', (e) => {
-      if (!pinch || e.touches.length < 2) return;
-      if (e.cancelable) e.preventDefault();
-      pinch.ratio = MV.clamp(tDist(e.touches) / pinch.d0, 0.5 / pinch.z0, 5 / pinch.z0);
-      stage.style.transform = 'scale(' + r2(pinch.ratio) + ')';
-    }, { passive: false });
-    const endPinch = (e) => {
-      if (!pinch || e.touches.length >= 2) return;
-      const p = pinch;
-      pinch = null;
-      lastUp = Date.now();
-      stage.style.transform = ''; stage.style.transformOrigin = ''; stage.style.willChange = '';
-      if (Math.abs(p.ratio - 1) > 0.03) setZoom(p.z0 * p.ratio, p.at, p.pt);
-      else drawSelBar();
-    };
-    scroll.addEventListener('touchend', endPinch);
-    scroll.addEventListener('touchcancel', endPinch);
     // 마지막 마우스 위치 (키보드 단축키 범위 판단용)
     const onPtr = (e) => { if (e.pointerType === 'mouse') lastPtr = { x: e.clientX, y: e.clientY }; };
     document.addEventListener('pointermove', onPtr, { passive: true });

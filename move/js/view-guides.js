@@ -93,12 +93,22 @@
       return v && typeof v === 'object' && v.id === String(id) && typeof v.y === 'number' && isFinite(v.y) ? v : null;
     } catch (e) { return null; }
   }
-  function writeHS(v) {
+  function writeHS(v, key) {
     try {
       const s = history.state;
       const base = s && typeof s === 'object' && !Array.isArray(s) ? s : {};
-      history.replaceState(Object.assign({}, base, { [HS_KEY]: v }), '');
+      history.replaceState(Object.assign({}, base, { [key || HS_KEY]: v }), '');
     } catch (e) { /* 무시 */ }
+  }
+  /* 목록 화면: 검색어·스크롤을 그 기록에 적어 두고, 뒤로/앞으로·새로고침 때만 되살립니다.
+     다른 화면(하단 메뉴 등)에서 새로 들어오면 검색어 없이 처음부터. */
+  const HS_IDX = 'mvGuideIdx';
+  function readIdxHS() {
+    try {
+      const s = history.state;
+      const v = s && typeof s === 'object' ? s[HS_IDX] : null;
+      return v && typeof v === 'object' && typeof v.q === 'string' ? v : null;
+    } catch (e) { return null; }
   }
 
   /* 파싱: <template> 안에서 (이미지 로드·스크립트 실행 없이) 목차용 id 를 붙이고 본문 텍스트를 뽑습니다. */
@@ -173,7 +183,8 @@
   function doCopy(text, btn) {
     copyText(text).then((ok) => {
       if (!ok) { manualCopy(text); return; }
-      MV.ui.toast('복사했어요. 메시지 창에 붙여 넣으세요.');
+      const t = MV.ui.toast('복사했어요. 메시지 창에 붙여 넣으세요.');
+      if (t && t.classList) t.classList.add('gd-toast');
       if (btn) {
         const old = btn.textContent;
         btn.textContent = '복사됨 ✓';
@@ -228,11 +239,12 @@
 .gd-toc { position:sticky; top:calc(var(--topbar-h) + 16px); max-height:calc(100vh - var(--topbar-h) - 32px); overflow-y:auto; padding:4px 2px 8px; font-size:.86rem; }
 .gd-toc-title { font-size:.74rem; font-weight:800; color:var(--ink-3); letter-spacing:.04em; margin:0 0 6px 10px; }
 .gd-toc-list { list-style:none; margin:0; padding:0; border-left:2px solid var(--line); }
-.gd-toc-list a { display:block; padding:5px 10px; margin-left:-2px; border-left:2px solid transparent; color:var(--ink-2); text-decoration:none; line-height:1.4; }
+.gd-toc-list a { display:flex; align-items:center; min-height:36px; padding:4px 10px; margin-left:-2px; border-left:2px solid transparent; color:var(--ink-2); text-decoration:none; line-height:1.4; }
 .gd-toc-list a:hover { color:var(--ink); background:var(--bg-3); }
 .gd-toc-list a.is-active { color:var(--brand); border-left-color:var(--brand); font-weight:750; background:var(--brand-bg); }
 .gd-toc-list .gd-l3 a { padding-left:22px; font-size:.82rem; }
-.gd-toc-top { margin:10px 0 0 8px; }
+.gd-toc-top { margin:10px 0 0 8px; min-height:36px; }
+.gd-btn { min-height:36px; }
 @media (max-width: 1099.98px) { .gd-toc { display:none; } }
 
 /* 목차: 접이식 (태블릿·폰) */
@@ -290,12 +302,13 @@
 .gd-tablewrap caption { caption-side:bottom; font-size:.75rem; color:var(--ink-3); padding:6px 10px; text-align:left; }
 .gd-copywrap { position:relative; margin:.8em 0; }
 .gd-copywrap > .gd-copy-target { margin:0 !important; padding-right:76px !important; }
-.gd-copywrap > .gd-copybtn { position:absolute; top:7px; right:7px; }
-.gd-copybtn { display:inline-flex; align-items:center; gap:4px; min-height:30px; padding:0 10px; border-radius:8px; border:1px solid var(--line-2); background:var(--bg-2); color:var(--ink-2); font:inherit; font-size:.76rem; font-weight:750; cursor:pointer; line-height:1; white-space:nowrap; }
+.gd-copywrap > .gd-copybtn { position:absolute; top:5px; right:6px; }
+.gd-copybtn { display:inline-flex; align-items:center; gap:4px; min-height:36px; padding:0 10px; border-radius:8px; border:1px solid var(--line-2); background:var(--bg-2); color:var(--ink-2); font:inherit; font-size:.76rem; font-weight:750; cursor:pointer; line-height:1; white-space:nowrap; }
+.toast.gd-toast { white-space:nowrap; max-width:calc(100vw - 24px); }
 .gd-copybtn:hover { border-color:var(--brand); color:var(--brand); }
 .gd-copybtn.is-done { border-color:var(--good); color:var(--good); }
 .gd-copybtn.is-inline { min-height:26px; padding:0 7px; margin-left:5px; vertical-align:1px; }
-@media (pointer: coarse) { .gd-copybtn, .gd-copybtn.is-inline { min-height:36px; } .gd-copybtn.is-inline { vertical-align:middle; margin-top:2px; margin-bottom:2px; } }
+@media (any-pointer: coarse) { .gd-copybtn, .gd-copybtn.is-inline { min-height:36px; } .gd-copybtn.is-inline { vertical-align:middle; margin-top:2px; margin-bottom:2px; } }
 @keyframes gd-flash { 0%, 35% { background-color:color-mix(in srgb, var(--brand) 20%, transparent); } 100% { background-color:transparent; } }
 .gd-flash { animation:gd-flash 2s ease-out; background-clip:content-box; border-radius:6px; }
 
@@ -304,9 +317,9 @@
 .gd-foot > .card { margin:0; }
 .gd-foot h2 { font-size:1rem; margin:0 0 8px; }
 .gd-sources { margin:0; padding-left:1.5em; font-size:.86rem; line-height:1.55; }
-.gd-sources li + li { margin-top:4px; }
-.gd-sources a { overflow-wrap:anywhere; }
-.gd-sources .gd-src-host { color:var(--ink-3); font-size:.78rem; margin-left:4px; }
+.gd-sources li + li { margin-top:2px; }
+.gd-sources a { display:block; width:fit-content; max-width:100%; padding:8px 0; overflow-wrap:anywhere; }
+.gd-sources .gd-src-host { display:inline-block; color:var(--ink-3); font-size:.78rem; margin-left:6px; }   /* inline-block: 링크 밑줄이 안 붙음 */
 .gd-related { display:grid; grid-template-columns:repeat(auto-fill, minmax(min(100%, 230px), 1fr)); gap:8px; }
 .gd-rel { display:flex; flex-direction:column; gap:2px; min-width:0; min-height:56px; padding:9px 14px; border-radius:12px; border:1px solid var(--line); background:var(--bg-2); color:var(--ink); text-decoration:none; }
 .gd-rel:hover { border-color:var(--brand); }
@@ -377,6 +390,9 @@
   function renderIndex(root, ctx) {
     const prevKey = st.lastKey;
     st.lastKey = 'index';
+    const savedIdx = readIdxHS();
+    if (savedIdx) st.q = savedIdx.q;               // 뒤로/앞으로·새로고침: 그때 검색어 그대로
+    else if (!prevKey) { st.q = ''; st.indexScroll = 0; }   // 다른 화면에서 새로 들어옴: 검색어 초기화
     root.appendChild(el('div', { class: 'view-head' },
       el('h1', '📖 가이드'),
       el('span', { class: 'sub' }, '파트별로 꼭 알아야 할 것들을 정리한 노트예요')));
@@ -417,21 +433,35 @@
       if (tokens.length && !shown) {
         cards.appendChild(el('div', { class: 'empty', style: { gridColumn: '1 / -1' } },
           el('span', { class: 'big' }, '🔎'), '맞는 가이드가 없어요. ',
-          el('button', { type: 'button', class: 'btn btn-sm', onclick: () => { st.q = ''; input.value = ''; draw(); input.focus(); } }, '검색어 지우기')));
+          el('button', { type: 'button', class: 'btn gd-btn', onclick: () => { st.q = ''; input.value = ''; draw(); saveIdx(); input.focus(); } }, '검색어 지우기')));
       }
     };
-    input.addEventListener('input', () => { st.q = input.value; draw(); });
+    let alive = true;
+    let saveT = 0;
+    const saveIdx = () => {
+      clearTimeout(saveT);
+      const h = MV.parseHash();
+      if (!alive || h.name !== 'guide' || h.params.length) return;
+      writeHS({ q: st.q, y: Math.round(window.scrollY) }, HS_IDX);
+    };
+    const saveSoon = () => { clearTimeout(saveT); saveT = setTimeout(saveIdx, 200); };
+    window.addEventListener('scroll', saveSoon, { passive: true });
+    document.addEventListener('click', saveIdx, true);        // 카드를 눌러 이동하기 직전에 지금 상태 기록
+    ctx.onCleanup(() => { alive = false; clearTimeout(saveT); window.removeEventListener('scroll', saveSoon); document.removeEventListener('click', saveIdx, true); });
+    input.addEventListener('input', () => { st.q = input.value; draw(); saveSoon(); });
     input.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && input.value) { e.preventDefault(); input.value = ''; st.q = ''; draw(); }
+      if (e.key === 'Escape' && input.value) { e.preventDefault(); input.value = ''; st.q = ''; draw(); saveSoon(); }
       if (e.key === 'Enter' && !e.isComposing) { const first = cards.querySelector('a.gd-card'); if (first && st.q.trim()) { e.preventDefault(); first.click(); } }
     });
     draw();
     ctx.subscribe((e) => { if (e && e.reset) return; draw(); });   // 파트 이름·이모지 변경 반영 (입력창은 그대로)
     ctx.onCleanup(() => { st.indexScroll = window.scrollY; });
-    if (prevKey && prevKey.startsWith('g:')) {
-      const y = st.indexScroll;
-      requestAnimationFrame(() => window.scrollTo(0, y));
-    }
+    // 뒤로/앞으로·새로고침 → 그 기록의 위치, 글에서 목록으로 → 전에 보던 위치, 그 밖(새로 들어옴·없는 글) → 맨 위.
+    // 같은 목록을 다시 그릴 때(초기화 등)만 그대로 둡니다. (같은 'guide' 화면끼리는 셸이 스크롤을 유지하므로 직접 정해야 함)
+    const restoreY = savedIdx && typeof savedIdx.y === 'number' && isFinite(savedIdx.y) ? savedIdx.y
+      : prevKey && prevKey.startsWith('g:') ? st.indexScroll
+        : prevKey === 'index' ? null : 0;
+    if (restoreY != null) requestAnimationFrame(() => window.scrollTo(0, restoreY));
   }
 
   /* ======================= 본문 ======================= */
@@ -725,7 +755,7 @@
         el('h2', '📚 출처'),
         el('ol', { class: 'gd-sources' }, srcs.map((s) => el('li',
           s.url && /^https?:\/\//i.test(s.url)
-            ? [el('a', { href: s.url, target: '_blank', rel: 'noopener noreferrer' }, String(s.label || s.url)), host(s.url) && s.label ? el('span', { class: 'gd-src-host' }, host(s.url)) : null]
+            ? el('a', { href: s.url, target: '_blank', rel: 'noopener noreferrer' }, String(s.label || s.url), host(s.url) && s.label ? el('span', { class: 'gd-src-host' }, host(s.url)) : null)
             : String(s.label || s.url))))) : null,
       rel.length ? el('section', { class: 'card flat tint-brand', 'aria-label': '관련 체크리스트' },
         el('h2', '✅ 관련 체크리스트'),
@@ -780,6 +810,7 @@
   MV.view('guide', {
     title: '가이드', short: '가이드', icon: '📖', order: 60,
     render(root, params, ctx) {
+      ctx.onCleanup(() => { if (MV.parseHash().name !== 'guide') st.lastKey = null; });
       const id = params && params[0];
       if (!id) renderIndex(root, ctx);
       else renderArticle(root, id, params.slice(1).join('/'), ctx);

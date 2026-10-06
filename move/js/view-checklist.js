@@ -43,10 +43,14 @@
   const PRI_LABEL = { high: '중요', mid: '보통', low: '여유' };
   const OWNER_FILTERS = [['', '전체'], ['나', '나'], ['아내', '아내'], ['함께', '함께']];
   const OWNER_CHIP = { '나': 'kid', '아내': 'think', '함께': '' };
+  /* '나'·'아내' 거르기는 둘이 '함께' 하는 일도 보여 줌 (내가 챙길 일 = 내 일 + 함께 할 일) */
+  const OWNER_WITH_TOGETHER = { '나': true, '아내': true };
+  const OWNER_TITLES = { '': '모든 담당 보기', '나': '나 담당 + 함께 하는 일', '아내': '아내 담당 + 함께 하는 일', '함께': '함께 하는 일만' };
   const EMOJIS = ['📌', '🏠', '📦', '🧹', '🔧', '📝', '💳', '📞', '🚗', '🏫', '🧒', '🪴', '🎁', '🧾', '🛋️', '🔑'];
   const PRI_WORDS = { '': 'high', '!': 'high', '중요': 'high', '높음': 'high', '급함': 'high', '긴급': 'high', '보통': 'mid', '중간': 'mid', '여유': 'low', '낮음': 'low' };
   const OWNER_WORDS = { '나': '나', '내가': '나', '아내': '아내', '와이프': '아내', '함께': '함께', '같이': '함께', '우리': '함께', '둘다': '함께' };
   const WEEK = ['일', '월', '화', '수', '목', '금', '토'];
+  const TITLE_MAX = 300;   // 스레드 제목 칸과 같은 한도
 
   /* 뷰를 떠났다 돌아와도 유지되는 메모리 (저장하지 않음) */
   const mem = {
@@ -57,6 +61,7 @@
     noteDrafts: {},     // 항목 → 메모 초안
     composerPart: '',   // 특수 채널에서 추가할 파트
     lastChannel: '~focus',
+    refocusSearch: false, // ✕ 로 검색을 닫은 뒤 다시 그려지면 검색창에 초점
     sideScroll: 0,      // 사이드바 스크롤
     unmountedAt: -1e9,  // 마지막으로 이 뷰를 닫은 시각 (같은 뷰 다시 그리기 판별)
     focusRow: null,     // 다시 그린 뒤 초점을 돌려줄 항목
@@ -104,7 +109,19 @@
     if (f === '함께') return it.owner === '함께';
     return it.owner === f || it.owner === '함께';
   }
-  const partLabel = (p) => (p ? (p.emoji || '📌') + ' ' + (p.name || '이름 없는 파트') : '📌 파트 없음');
+  /* 이모지 칸에는 글자 하나(그래핌)만: '가나다라…' 같은 긴 글이 제목을 밀어내지 않게 */
+  let segmenter = null;
+  try { segmenter = window.Intl && Intl.Segmenter ? new Intl.Segmenter('ko', { granularity: 'grapheme' }) : null; } catch (e) { segmenter = null; }
+  function firstGrapheme(s) {
+    s = String(s == null ? '' : s).trim();
+    if (!s) return '';
+    if (segmenter) {
+      try { const r = segmenter.segment(s)[Symbol.iterator]().next(); if (!r.done) return r.value.segment; } catch (e) { /* 아래로 */ }
+    }
+    return Array.from(s)[0] || '';
+  }
+  const emo = (p) => (p && firstGrapheme(p.emoji)) || '📌';
+  const partLabel = (p) => (p ? emo(p) + ' ' + (p.name || '이름 없는 파트') : '📌 파트 없음');
   function isTyping(t) {
     if (!t || t === document.body) return false;
     if (t.isContentEditable) return true;
@@ -285,15 +302,16 @@
     return Promise.resolve(fallback());
   }
   function emojiPicker(value) {
-    let v = value || '📌';
-    const custom = el('input', { class: 'input ck-emo-input', value: v, maxlength: '16', 'aria-label': '이모지 직접 입력', placeholder: '직접' });
+    let v = firstGrapheme(value) || '📌';
+    const custom = el('input', { class: 'input ck-emo-input', value: v, maxlength: '16', 'aria-label': '이모지 직접 입력 (한 글자)', placeholder: '직접', title: '이모지나 글자 하나' });
     const btns = EMOJIS.map((e) => el('button', {
       type: 'button', class: 'ck-emo', 'aria-pressed': String(e === v), 'aria-label': '아이콘 ' + e,
       onclick: () => { v = e; custom.value = e; sync(); },
     }, e));
     function sync() { btns.forEach((b) => b.setAttribute('aria-pressed', String(b.textContent === v))); }
-    custom.addEventListener('input', () => { v = custom.value.trim(); sync(); });
-    return { node: el('div', { class: 'ck-emo-grid' }, btns, custom), get: () => (v || '📌') };
+    custom.addEventListener('input', () => { v = firstGrapheme(custom.value); sync(); });
+    custom.addEventListener('blur', () => { if (custom.value.trim() && custom.value !== v) custom.value = v; });
+    return { node: el('div', { class: 'ck-emo-grid' }, btns, custom), get: () => (firstGrapheme(v) || '📌') };
   }
 
   /* ---------------- 파트 만들기·고치기 (모달) ---------------- */
@@ -359,9 +377,10 @@
     const searchClear = el('button', { type: 'button', class: 'ck-search-clear', 'aria-label': '검색 지우기', hidden: true }, '✕');
     const searchBox = el('div', { class: 'ck-search', role: 'search' },
       el('span', { class: 'ck-search-ico', 'aria-hidden': 'true' }, '🔍'), searchInput, searchClear);
+    const searchBack = el('button', { type: 'button', class: 'btn btn-ghost btn-icon ck-search-back', 'aria-label': '검색 닫고 파트 목록으로' }, '←');
     const chans = el('nav', { class: 'ck-chans', 'aria-label': '파트(채널) 목록' });
     const side = el('aside', { class: 'ck-side' },
-      el('div', { class: 'ck-side-head' }, sideTop, searchBox),
+      el('div', { class: 'ck-side-head' }, sideTop, el('div', { class: 'ck-search-row' }, searchBack, searchBox)),
       chans,
       el('div', { class: 'ck-side-foot' },
         el('button', { type: 'button', class: 'ck-addpart', onclick: () => addPart() }, el('span', { 'aria-hidden': 'true' }, '＋'), ' 파트 추가'),
@@ -372,13 +391,15 @@
     const list = el('div', { class: 'ck-list', tabindex: '-1' });
 
     const compPart = el('select', { class: 'select ck-comp-part', 'aria-label': '추가할 파트' });
+    const compPartWrap = el('label', { class: 'ck-comp-pw' }, el('span', { class: 'ck-comp-pl', 'aria-hidden': 'true' }, '추가할 파트'), compPart);
     const compInput = el('input', {
       class: 'input ck-comp-input', placeholder: '할 일 추가… 예) 우리은행 방문 ~10/15 !중요 @아내',
-      'aria-label': '할 일 추가', autocomplete: 'off', enterkeyhint: 'done',
+      'aria-label': '할 일 추가', autocomplete: 'off', enterkeyhint: 'done', maxlength: String(TITLE_MAX + 60),
     });
     const compBtn = el('button', { type: 'button', class: 'btn btn-primary ck-comp-btn', 'aria-label': '할 일 추가' }, '추가');
+    const compNote = el('div', { class: 'ck-comp-note', role: 'status', hidden: true });
     const compPrev = el('div', { class: 'ck-comp-prev', 'aria-live': 'polite' });
-    const composer = el('div', { class: 'ck-composer' }, el('div', { class: 'ck-comp-row' }, compPart, compInput, compBtn), compPrev);
+    const composer = el('div', { class: 'ck-composer' }, compNote, el('div', { class: 'ck-comp-row' }, compPartWrap, compInput, compBtn), compPrev);
     const main = el('section', { class: 'ck-main', 'aria-label': '할 일 목록' }, head, sub, list, composer);
 
     const thread = el('aside', { class: 'ck-thread', 'aria-label': '항목 상세' });
@@ -404,10 +425,12 @@
       MV.route = { name: 'checklist', params: r.params };
       applyRoute(r.params, opts.how || 'push');
     }
+    let backAt = -1e9;   // history.back() 을 부른 시각 (뒤로 두 번 가지 않게)
     function goBackTo(target) {
       const st = history.state;
       if (st && st.ckPrev === target) {
         if (cur.itemId && !isPhone()) mem.focusRow = cur.itemId;
+        backAt = performance.now();
         history.back();   // 앱 셸이 다시 그림 → mem 으로 스크롤·초점 복원
       } else nav(target, { replace: true, how: 'history' });
     }
@@ -450,6 +473,8 @@
         if (itemId) buildThread(MV.items.get(itemId)); else clearThread();
       }
       wrap.classList.toggle('ck-open', !!itemId);
+      syncDrawer();
+      if (chChanged) hideCompNote();
 
       if (how === 'init') {
         chans.scrollTop = mem.sideScroll || 0;
@@ -463,6 +488,8 @@
           if (a) a.focus({ preventScroll: true });
         }
         mem.focusRow = null;
+        if (inPlace && mem.refocusSearch) searchInput.focus({ preventScroll: true });
+        mem.refocusSearch = false;
       } else if (isPhone()) {
         const k = screenKey();
         if (k !== prevKey || how === 'history') {
@@ -480,6 +507,24 @@
       }
     }
     const cssEsc = (s) => (window.CSS && CSS.escape ? CSS.escape(s) : String(s).replace(/"/g, '\\"'));
+
+    /* 태블릿 서랍(700–1099px)은 모달처럼: 뒤쪽은 inert, Tab 은 서랍 안에서만 돎 */
+    const drawerMode = () => !isPhone() && !isDesk();
+    function syncDrawer() {
+      const open = drawerMode() && !!cur.itemId;
+      if (open) { thread.setAttribute('role', 'dialog'); thread.setAttribute('aria-modal', 'true'); }
+      else { thread.removeAttribute('role'); thread.removeAttribute('aria-modal'); }
+      side.inert = open; main.inert = open;
+    }
+    function trapTab(e) {
+      const f = MV.$$('a[href], button, input, select, textarea, [tabindex]', thread)
+        .filter((n) => !n.disabled && n.tabIndex >= 0 && n.getClientRects().length > 0);
+      if (!f.length) return;
+      const first = f[0]; const last = f[f.length - 1]; const a = document.activeElement;
+      if (!thread.contains(a)) { e.preventDefault(); (e.shiftKey ? last : first).focus(); }
+      else if (e.shiftKey && a === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && a === last) { e.preventDefault(); first.focus(); }
+    }
 
     function selectItem(id) {
       const ch = effCh();
@@ -522,38 +567,49 @@
       meta != null && meta !== '' ? el('span', { class: 'ck-chan-meta' }, meta) : null,
       badge ? el('span', { class: 'badge ck-chan-badge', title: '기한 지난 항목 ' + badge + '개', 'aria-label': '지연 ' + badge + '개' }, String(badge)) : null);
     }
+    /* 내용 서명이 같으면 DOM 을 건드리지 않음 → 누르는 도중(mousedown~click)에 노드가 바뀌어 클릭이 사라지는 일을 막음 */
+    let sideTopSig = null; let chansSig = null;
     function renderSidebar() {
       const c = computeCounts();
-      const fk = focusKeyIn(side);
       const active = cur.ch === '~search' ? null : (cur.ch || (isPhone() ? null : '~focus'));
       const dd = D.dday(D.moveDate());
-      put(sideTop, 
-        el('div', { class: 'ck-ws-row' },
-          el('h1', { class: 'ck-ws-title' }, '체크리스트'),
-          el('span', { class: 'ck-ws-sub' }, c.done + '/' + c.total + ' 완료')),
-        MV.ui.progress(c.total ? c.done / c.total : 0),
-        el('p', { class: 'ck-ws-note' },
-          '이사 ' + (dd.n === 0 ? '오늘' : dd.label) + ' · ' + D.fmt(D.moveDate()),
-          c.overdue ? el('span', { class: 'ck-ws-over' }, ' · 지연 ' + c.overdue) : null));
+      const topSig = [c.done, c.total, c.overdue, dd.n, dd.label, D.moveDate()].join('|');
+      if (topSig !== sideTopSig) {
+        sideTopSig = topSig;
+        put(sideTop,
+          el('div', { class: 'ck-ws-row' },
+            el('h1', { class: 'ck-ws-title' }, '체크리스트'),
+            el('span', { class: 'ck-ws-sub' }, c.done + '/' + c.total + ' 완료')),
+          MV.ui.progress(c.total ? c.done / c.total : 0),
+          el('p', { class: 'ck-ws-note' },
+            '이사 ' + (dd.n === 0 ? '오늘' : dd.label) + ' · ' + D.fmt(D.moveDate()),
+            c.overdue ? el('span', { class: 'ck-ws-over' }, ' · 지연 ' + c.overdue) : null));
+      }
 
-      const nodes = [];
-      nodes.push(el('div', { class: 'ck-group ck-group-sp' }, SPECIALS.map((s) => chanRow(
-        s.id, s.emoji, s.name,
-        s.id === '~activity' ? '' : String(c.sp[s.id] || 0),
-        s.id === '~focus' ? c.focusOver : 0,
-        active === s.id, s.desc))));
       const groups = []; const gmap = new Map();
       MV.parts.list().forEach((p) => {
         const g = p.group || '기타';
         if (!gmap.has(g)) { gmap.set(g, []); groups.push(g); }
         gmap.get(g).push(p);
       });
+      const stOf = (p) => c.byPart[p.id] || { total: 0, done: 0, overdue: 0 };
+      const sig = JSON.stringify([active, SPECIALS.map((x) => c.sp[x.id] || 0), c.focusOver,
+        groups.map((g) => [g, gmap.get(g).map((p) => { const st = stOf(p); return [p.id, emo(p), p.name || '', p.desc || '', st.done, st.total, st.overdue]; })])]);
+      if (sig === chansSig) return;
+      chansSig = sig;
+      const fk = focusKeyIn(side);
+      const nodes = [];
+      nodes.push(el('div', { class: 'ck-group ck-group-sp' }, SPECIALS.map((x) => chanRow(
+        x.id, x.emoji, x.name,
+        x.id === '~activity' ? '' : String(c.sp[x.id] || 0),
+        x.id === '~focus' ? c.focusOver : 0,
+        active === x.id, x.desc))));
       groups.forEach((g) => {
         nodes.push(el('div', { class: 'ck-group' },
           el('h2', { class: 'ck-group-h' }, g),
           gmap.get(g).map((p) => {
-            const st = c.byPart[p.id] || { total: 0, done: 0, overdue: 0 };
-            return chanRow(p.id, p.emoji || '📌', p.name || '이름 없는 파트', st.done + '/' + st.total, st.overdue, active === p.id, p.desc);
+            const st = stOf(p);
+            return chanRow(p.id, emo(p), p.name || '이름 없는 파트', st.done + '/' + st.total, st.overdue, active === p.id, p.desc);
           })));
       });
       if (!groups.length) nodes.push(el('p', { class: 'ck-side-empty' }, '파트가 없어요. 아래에서 새 파트를 만들어 보세요.'));
@@ -569,13 +625,34 @@
         return { emoji: sp.emoji, name: sp.name, desc: sp.desc, special: true };
       }
       const p = MV.parts.get(ch);
-      if (p) return { emoji: p.emoji || '📌', name: p.name || '이름 없는 파트', desc: p.desc || '', part: p };
+      if (p) return { emoji: emo(p), name: p.name || '이름 없는 파트', desc: p.desc || '', part: p };
       return { emoji: '❓', name: '찾을 수 없는 파트', desc: '삭제되었거나 주소가 잘못되었어요.', missing: true };
     }
+    let headSig = null;
     function renderHeader() {
       const ch = effCh();
       const info = channelInfo(ch);
       const u = ui();
+      // 요약 숫자 먼저 계산 → 서명이 같으면 그대로 둠
+      let sum = null;
+      if (info.part) {
+        const st = MV.parts.stats(info.part.id);
+        sum = ['part', st.pct, st.done, st.total, st.overdue];
+      } else if (ch === '~focus' || ch === '~week' || ch === '~all') {
+        const its = MV.items.list((it) => !it.done && SPECIAL_MAP[ch].statuses.includes(statusOf(it)) && ownerMatch(it, u.owner));
+        const n = (x) => its.filter((it) => statusOf(it) === x).length;
+        sum = ['sp', n('overdue'), n('today'), its.length];
+      } else if (ch === '~done') {
+        sum = ['done', MV.items.list((it) => it.done && ownerMatch(it, u.owner)).length];
+      } else if (ch === '~search' && cur.q) {
+        sum = ['search', listItemsFor('~search').length];
+      } else if (ch === '~activity') {
+        sum = ['act', (MV.store.get().activity || []).length];
+      }
+      const sig = JSON.stringify([ch, cur.q, info.emoji, info.name, info.desc, info.part ? (info.part.guide || '') : '', !!info.missing, u.owner || '', !!u.hideDone, sum]);
+      if (sig === headSig) return;
+      headSig = sig;
+
       const fkH = focusKeyIn(head); const fkS = focusKeyIn(sub);
       const backBtn = ch === '~search' ? null : el('button', {
         type: 'button', class: 'btn btn-ghost btn-icon ck-back ck-phone-only', 'aria-label': '파트 목록으로', 'data-fkey': 'back',
@@ -597,37 +674,36 @@
 
       // 진행률·요약
       let summary = null;
-      if (info.part) {
-        const st = MV.parts.stats(info.part.id);
-        summary = el('div', { class: 'ck-prog' }, MV.ui.progress(st.pct), el('span', { class: 'ck-prog-txt' }, st.done + '/' + st.total + ' 완료'),
-          st.overdue ? el('span', { class: 'chip bad' }, '지연 ' + st.overdue) : null);
-      } else if (ch === '~focus' || ch === '~week' || ch === '~all') {
-        const its = MV.items.list((it) => !it.done && SPECIAL_MAP[ch].statuses.includes(statusOf(it)) && ownerMatch(it, u.owner));
-        const n = (s) => its.filter((it) => statusOf(it) === s).length;
+      if (sum && sum[0] === 'part') {
+        summary = el('div', { class: 'ck-prog' }, MV.ui.progress(sum[1]), el('span', { class: 'ck-prog-txt' }, sum[2] + '/' + sum[3] + ' 완료'),
+          sum[4] ? el('span', { class: 'chip bad' }, '지연 ' + sum[4]) : null);
+      } else if (sum && sum[0] === 'sp') {
         summary = el('div', { class: 'ck-prog ck-prog-sp' },
-          n('overdue') ? el('span', { class: 'chip bad' }, '지연 ' + n('overdue')) : null,
-          n('today') ? el('span', { class: 'chip warn' }, '오늘 ' + n('today')) : null,
-          el('span', { class: 'ck-prog-txt' }, '모두 ' + its.length + '개'));
-      } else if (ch === '~done') {
-        summary = el('div', { class: 'ck-prog ck-prog-sp' }, el('span', { class: 'ck-prog-txt' }, '완료 ' + MV.items.list((it) => it.done && ownerMatch(it, u.owner)).length + '개'));
-      } else if (ch === '~search' && cur.q) {
-        const n = listItemsFor('~search').length;
-        summary = el('div', { class: 'ck-prog ck-prog-sp' }, el('span', { class: 'ck-prog-txt' }, '결과 ' + n + '개'));
-      } else if (ch === '~activity') {
-        summary = el('div', { class: 'ck-prog ck-prog-sp' }, el('span', { class: 'ck-prog-txt' }, '기록 ' + (MV.store.get().activity || []).length + '개 (최근 300개까지)'));
+          sum[1] ? el('span', { class: 'chip bad' }, '지연 ' + sum[1]) : null,
+          sum[2] ? el('span', { class: 'chip warn' }, '오늘 ' + sum[2]) : null,
+          el('span', { class: 'ck-prog-txt' }, '모두 ' + sum[3] + '개'));
+      } else if (sum && sum[0] === 'done') {
+        summary = el('div', { class: 'ck-prog ck-prog-sp' }, el('span', { class: 'ck-prog-txt' }, '완료 ' + sum[1] + '개'));
+      } else if (sum && sum[0] === 'search') {
+        summary = el('div', { class: 'ck-prog ck-prog-sp' }, el('span', { class: 'ck-prog-txt' }, '결과 ' + sum[1] + '개'));
+      } else if (sum && sum[0] === 'act') {
+        summary = el('div', { class: 'ck-prog ck-prog-sp' }, el('span', { class: 'ck-prog-txt' }, '기록 ' + sum[1] + '개 (최근 300개까지)'));
       }
       let filters = null;
       if (ch !== '~activity' && !info.missing && !(ch === '~search' && !cur.q)) {
         const showHide = !!info.part || ch === '~search';
+        const ownSeg = seg(OWNER_FILTERS, u.owner || '', (v) => setUI({ owner: v }), '담당자로 거르기', 'own:');
+        MV.$$('.ck-seg-b', ownSeg).forEach((b) => { const t = OWNER_TITLES[b.dataset.v]; if (t) b.title = t; });
         filters = el('div', { class: 'ck-filters' },
-          seg(OWNER_FILTERS, u.owner || '', (v) => setUI({ owner: v }), '담당자로 거르기', 'own:'),
+          el('div', { class: 'ck-own' }, ownSeg,
+            OWNER_WITH_TOGETHER[u.owner] ? el('span', { class: 'ck-own-note', title: OWNER_TITLES[u.owner] }, '+함께 포함') : null),
           showHide ? el('button', {
             type: 'button', class: 'ck-toggle', 'aria-pressed': String(!!u.hideDone), 'data-fkey': 'hide',
             title: '켜 두면 끝낸 일은 아래 “완료” 묶음에 접혀 있어요',
             onclick: () => { mem.doneOpen = {}; setUI({ hideDone: !ui().hideDone }); },
           }, el('span', { class: 'ck-switch', 'aria-hidden': 'true' }), '완료 숨기기') : null);
       }
-      put(sub, 
+      put(sub,
         info.desc ? el('p', { class: 'ck-head-desc' }, info.desc) : null,
         (summary || filters) ? el('div', { class: 'ck-head-bar' }, summary, filters) : null);
       sub.hidden = !sub.firstChild;
@@ -706,7 +782,7 @@
         done.forEach((it) => lines.push('☑ ' + (sp ? '[' + ((MV.parts.get(it.partId) || {}).name || '파트 없음') + '] ' : '') + it.title));
       } else {
         const open = items.filter((it) => !it.done).sort(cmpItems);
-        lines.push(info.emoji + ' ' + info.name + ' — 남은 할 일 ' + open.length + '개' + (u.owner ? ' (' + u.owner + ')' : ''));
+        lines.push(info.emoji + ' ' + info.name + ' — 남은 할 일 ' + open.length + '개' + (u.owner ? ' (' + u.owner + (OWNER_WITH_TOGETHER[u.owner] ? ' + 함께' : '') + ')' : ''));
         lines.push('(' + D.fmt(today) + ' 기준 · 이사 ' + (dd.n === 0 ? '오늘' : dd.label) + ')');
         open.forEach((it) => {
           const p = MV.parts.get(it.partId);
@@ -781,9 +857,9 @@
       if (opts.showPart) {
         const p = MV.parts.get(it.partId);
         meta.push(el('button', {
-          type: 'button', class: 'chip ck-pchip', title: (p ? p.name : '파트 없음') + ' 채널로',
-          onclick: (e) => { e.stopPropagation(); if (p) goChannel(p.id); },
-        }, partLabel(p)));
+          type: 'button', class: 'ck-rchip', title: (p ? p.name : '파트 없음') + ' 채널로',
+          onclick: (e) => { e.stopPropagation(); const x = MV.items.get(it.id); const q = x && MV.parts.get(x.partId); if (q) goChannel(q.id); },
+        }, el('span', { class: 'chip ck-pchip-t' }, partLabel(p))));
       }
       const snip = terms ? snippetFor(it, terms) : null;
       return el('div', {
@@ -1016,10 +1092,7 @@
           row.classList.remove('ck-flash'); void row.offsetWidth; row.classList.add('ck-flash');
           row.addEventListener('animationend', () => row.classList.remove('ck-flash'), { once: true });
           row.scrollIntoView({ block: 'nearest' });
-        } else {
-          const p = MV.parts.get(pf.partId);
-          MV.ui.toast('“' + pf.title + '” → ' + partLabel(p) + '에 추가했어요', { action: { label: '보기', onClick: () => goChannel(pf.partId, pf.id) } });
-        }
+        } else showCompNote(pf);   // 지금 목록에 안 보이는 곳에 추가됨 → 입력창 위에 알림 (토스트는 입력창을 가림)
       }
     }
     function markSelected() {
@@ -1032,7 +1105,7 @@
       const willDone = !it.done;
       if (lingering.has(id)) { clearTimeout(lingering.get(id)); lingering.delete(id); }
       if (willDone) {
-        lingering.set(id, setTimeout(() => { lingering.delete(id); if (alive) { renderList(); renderHeader(); } }, 1300));
+        lingering.set(id, setTimeout(() => { lingering.delete(id); if (alive) { rowCache.delete(id); scheduleRefresh(); } }, 1300));
       }
       MV.items.toggle(id);
       if (willDone) {
@@ -1063,7 +1136,8 @@
       const show = (ch === '~focus' || ch === '~week' || ch === '~all') || (!sp && !!MV.parts.get(ch));
       composer.hidden = !show;
       if (!show) return;
-      compPart.hidden = !sp;
+      compPartWrap.hidden = !sp;
+      if (!sp) hideCompNote();
       if (sp && document.activeElement !== compPart) {
         const parts = MV.parts.list();
         const want = parts.some((p) => p.id === mem.composerPart) ? mem.composerPart : (parts[0] ? parts[0].id : '');
@@ -1097,8 +1171,27 @@
         if (pt) chips.push(el('span', { class: 'ck-prev-to' }, '→ ' + partLabel(pt)));
       }
       if (!p.title) chips.push(el('span', { class: 'ck-prev-warn' }, '할 일 내용을 적어 주세요'));
+      else if (p.title.length > TITLE_MAX) chips.push(el('span', { class: 'ck-prev-warn' }, '제목은 ' + TITLE_MAX + '자까지만 저장돼요 (자세한 건 설명에)'));
       put(compPrev, ...chips);
     }
+    let compNoteTimer = null;
+    function hideCompNote() {
+      clearTimeout(compNoteTimer); compNoteTimer = null;
+      if (!compNote.hidden) { compNote.hidden = true; put(compNote); }
+    }
+    function showCompNote(pf) {
+      const p = MV.parts.get(pf.partId);
+      const t = String(pf.title || '');
+      put(compNote,
+        el('span', { class: 'ck-comp-note-ico', 'aria-hidden': 'true' }, '✓'),
+        el('span', { class: 'ck-comp-note-txt' }, '“' + (t.length > 40 ? t.slice(0, 38) + '…' : t) + '” → ' + partLabel(p) + '에 추가했어요'),
+        el('button', { type: 'button', class: 'btn btn-sm ck-comp-note-go', onclick: () => { hideCompNote(); goChannel(pf.partId, pf.id); } }, '보기'),
+        el('button', { type: 'button', class: 'ck-x ck-comp-note-x', 'aria-label': '알림 닫기', onclick: () => hideCompNote() }, '×'));
+      compNote.hidden = false;
+      clearTimeout(compNoteTimer);
+      compNoteTimer = setTimeout(hideCompNote, 7000);
+    }
+    ctx.onCleanup(() => clearTimeout(compNoteTimer));
     function addFromComposer() {
       const raw = compInput.value.trim();
       if (!raw) { compInput.focus(); return; }
@@ -1113,7 +1206,8 @@
       if (!partId || !MV.parts.get(partId)) { MV.ui.toast('추가할 파트를 먼저 만들어 주세요'); return; }
       const owner = p.owner != null ? p.owner : (ui().owner || '');
       compInput.value = ''; mem.draft = '';
-      const it = MV.items.add({ partId, title: p.title, due: p.due || null, priority: p.priority || 'mid', owner });
+      hideCompNote();
+      const it = MV.items.add({ partId, title: p.title.slice(0, TITLE_MAX).trim(), due: p.due || null, priority: p.priority || 'mid', owner });
       pendingFlash = { id: it.id, partId, title: it.title };
       updatePreview();
       compInput.focus({ preventScroll: true });
@@ -1133,13 +1227,18 @@
       const q = searchInput.value.trim();
       if (q) {
         nav(hashFor('~search', null, q), { replace: cur.ch === '~search' });
-      } else if (cur.ch === '~search') {
-        exitSearch();
+      } else if (cur.ch === '~search' && cur.q) {
+        // 글자를 다 지운 것뿐 → 빈 검색 화면에 머묾 (주소만 바꿔 다시 그리지 않음 → 초점·입력 유지).
+        // 검색을 끝내려면 Esc · ✕ · ← 또는 채널을 누르면 돼요.
+        nav(hashFor('~search'), { replace: true });
       }
     }, 250);
-    function exitSearch() {
+    function exitSearch(refocus) {
+      if (performance.now() - backAt < 1500) return;   // 이미 뒤로 가는 중 (두 번 뒤로 가지 않게)
       const target = isPhone() ? '#/checklist' : hashFor(mem.lastChannel && (MV.parts.get(mem.lastChannel) || SPECIAL_MAP[mem.lastChannel]) ? mem.lastChannel : '~focus');
+      mem.refocusSearch = !!refocus;
       goBackTo(target);
+      if (!(performance.now() - backAt < 50)) { mem.refocusSearch = false; if (refocus) searchInput.focus(); }   // 제자리 이동(replace)이면 지금 바로
     }
     searchInput.addEventListener('input', () => { searchClear.hidden = !searchInput.value; runSearch(); });
     searchInput.addEventListener('keydown', (e) => {
@@ -1153,10 +1252,17 @@
         searchInput.blur();
       }
     });
+    searchBack.addEventListener('click', () => {
+      searchInput.value = ''; searchClear.hidden = true;
+      runSearch.flush();
+      if (cur.ch === '~search') exitSearch();
+      searchInput.blur();
+    });
     searchClear.addEventListener('click', () => {
       searchInput.value = ''; searchClear.hidden = true;
-      if (cur.ch === '~search') exitSearch();
-      if (!isPhone()) searchInput.focus();
+      runSearch.flush();
+      if (cur.ch === '~search') exitSearch(!isPhone());
+      else if (!isPhone()) searchInput.focus();
     });
 
     /* ================================================================
@@ -1499,17 +1605,49 @@
       updateComposer();
       syncThread();
     }
-    ctx.subscribe(() => {
-      if (!alive || queued) return;
+    /* 누르는 중(mousedown/터치 ~ click)에는 다시 그리지 않고 click 이 끝난 뒤에 그림.
+       스레드의 제목·설명 칸은 blur 때 저장되는데, blur 는 다른 곳을 누르는 mousedown 순간에 일어남 →
+       그때 바로 다시 그리면 누른 사이드바·버튼·체크박스 노드가 바뀌어 첫 클릭이 사라졌음. */
+    let holding = false; let holdTimer = null; let pendingRefresh = false;
+    function scheduleRefresh() {
+      if (!alive) return;
+      if (holding) { pendingRefresh = true; return; }
+      if (queued) return;
       queued = true;
       Promise.resolve().then(() => { queued = false; try { refresh(); } catch (e) { console.error(e); } });
+    }
+    function releaseHold() {
+      clearTimeout(holdTimer); holdTimer = null;
+      if (!holding) return;
+      holding = false;
+      if (pendingRefresh) { pendingRefresh = false; scheduleRefresh(); }
+    }
+    function releaseSoon(ms) { clearTimeout(holdTimer); holdTimer = setTimeout(releaseHold, ms); }
+    const onDown = (e) => { if (e.button > 0) return; holding = true; releaseSoon(2500); };   // 안전장치: 아주 오래 누르고 있으면 그냥 그림
+    const onUp = () => { if (holding) releaseSoon(450); };      // click 이 오지 않는 경우(끌기 등) 대비
+    const onClickDone = () => { if (holding) releaseSoon(0); };  // click 처리가 모두 끝난 다음 작업에서 그림
+    const onCancel = () => { if (holding) releaseSoon(0); };
+    document.addEventListener('pointerdown', onDown, true);
+    document.addEventListener('mousedown', onDown, true);
+    document.addEventListener('pointerup', onUp, true);
+    document.addEventListener('click', onClickDone, true);
+    document.addEventListener('pointercancel', onCancel, true);
+    ctx.onCleanup(() => {
+      clearTimeout(holdTimer);
+      document.removeEventListener('pointerdown', onDown, true);
+      document.removeEventListener('mousedown', onDown, true);
+      document.removeEventListener('pointerup', onUp, true);
+      document.removeEventListener('click', onClickDone, true);
+      document.removeEventListener('pointercancel', onCancel, true);
     });
+    ctx.subscribe(scheduleRefresh);
 
     /* ---------- 키보드 ---------- */
     function onKey(e) {
       if (!alive || e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return;
       if (document.querySelector('.modal-back')) return;
       const t = e.target;
+      if (e.key === 'Tab') { if (cur.itemId && drawerMode()) trapTab(e); return; }
       const typing = isTyping(t);
       if (e.key === 'Escape') {
         if (cur.itemId) { e.preventDefault(); closeThread(); }
@@ -1539,7 +1677,13 @@
 
     /* ---------- 화면 크기 변화 ---------- */
     const mqP = mq(MQ_PHONE); const mqD = mq(MQ_DESK);
-    const onMode = () => { if (!alive) return; renderSidebar(); requestAnimationFrame(() => { if (T.f.title) { autosize(T.f.title); autosize(T.f.detail, 420); autosize(T.f.noteInput, 160); } }); };
+    const syncNarrow = () => { if (!alive) return; const w = main.clientWidth; composer.classList.toggle('ck-narrow', !isPhone() && w > 0 && w < 480); };
+    if (window.ResizeObserver) {
+      const ro = new ResizeObserver(() => syncNarrow());
+      ro.observe(main);
+      ctx.onCleanup(() => ro.disconnect());
+    }
+    const onMode = () => { if (!alive) return; syncDrawer(); syncNarrow(); renderSidebar(); requestAnimationFrame(() => { if (T.f.title) { autosize(T.f.title); autosize(T.f.detail, 420); autosize(T.f.noteInput, 160); } }); };
     try { mqP.addEventListener('change', onMode); mqD.addEventListener('change', onMode); } catch (e) { /* 옛 브라우저 */ }
     ctx.onCleanup(() => { try { mqP.removeEventListener('change', onMode); mqD.removeEventListener('change', onMode); } catch (e) { /* 무시 */ } });
 
@@ -1579,7 +1723,9 @@
 .ck-ws .progress { height: 6px; }
 .ck-ws-note { margin: 6px 0 0; font-size: .74rem; color: var(--ink-3); }
 .ck-ws-over { color: var(--bad); font-weight: 700; }
-.ck-search { position: relative; margin-top: 10px; }
+.ck-search-row { display: flex; align-items: center; gap: 4px; margin-top: 10px; }
+.ck-search { position: relative; flex: 1 1 auto; min-width: 0; }
+.ck-search-back { display: none; flex: none; font-size: 1.3rem; width: 40px; min-height: 44px; }
 .ck-search-ico { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); font-size: .8rem; opacity: .65; pointer-events: none; }
 .ck-search-input { padding-left: 32px; padding-right: 34px; min-height: 38px; font-size: .9rem; }
 .ck-search-input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; display: none; }
@@ -1592,7 +1738,7 @@
 .ck-chan { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 4px 8px; border-radius: 8px; color: var(--ink-2); text-decoration: none; font-size: .9rem; font-weight: 600; line-height: 1.3; }
 .ck-chan:hover { background: var(--bg-3); color: var(--ink); }
 .ck-chan.ck-active { background: var(--brand); color: var(--on-brand); }
-.ck-chan-emo { flex: none; width: 1.4em; text-align: center; }
+.ck-chan-emo { flex: none; width: 1.4em; text-align: center; overflow: hidden; white-space: nowrap; }
 .ck-chan-name { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ck-chan-meta { flex: none; font-size: .72rem; font-weight: 600; color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .ck-chan.ck-active .ck-chan-meta { color: inherit; opacity: .85; }
@@ -1609,7 +1755,7 @@
 .ck-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg-2); }
 .ck-head { flex: none; padding: 12px 16px 0; }
 .ck-head-top { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 38px; }
-.ck-head-emo { flex: none; font-size: 1.3rem; line-height: 1; }
+.ck-head-emo { flex: none; max-width: 1.5em; overflow: hidden; white-space: nowrap; text-align: center; font-size: 1.3rem; line-height: 1.2; }
 .ck-head-title { margin: 0; min-width: 0; font-size: 1.15rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ck-guide-btn { flex: none; }
 .ck-menu-btn { flex: none; }
@@ -1623,6 +1769,8 @@
 .ck-prog-sp { flex: 1 1 auto; max-width: none; }
 .ck-prog-txt { font-size: .78rem; font-weight: 700; color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .ck-filters { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+.ck-own { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.ck-own-note { font-size: .72rem; font-weight: 700; color: var(--ink-3); white-space: nowrap; }
 
 /* 세그먼트·토글 */
 .ck-seg { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-radius: 10px; background: var(--bg-3); }
@@ -1648,7 +1796,8 @@
 .ck-done-h { cursor: pointer; min-height: 40px; }
 .ck-done-h:hover { color: var(--ink); }
 .ck-caret { width: 1em; display: inline-block; }
-.ck-row { position: relative; display: flex; align-items: flex-start; gap: 4px; padding: 4px 16px 6px 8px; cursor: pointer; transition: background .1s; }
+/* 줄은 position 을 주지 않음: 위치 지정된 줄은 터치 보정(touch adjustment)에서 바로 위 줄의 칩 터치를 가로챔 */
+.ck-row { display: flex; align-items: flex-start; gap: 4px; padding: 4px 16px 6px 8px; cursor: pointer; transition: background .1s; }
 @media (hover: hover) { .ck-row:hover { background: color-mix(in srgb, var(--bg-3) 65%, transparent); } }
 .ck-row.ck-overdue { box-shadow: inset 3px 0 0 var(--bad); }
 .ck-row.ck-sel { background: var(--brand-bg); box-shadow: inset 3px 0 0 var(--brand); }
@@ -1666,8 +1815,14 @@
 .ck-row-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin-top: 4px; font-size: .76rem; color: var(--ink-3); }
 .ck-row-meta .chip { font-size: .72rem; line-height: 1.6; }
 .ck-meta-n { font-weight: 700; font-variant-numeric: tabular-nums; }
-.ck-pchip { border: 0; font: inherit; cursor: pointer; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
-.ck-row-meta .ck-pchip { font-size: .72rem; line-height: 1.6; }
+.ck-pchip { border: 0; font: inherit; cursor: pointer; max-width: 100%; min-width: 0; }
+.ck-th-part { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; }
+/* 목록 줄의 파트 칩: 버튼은 투명한 틀, 모양은 안쪽 span (터치 때 틀만 키워 줄 높이는 그대로) */
+.ck-rchip { position: relative; z-index: 1; display: inline-flex; max-width: 100%; min-width: 0; padding: 0; margin: 0; border: 0; border-radius: 999px; background: transparent; color: inherit; font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.ck-rchip .ck-pchip-t { display: block; max-width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ck-rchip:hover .ck-pchip-t { background: var(--line); color: var(--ink); }
+.ck-rchip:focus-visible { outline: none; }
+.ck-rchip:focus-visible .ck-pchip-t { outline: 2px solid var(--brand); outline-offset: 1px; }
 .ck-pchip:hover { background: var(--line); color: var(--ink); }
 .ck-snip { margin-top: 3px; font-size: .78rem; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ck-leaving { animation: ck-leave 1.3s ease-in forwards; }
@@ -1690,7 +1845,24 @@
 /* 입력창 */
 .ck-composer { flex: none; padding: 10px 12px 12px; border-top: 1px solid var(--line); background: var(--bg-2); }
 .ck-comp-row { display: flex; align-items: center; gap: 8px; }
-.ck-comp-part { flex: 0 1 auto; width: auto; max-width: 38%; min-height: 44px; font-size: .85rem; }
+.ck-comp-pw { flex: 0 1 auto; display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 38%; }
+.ck-comp-pw[hidden] { display: none; }
+.ck-comp-pl { display: none; flex: none; font-size: .74rem; font-weight: 800; color: var(--ink-3); white-space: nowrap; }
+.ck-comp-part { flex: 1 1 auto; width: auto; min-width: 0; max-width: 100%; min-height: 44px; font-size: .85rem; }
+/* 좁은 목록 열(스레드가 열린 데스크톱 등): 파트 고르기는 윗줄로 → 입력칸을 넓게 */
+.ck-composer.ck-narrow { padding-left: 10px; padding-right: 10px; }
+.ck-narrow .ck-comp-row { flex-wrap: wrap; row-gap: 6px; }
+.ck-narrow .ck-comp-pw { flex: 1 1 100%; max-width: none; }
+.ck-narrow .ck-comp-pl { display: inline; }
+.ck-narrow .ck-comp-part { min-height: 36px; padding-top: 4px; padding-bottom: 4px; }
+.ck-narrow .ck-comp-btn { padding: 0 12px; }
+.ck-comp-note { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; padding: 4px 4px 4px 10px; border-radius: 10px; background: var(--good-bg); color: var(--ink); font-size: .82rem; font-weight: 600; animation: ck-note-in .16s ease-out; }
+.ck-comp-note[hidden] { display: none; }
+.ck-comp-note-ico { flex: none; color: var(--good); font-weight: 900; }
+.ck-comp-note-txt { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ck-comp-note-go { flex: none; white-space: nowrap; }
+.ck-comp-note-x { width: 32px; height: 32px; }
+@keyframes ck-note-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 .ck-comp-input { flex: 1 1 0; min-width: 0; min-height: 44px; }
 .ck-comp-btn { flex: none; min-height: 44px; }
 .ck-comp-prev { display: none; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 7px; min-height: 22px; font-size: .76rem; color: var(--ink-3); }
@@ -1705,8 +1877,8 @@
 .ck-thread { display: none; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg-2); }
 .ck-th-head { flex: none; display: flex; align-items: center; gap: 8px; min-height: 54px; padding: 8px 10px 8px 14px; border-bottom: 1px solid var(--line); background: var(--bg-2); }
 .ck-th-back { flex: none; white-space: nowrap; padding: 0 8px; }
-.ck-th-part { flex: 0 1 auto; min-width: 0; min-height: 30px; font-size: .8rem; }
-.ck-move { flex: 0 1 auto; width: auto; max-width: 170px; min-height: 36px; padding: 4px 8px; font-size: .8rem; }
+.ck-th-part { flex: 0 0 auto; min-width: 0; max-width: 52%; min-height: 30px; font-size: .8rem; }
+.ck-move { flex: 0 1 160px; width: auto; min-width: 96px; max-width: 170px; min-height: 36px; padding: 4px 8px; font-size: .8rem; }
 .ck-th-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 14px 16px 20px; }
 .ck-th-top { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .ck-th-done { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 14px 0 8px; border: 1px solid var(--line-2); border-radius: 999px; background: var(--bg-2); color: var(--ink); font: inherit; font-size: .88rem; font-weight: 700; cursor: pointer; }
@@ -1778,6 +1950,27 @@
 .ck-emo-input { grid-column: span 2; min-height: 42px; text-align: center; font-size: 1.1rem; }
 .ck-copy-ta { min-height: 220px; font-size: .85rem; }
 
+/* 손가락 터치: 36px 이상 */
+@media (pointer: coarse) {
+  .ck-rchip { padding: 8px 2px; margin: -8px -2px; }   /* 누르는 영역 36px, 보이는 칩은 그대로 */
+  .ck-th-part { min-height: 36px; display: inline-flex; align-items: center; }
+  .ck-addlink, .ck-del, .ck-guide-link, .ck-link { min-height: 36px; }
+  .ck-x { width: 36px; height: 36px; }
+  .ck-note-del { width: 36px; height: 36px; }
+}
+/* 체크리스트가 열려 있으면 토스트를 아래 입력창 위로 (입력창을 가리지 않게) */
+body:has(.ck) .toast button { white-space: nowrap; flex: none; }
+@media (min-width: 700px) {
+  body:has(.ck .ck-composer:not([hidden])) .toast-wrap { bottom: calc(var(--bottom-h) + 128px + env(safe-area-inset-bottom)); }
+  body:has(.ck .ck-composer.ck-narrow:not([hidden])) .toast-wrap { bottom: calc(var(--bottom-h) + 170px + env(safe-area-inset-bottom)); }
+}
+@media (max-width: 699px) {
+  body:has(.ck[data-screen="list"] .ck-composer:not([hidden])) .toast-wrap,
+  body:has(.ck[data-screen="thread"]) .toast-wrap { bottom: calc(var(--bottom-h) + 84px + env(safe-area-inset-bottom)); }
+  body:has(.ck[data-screen="list"] .ck-composer:not([hidden]):is(:focus-within, .ck-has-text)) .toast-wrap { bottom: calc(var(--bottom-h) + 112px + env(safe-area-inset-bottom)); }
+  body:has(.ck:is([data-screen="channels"], [data-screen="search"])) .toast-wrap { bottom: calc(var(--bottom-h) + 16px + env(safe-area-inset-bottom)); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .ck *, .ck *::before, .ck *::after { animation: none !important; transition: none !important; }
 }
@@ -1802,7 +1995,10 @@
   .ck.ck-open { grid-template-columns: var(--ck-side) minmax(0, 1fr) var(--ck-thread); }
   .ck.ck-open .ck-thread { display: flex; border-left: 1px solid var(--line); }
 }
-@media (min-width: 1100px) and (max-width: 1279px) { .ck { --ck-side: 224px; } }
+@media (min-width: 1100px) and (max-width: 1279px) {
+  .ck { --ck-side: 224px; }
+  .ck.ck-open { --ck-side: 208px; --ck-thread: 316px; }
+}
 
 /* 태블릿: 스레드는 오른쪽 서랍 */
 @media (min-width: 700px) and (max-width: 1099px) {
@@ -1836,6 +2032,8 @@
   .ck[data-screen="thread"] .ck-thread { display: flex; background: transparent; }
   .ck[data-screen="search"] .ck-ws, .ck[data-screen="search"] .ck-chans, .ck[data-screen="search"] .ck-side-foot { display: none; }
   .ck[data-screen="search"] .ck-side-head { padding: 0 0 8px; }
+  .ck[data-screen="search"] .ck-search-row { margin-top: 0; }
+  .ck[data-screen="search"] .ck-search-back { display: inline-flex; }
   .ck[data-screen="search"] .ck-head { display: none; }
   .ck[data-screen="search"] .ck-sub { padding-top: 4px; }
 
@@ -1871,14 +2069,15 @@
   .ck-bucket-h { position: static; padding: 14px 2px 6px; background: transparent; backdrop-filter: none; }
   .ck-row { padding: 6px 4px 8px 0; margin: 0 -4px; border-radius: 12px; }
   .ck-row.ck-overdue { box-shadow: inset 3px 0 0 var(--bad); }
-  .ck-row + .ck-row::before { content: ''; position: absolute; top: 0; left: 44px; right: 4px; height: 1px; background: var(--line); }
+  .ck-row + .ck-row { background-image: linear-gradient(var(--line), var(--line)); background-repeat: no-repeat; background-position: 44px 0; background-size: calc(100% - 48px) 1px; }
   .ck-cb { width: 44px; height: 44px; }
   .ck-cb-box { width: 26px; height: 26px; }
   .ck-row-main { padding-top: 9px; }
   .ck-row-title { font-size: 1rem; }
   .ck-act { padding: 8px 2px; }
   .ck-composer { position: sticky; bottom: calc(var(--bottom-h) + env(safe-area-inset-bottom)); z-index: 6; margin: 0 -16px; padding: 8px 12px 10px; background: color-mix(in srgb, var(--bg) 94%, transparent); backdrop-filter: blur(10px); border-top: 1px solid var(--line); }
-  .ck-comp-part { flex: 0 1 auto; max-width: 34%; min-height: 44px; padding-left: 6px; padding-right: 2px; font-size: .8rem; }
+  .ck-comp-pw { max-width: 33%; }
+  .ck-comp-part { min-height: 44px; padding-left: 6px; padding-right: 2px; font-size: .8rem; }
   .ck-comp-btn { padding: 0 12px; }
   .ck-comp-input { font-size: 1rem; }
 
