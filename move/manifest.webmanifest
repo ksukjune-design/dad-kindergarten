@@ -1,0 +1,15 @@
+{
+  "name": "우리집 이사 관리",
+  "short_name": "이사 관리",
+  "description": "11/3 이사를 위한 체크리스트·도면 배치·견적·자금 흐름 관리",
+  "lang": "ko",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f6f4ef",
+  "theme_color": "#0e7490",
+  "icons": [
+    { "src": "./icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
