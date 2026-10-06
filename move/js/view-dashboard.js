@@ -9,8 +9,12 @@
    - 저장소 변경 시 스크롤·가로 스크롤·펼침 상태·포커스를 유지한 채 다시 그립니다.
      다시 그리기는 다음 프레임 뒤에, 내용이 바뀐 카드·줄·주 칸만 바꿔 끼웁니다 (patchNode — 태블릿 가로 화면 체크 속도).
    - 11/3 돈 흐름: 머리 숫자는 '꼭 필요한 현금 기준'(financeSummary.netEssential), 아래 작은 줄에 살림 구입까지 / 전부 포함.
+     이사 전에 지금 통장에서 먼저 나갈 돈(financeSummary.beforeMoveUnpaid — 꼭 드는 비용에 이미 들어 있음)은 작은 줄로만.
+     자금 모듈의 주의사항은 'info' 와 머리 숫자(부족)와 겹치는 것은 빼고 보여 줌 (필드가 없어도 동작).
      자금 모듈이 없으면 가족 결정(2026-10-06)을 반영한 계획값으로 같은 모양을 그림.
-   - 이사 견적: 자금·LG 비교와 같은 '실제로 낼 돈'(moveEstimate.pay, 부가세 포함), LG 이전설치는 따로.
+   - 이사 견적: 자금·가전 이전 비교와 같은 '실제로 낼 돈'(moveEstimate.pay, 부가세 포함).
+     제조사 서비스(moveEstimate.lgCost = makerCost — LG·삼성 전체, 지금은 삼성 2in1 에어컨 이사 전 설치)는 따로.
+   - 큰 가전 (2026-10-06 결정): 냉장고·건조기는 이삿짐센터, 삼성 2in1 에어컨은 삼성전자서비스가 이사 전(11/3 전) 설치.
    CSS 접두사: db-
    ============================================================ */
 (function () {
@@ -65,7 +69,8 @@
     const move = moveDay();
     const list = [{ date: LEASE_END, label: '원래 전세 만기', icon: '📄' }];
     if (move) {
-      list.push({ date: D.add(move, -1), label: '가전 선이동(예정)', icon: '🔌' });
+      // 냉장고·건조기는 이삿짐센터가 11/3에, 삼성 2in1 에어컨만 이사 전에 새 집에 설치 (삼성 예약일 — 늦어도 이사 전날)
+      list.push({ date: D.add(move, -1), label: '에어컨 이전설치(이사 전, 예정)', icon: '🔧' });
       list.push({ date: move, label: '이사·잔금·전입신고', icon: '🚚', main: true });
     }
     return list.sort((a, b) => (a.date < b.date ? -1 : 1));
@@ -218,6 +223,8 @@
 .db-lr-amt.is-in { color:var(--good); }
 .db-lr-bal { display:block; font-size:.72rem; color:var(--ink-3); font-weight:600; }
 .db-lr.is-sum .db-lr-label { font-weight:800; }
+.db-lr-note { display:flex; align-items:flex-start; gap:6px; margin:0 0 6px; padding:5px 9px; border-radius:9px; background:var(--bg-3); color:var(--ink-2); font-size:.76rem; font-weight:600; line-height:1.45; }
+.db-lr-note b { color:var(--ink); font-variant-numeric:tabular-nums; }
 .db-total { display:flex; align-items:baseline; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-top:8px; padding:10px 12px; border-radius:12px; background:var(--good-bg); color:var(--good); }
 .db-total.is-bad { background:var(--bad-bg); color:var(--bad); }
 .db-total span { font-weight:750; font-size:.88rem; }
@@ -609,6 +616,61 @@ button.db-wk-head:hover { background:var(--bg-3); }
     if (typeof w === 'string') return w;
     return w.text || w.msg || w.message || w.title || '';
   }
+  const warnLevel = (w) => (w && typeof w === 'object' && typeof w.level === 'string' ? w.level : '');
+  /* 자금 모듈 주의사항 중 대시보드에 이미 보이는 것: 머리 숫자의 '부족'(예산 알림), 이사 전에 먼저 나가는 돈.
+     id 가 있으면 id 로, 없으면(예전 자금 모듈) 문구로 알아봄 */
+  function warnDup(w, t) {
+    const id = w && typeof w === 'object' && w.id != null ? String(w.id) : '';
+    if (id) return id === 'budget' || id === 'before';
+    return (/꼭 드는 이사 비용/.test(t) && /부족/.test(t)) || /이사 전에 먼저 나가는 돈/.test(t);
+  }
+
+  /* ---------- 제조사 서비스 (moveEstimate.lgCost = makerCost — LG·삼성 전체, 이름 lgCost 는 호환용) ----------
+     10/6 가족 결정: 냉장고·건조기는 이삿짐센터, 삼성 2in1 에어컨만 삼성전자서비스가 이사 전(11/3 전)에 새 집에 설치.
+     짐·견적 계산이 없으면 자금 모듈과 같은 가족 결정 금액 약 50만원 (추정 45만~70만원). */
+  const AC_FALLBACK = 500000;
+  function calcEst() {
+    try {
+      const e = MV.calc && typeof MV.calc.moveEstimate === 'function' ? MV.calc.moveEstimate(MV.store.get()) : null;
+      return e && typeof e === 'object' ? e : null;
+    } catch (e) { console.warn('[dashboard] moveEstimate 실패', e); return null; }
+  }
+  function makerOf(est) {
+    if (!est || typeof est !== 'object') return null;
+    const m = est.makerCost && typeof est.makerCost === 'object' ? est.makerCost : est.lgCost;
+    return m && typeof m === 'object' ? m : null;
+  }
+  // 제조사별 [{brand, typical, count}] — byBrand 가 없으면 빈 목록
+  function makerBrands(m) {
+    const bb = m && m.byBrand && typeof m.byBrand === 'object' ? m.byBrand : null;
+    if (!bb) return [];
+    return Object.keys(bb).map((k) => {
+      const v = bb[k] && typeof bb[k] === 'object' ? bb[k] : {};
+      return { brand: k, typical: isNum(v.typical) ? v.typical : 0, count: isNum(v.count) ? v.count : 0 };
+    }).filter((x) => x.count > 0 || x.typical > 0);
+  }
+  /* 사람이 읽는 이름: { name: '삼성 에어컨 이전설치', when: '이사 전' | '', svc: '삼성전자서비스' }
+     m 이 없으면(짐·견적 계산 없음) 가족 결정 그대로 '삼성 에어컨 이전설치(이사 전)' */
+  function makerName(m) {
+    if (!m) return { name: '삼성 에어컨 이전설치', when: '이사 전', svc: '삼성전자서비스' };
+    const makers = Array.isArray(m.makers) && m.makers.length ? m.makers.map(String) : makerBrands(m).map((x) => x.brand);
+    const rows = Array.isArray(m.rows) ? m.rows.filter((r) => r && !r.setPart) : [];
+    const allAc = rows.length > 0 && rows.every((r) => String(r.kind || '').indexOf('ac') === 0);
+    const svc = typeof m.label === 'string' && m.label ? m.label : '제조사 서비스';
+    if (makers.length === 1) {
+      const b = makers[0];
+      return { name: b + (allAc ? ' 에어컨' : ' 가전') + ' 이전설치', when: b === '삼성' && allAc ? '이사 전' : '', svc };
+    }
+    if (makers.length > 1) return { name: makers.join('·') + ' 가전 이전설치', when: '', svc };
+    return { name: '제조사 서비스 이전설치', when: '', svc };
+  }
+  const nameWhen = (n) => n.name + (n.when ? '(' + n.when + ')' : '');
+  // '그중 X는 이사 전에 지금 통장에서 나가요 (무엇)' — 꼭 드는 비용에 이미 들어 있는 돈이라 더하지 않고 알려만 줌
+  function beforeNote(amount, what) {
+    return el('div', { class: 'db-lr-note' },
+      el('span', { 'aria-hidden': 'true' }, '⏰'),
+      el('span', '그중 ', el('b', MV.fmt.krw(amount)), '은 이사 전에 지금 통장에서 나가요' + (what ? ' (' + what + ')' : '')));
+  }
   /* 계획값 — 자금흐름 화면(MV.calc.financeSummary)이 없을 때만 씁니다.
      가족 결정(2026-10-06) 반영: 옷장은 이사 뒤 간이 옷장(약 20만원, 선택·나중에) · 통돌이 약 50만원(이사 후 배송)
      · 커튼·소품은 지금 것을 가져감(0원) · 입주청소는 직접(0원) · 예비비 없음.
@@ -620,15 +682,22 @@ button.db-wk-head:hover { background:var(--bg-3); }
     { label: '11월 월세 (11/3에 낸다면)', sub: '계약서상 후불 — 낸다면 잔금과 따로 이체하고 영수증도 따로 받기', amt: 700000, sign: -1 },
     { label: '중개보수 (상한)', sub: '법정 상한 117만원 · 부가세 별도', amt: 1170000, sign: -1 },
   ];
-  function planCosts() {
-    let est = null;
-    try { est = MV.calc && typeof MV.calc.moveEstimate === 'function' ? MV.calc.moveEstimate(MV.store.get()) : null; } catch (e) { est = null; }
+  // 짐 목록에서 이삿짐센터가 옮기는 에어컨 수 (자금 모듈과 같은 규칙: 견적은 있는데 제조사 서비스가 없으면 에어컨 이전설치 0원)
+  const moverAircons = () => MV.inv.list().filter((x) => x && (x.cat === 'aircon' || x.tag === 'aircon') && x.fate === 'move').length;
+  function planCosts(est) {
     const pay = est && est.pay && isNum(est.pay.typical) ? est.pay.typical : null;
-    const lg = est && est.lgCost && isNum(est.lgCost.typical) ? est.lgCost.typical : null;
+    const mk = makerOf(est);
+    // 에어컨 이전설치: 짐·견적의 제조사 서비스 합계 → (견적은 있는데 에어컨도 이삿짐센터가 옮기면 0) → 없으면 가족 결정 약 50만원
+    const ac = mk && isNum(mk.typical) ? mk.typical : (est && moverAircons() > 0 ? 0 : AC_FALLBACK);
     const essential = (pay != null ? pay : 2167000)       // 이사업체 (부가세 포함, 모델 중간값)
-      + (lg != null ? lg : 565000)                         // LG 가전 이전설치
-      + 50000 + 100000 + 20000;                            // 대형폐기물 · 엘리베이터(두 단지) · 인터넷 이전
-    return { essential, purchase: 500000, optional: 200000 + 780800, fromEst: pay != null };
+      + ac                                                 // 삼성 에어컨 이전설치 (이사 전)
+      + 50000 + 200000 + 36000;                            // 대형폐기물 · 엘리베이터(두 단지 각 약 10만원) · 인터넷 이전설치
+    return {
+      essential, ac, acName: makerName(mk),
+      purchase: 500000,                                    // 통돌이 세탁기 (이사 후 배송)
+      optional: 200000 + 684800,                           // 간이 옷장(이사 후) + HUG 보증료 (선택·나중에)
+      fromEst: pay != null,
+    };
   }
   /* 결과: 머리 숫자는 '꼭 필요한 현금 기준'(11/3 남는 돈 − 꼭 드는 이사 비용), 아래 작은 줄에 살림 구입까지 / 전부 포함 */
   function cashResult(r) {
@@ -654,7 +723,7 @@ button.db-wk-head:hover { background:var(--bg-3); }
     box.appendChild(el('a', { class: 'db-hug', href: HUG_HREF }, '🛡 HUG 보증: 가입할 때와 안 할 때 비교 →'));
     return box;
   }
-  function moneyCard() {
+  function moneyCard(est) {
     let fs = null;
     try {
       if (MV.calc && typeof MV.calc.financeSummary === 'function') fs = MV.calc.financeSummary(MV.store.get());
@@ -682,7 +751,19 @@ button.db-wk-head:hover { background:var(--bg-3); }
         const purchase = isNum(fs.purchaseUnpaid) ? fs.purchaseUnpaid : (nwp != null ? fs.netEssential - nwp : null);
         const optional = isNum(fs.optionalUnpaid) ? fs.optionalUnpaid : (nwp != null && net != null ? nwp - net : null);
         if (left != null) led.appendChild(ledgerRow('남는 돈', null, minus(left), 'sum', null, MV.fmt.won(left)));
-        if (essential != null) led.appendChild(ledgerRow('꼭 드는 이사 비용', '이사업체 · LG 가전 이전 · 엘리베이터 등', signed(essential, -1), '', null, MV.fmt.won(essential)));
+        if (essential != null) {
+          // 견적 계산이 있는데 제조사 서비스가 없으면(에어컨도 이삿짐센터) 에어컨 이전설치는 빼고 적음
+          const mk = makerOf(est);
+          const acTxt = mk ? makerName(mk).name : !est ? makerName(null).name : null;
+          led.appendChild(ledgerRow('꼭 드는 이사 비용', ['이사업체', acTxt, '엘리베이터 등'].filter(Boolean).join(' · '), signed(essential, -1), '', null, MV.fmt.won(essential)));
+          // 이사 전에 지금 통장에서 먼저 나갈 돈 (꼭 드는 비용 안에 이미 들어 있음 — 더하지 않음)
+          const before = isNum(fs.beforeMoveUnpaid) && fs.beforeMoveUnpaid > 0 ? fs.beforeMoveUnpaid : 0;
+          if (before) {
+            const labels = (Array.isArray(fs.beforeMoveLabels) ? fs.beforeMoveLabels : [])
+              .map((s) => String(s == null ? '' : s).replace(/\s*\(이사 전\)\s*$/, '').trim()).filter(Boolean);
+            led.appendChild(beforeNote(before, labels.length ? labels.join(', ') : acTxt));
+          }
+        }
         body.appendChild(led);
         body.appendChild(cashResult({ netEssential: fs.netEssential, netWithPurchases: nwp, net, purchase, optional }));
       } else {
@@ -698,10 +779,14 @@ button.db-wk-head:hover { background:var(--bg-3); }
             el('span', label), el('b', { title: MV.fmt.won(fin) }, (fin < 0 ? '⚠ ' : '') + verdict(fin))));
         }
       }
-      const warns = (Array.isArray(fs.warnings) ? fs.warnings : []).map(warnText).filter(Boolean);
+      // 주의사항: 'info' 는 빼고, 머리 숫자(꼭 필요한 현금 기준 '부족')·이사 전 결제 줄과 겹치는 것도 뺌
+      const headline = isNum(fs.netEssential);
+      const warns = (Array.isArray(fs.warnings) ? fs.warnings : [])
+        .map((w) => ({ t: warnText(w), lv: warnLevel(w), w }))
+        .filter((x) => x.t && x.lv !== 'info' && !(headline && warnDup(x.w, x.t)));
       if (warns.length) {
         const box = el('div', { class: 'db-warns' });
-        warns.slice(0, 3).forEach((w) => box.appendChild(el('div', { class: 'callout warn' }, w)));
+        warns.slice(0, 3).forEach((x) => box.appendChild(el('div', { class: 'callout ' + (x.lv === 'bad' ? 'bad' : 'warn') }, x.t)));
         if (warns.length > 3) box.appendChild(el('a', { class: 'db-more db-more-rest', href: '#/money' }, '주의사항 ' + (warns.length - 3) + '개 더 →'));
         body.appendChild(box);
       }
@@ -714,9 +799,11 @@ button.db-wk-head:hover { background:var(--bg-3); }
         bal += s.sign * s.amt;
         led.appendChild(ledgerRow(s.label, s.sub, signed(s.amt, s.sign), s.sign > 0 ? 'in' : '', bal, MV.fmt.won(s.amt)));
       });
-      const pc = planCosts();
-      led.appendChild(ledgerRow('꼭 드는 이사 비용 (약)', (pc.fromEst ? '이사업체(견적 계산값)' : '이사업체') + ' · LG 가전 이전 · 엘리베이터 · 폐기물 · 인터넷',
+      const pc = planCosts(est);
+      led.appendChild(ledgerRow('꼭 드는 이사 비용 (약)',
+        [pc.fromEst ? '이사업체(견적 계산값)' : '이사업체', pc.ac > 0 ? nameWhen(pc.acName) : null, '엘리베이터', '폐기물', '인터넷'].filter(Boolean).join(' · '),
         signed(pc.essential, -1), '', null, MV.fmt.won(pc.essential)));
+      if (pc.ac > 0 && pc.acName.when === '이사 전') led.appendChild(beforeNote(pc.ac, pc.acName.name));
       body.appendChild(led);
       const nE = bal - pc.essential;
       body.appendChild(cashResult({ netEssential: nE, netWithPurchases: nE - pc.purchase, net: nE - pc.purchase - pc.optional, purchase: pc.purchase, optional: pc.optional }));
@@ -731,18 +818,16 @@ button.db-wk-head:hover { background:var(--bg-3); }
   function invSummary() {
     const inv = MV.inv.list();
     const n = (f) => inv.filter((x) => x.fate === f).reduce((s, x) => s + Math.max(0, +x.qty || 0), 0);
-    return { count: inv.length, move: n('move'), discard: n('discard'), buy: n('buy'), sell: n('sell'), lg: inv.filter((x) => x.lg && x.fate === 'move').length };
+    // maker: 제조사 서비스(LG 베스트케어·삼성전자서비스)로 옮길 가전 대수 — 견적 계산이 없을 때만 쓰는 어림값
+    const maker = inv.filter((x) => x.lg && x.fate === 'move').reduce((s, x) => s + Math.max(0, +x.qty || 0), 0);
+    return { count: inv.length, move: n('move'), discard: n('discard'), buy: n('buy'), sell: n('sell'), maker };
   }
-  function estimateCard() {
-    let est = null;
-    try {
-      if (MV.calc && typeof MV.calc.moveEstimate === 'function') est = MV.calc.moveEstimate(MV.store.get());
-    } catch (e) { console.warn('[dashboard] moveEstimate 실패', e); est = null; }
+  function estimateCard(est) {
     const inv = invSummary();
     const body = el('div');
     const ok = est && typeof est === 'object' && isNum(est.typical);
     if (ok) {
-      // 머리 숫자는 자금 화면·LG 비교와 같은 '실제로 낼 돈'(부가세 포함, est.pay). 없으면 기준가를 쓰고 부가세 기준을 밝혀 둠
+      // 머리 숫자는 자금 화면·가전 이전 비교와 같은 '실제로 낼 돈'(부가세 포함, est.pay). 없으면 기준가를 쓰고 부가세 기준을 밝혀 둠
       const pay = est.pay && typeof est.pay === 'object' && isNum(est.pay.typical) ? est.pay : null;
       const typ = pay ? pay.typical : est.typical;
       const low = pay ? (isNum(pay.low) ? pay.low : typ) : (isNum(est.low) ? est.low : typ);
@@ -767,13 +852,17 @@ button.db-wk-head:hover { background:var(--bg-3); }
       if (isNum(est.crew)) facts.appendChild(el('span', { class: 'chip' }, '👷 ' + est.crew + '명'));
       facts.appendChild(el('span', { class: 'chip' }, '짐 ' + inv.count + '개'));
       body.appendChild(facts);
-      // LG 이전설치는 LG에 따로 내는 돈 (소비자가, 부가세 포함) — 이삿짐센터 금액에 섞지 않고 따로 보여 줌
-      const lgc = est.lgCost;
-      if (lgc && isNum(lgc.typical) && lgc.typical > 0) {
-        const tot = est.totalPay && isNum(est.totalPay.typical) ? est.totalPay.typical : (pay ? typ + lgc.typical : null);
-        body.appendChild(el('div', { class: 'db-est-lg', title: isNum(lgc.low) && isNum(lgc.high) ? 'LG 이전 ' + MV.fmt.krw(lgc.low) + ' ~ ' + MV.fmt.krw(lgc.high) + ' (부가세 포함)' : null },
-          el('span', { 'aria-hidden': 'true' }, '🔌'),
-          el('span', 'LG 이전설치는 따로 약 ', el('b', MV.fmt.krw(lgc.typical)), ' (부가세 포함)',
+      // 제조사 서비스(지금은 삼성 에어컨 이사 전 설치)는 제조사에 따로 내는 돈 (소비자가, 부가세 포함) — 이삿짐센터 금액에 섞지 않음
+      const mk = makerOf(est);
+      if (mk && isNum(mk.typical) && mk.typical > 0) {
+        const nm = makerName(mk);
+        const tot = est.totalPay && isNum(est.totalPay.typical) ? est.totalPay.typical : (pay ? typ + mk.typical : null);
+        const brands = makerBrands(mk).filter((x) => x.typical > 0);
+        const split = brands.length > 1 ? ' (' + brands.map((x) => x.brand + ' 약 ' + MV.fmt.krw(x.typical)).join(' · ') + ')' : '';
+        const range = isNum(mk.low) && isNum(mk.high) && mk.high > mk.low ? ' · 범위 ' + MV.fmt.krw(mk.low) + ' ~ ' + MV.fmt.krw(mk.high) : '';
+        body.appendChild(el('div', { class: 'db-est-lg', title: nameWhen(nm) + range + ' (부가세 포함)' },
+          el('span', { 'aria-hidden': 'true' }, '🔧'),
+          el('span', nameWhen(nm) + ' 약 ', el('b', MV.fmt.krw(mk.typical)), split + ' — ' + nm.svc + '에 따로 내요 (부가세 포함)',
             tot != null ? el('span', { class: 'db-est-tot' }, ' → 이사 전체 약 ' + MV.fmt.krw(tot)) : null)));
       }
       const notes = (Array.isArray(est.notes) ? est.notes : []).map(warnText).filter(Boolean);
@@ -788,11 +877,14 @@ button.db-wk-head:hover { background:var(--bg-3); }
         ? '짐 목록 ' + inv.count + '개가 있어요. 냉장고·에어컨·가구 규격을 채우면 예상 이사비와 짐량(톤)이 자동으로 계산돼요.'
         : '짐 목록(냉장고 규격, 에어컨, 가구 개수)을 채우면 예상 이사비가 자동으로 계산돼요.'));
       if (inv.count) {
+        // 제조사 서비스로 옮길 가전 수: 견적 계산의 lgCost.count(제조사 서비스 전체)가 있으면 그 값, 없으면 짐 목록 어림
+        const mk = makerOf(est);
+        const nMaker = mk && isNum(mk.count) ? mk.count : inv.maker;
         body.appendChild(el('div', { class: 'db-facts' },
           el('span', { class: 'chip kid' }, '가져감 ' + inv.move),
           el('span', { class: 'chip bad' }, '버림 ' + inv.discard),
           el('span', { class: 'chip good' }, '구매 ' + inv.buy),
-          inv.lg ? el('span', { class: 'chip' }, '🔌 LG ' + inv.lg) : null));
+          nMaker > 0 ? el('span', { class: 'chip', title: '제조사 서비스(삼성전자서비스 등)로 옮길 가전 ' + nMaker + '대' }, '🔧 제조사 서비스 ' + nMaker) : null));
       }
       body.appendChild(el('div', { class: 'db-cta' }, el('a', { class: 'btn btn-sm btn-primary', href: '#/stuff' }, '짐 목록 채우기 →')));
     }
@@ -1226,11 +1318,11 @@ button.db-wk-head:hover { background:var(--bg-3); }
   }
   function linksCard() {
     const mover = guideLink('mover');
-    const lg = guideLink('appliance');
+    const appl = guideLink('appliance');
     const items = [
       { ico: '📐', label: '도면 배치', sub: '두 집 도면에 가구 놓아보기', href: '#/plan' },
       { ico: '🚚', label: '이사업체 가이드', sub: mover.guide ? '견적·계약 체크포인트' : '체크리스트 (가이드 준비 중)', href: mover.href },
-      { ico: '🔌', label: 'LG 가전이사', sub: lg.guide ? '이전설치·선입주 양해' : '체크리스트 (가이드 준비 중)', href: lg.href },
+      { ico: '🔌', label: '가전이사', sub: appl.guide ? '에어컨 이사 전 설치·냉장고 운반' : '체크리스트 (가이드 준비 중)', href: appl.href },
       { ico: '📖', label: '모든 가이드', sub: '파트별 정리 노트', href: '#/guide' },
       { ico: '💾', label: '백업', sub: '파일로 저장·복원', onClick: () => { const b = document.getElementById('topbar-menu'); if (b) b.click(); } },
     ];
@@ -1305,12 +1397,13 @@ button.db-wk-head:hover { background:var(--bg-3); }
   const partsSection = (cols) => seal(keyed('parts', late(safe('db-span-12', () => partsCard(cols)))));
   function build(acc, cols) {
     const pm = partMap();
+    const est = calcEst();                       // 돈 흐름·견적 카드가 같은 견적 계산을 한 번만 씀
     return sealTree(el('div', { class: 'db', dataset: { dbKey: 'db', dbDeep: '1' } },
       el('h1', { class: 'db-sr', dataset: { dbKey: 'title' } }, '대시보드'),
       el('div', { class: 'db-grid', dataset: { dbKey: 'grid', dbDeep: '1' } },
         keyed('hero', safe('db-span-12', heroCard)),
         keyed('now', safe('db-span-7', () => nowCard(pm))),
-        late(el('div', { class: 'db-side', dataset: { dbKey: 'side', dbDeep: '1' } }, keyed('money', safe('', moneyCard)), keyed('est', safe('', estimateCard)))),
+        late(el('div', { class: 'db-side', dataset: { dbKey: 'side', dbDeep: '1' } }, keyed('money', safe('', () => moneyCard(est))), keyed('est', safe('', () => estimateCard(est))))),
         keyed('road', safe('db-span-12', () => roadCard(acc, pm))),
         partsSection(cols),
         keyed('activity', late(safe('db-span-7', activityCard))),
