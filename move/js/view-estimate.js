@@ -534,8 +534,10 @@
     const invAll = Array.isArray(opt.inventory) ? opt.inventory : (st && Array.isArray(st.inventory) ? st.inventory : []);
     const inv = invAll.filter((x) => x && typeof x === 'object');
     const going = inv.filter((it) => isGoing(it, inp));
-    const mover = going.filter((it) => !it.lg);
-    const lgItems = going.filter((it) => !!it.lg);
+    // LG 표시는 가전·에어컨에만 의미가 있어요 (가구에 잘못 켜져 있으면 이삿짐센터가 옮기는 것으로 계산)
+    const viaLg = (it) => !!it.lg && isApplianceLike(it);
+    const mover = going.filter((it) => !viaLg(it));
+    const lgItems = going.filter(viaLg);
 
     /* 1) 부피 */
     const furnRaw = sum(mover, rawVol);
@@ -820,7 +822,11 @@
 .es-iqty { width: 70px; min-height: 36px; padding: 4px 8px; }
 .es-dim { white-space: nowrap; font-variant-numeric: tabular-nums; font-size: .84rem; color: var(--ink-2); }
 .es-room { font-size: .84rem; color: var(--ink-2); white-space: nowrap; }
-.es-memo { font-size: .8rem; color: var(--ink-3); max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.es-memo { font-size: .76rem; color: var(--ink-3); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: -2px; }
+.es-tbl td.es-lgcell { white-space: nowrap; }
+.es-tbl td.es-lgcell > * { vertical-align: middle; }
+.es-tbl td.es-lgcell .es-link { margin-left: 2px; }
+.es-tbl th, .es-tbl td { padding-left: 8px; padding-right: 8px; }
 .es-link { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 10px; text-decoration: none; }
 .es-link:hover { background: var(--bg-3); }
 .es-tbl tr.is-faded td { opacity: .62; }
@@ -1067,6 +1073,10 @@
 .es-caveats ul { margin: 0; padding-left: 1.2em; font-size: .88rem; }
 .es-caveats li + li { margin-top: 5px; }
 .es-err { font-size: .85rem; }
+/* 토스트 (core .toast 에 이 모듈이 붙이는 보조 클래스) — 가운데 기준으로 내용 폭만큼, 버튼은 한 줄 */
+.toast.es-toast { width: max-content; max-width: calc(100vw - 32px); box-sizing: border-box; }
+.toast.es-toast > span { min-width: 0; }
+.toast.es-toast > button { white-space: nowrap; flex: none; min-height: 32px; }
 `);
 
   /* ======================= 화면 상태 (모듈 메모리) ======================= */
@@ -1335,7 +1345,8 @@
     const fc = fateCounts(inv);
     const moveVol = sum(inv.filter((it) => it.fate === 'move'), (it) => MV.inv.volume(it));
     const assumed = inv.filter((it) => it.assumed).length;
-    const lg = inv.filter((it) => it.lg && it.fate === 'move').length;
+    const inpS = inpNow();
+    const lg = sum(inv.filter((it) => it.lg && isGoing(it, inpS) && isApplianceLike(it)), qtyOf);
     const fchips = MV.inv.FATES.map((f) => el('button', {
       type: 'button', class: 'es-fchip' + (mem.fates.has(f.id) ? ' is-on' : ''), 'data-tone': f.cls || '',
       'aria-pressed': String(mem.fates.has(f.id)), 'data-fk': 'fate-filter-' + f.id,
@@ -1346,7 +1357,7 @@
       el('div', { class: 'es-chiprow' },
         el('span', { class: 'es-stat', title: '처리가 ‘가져감’인 짐의 가로×깊이×높이 합 (수량 포함)' }, '📦 가져갈 짐 ', el('b', m3(moveVol))),
         el('span', { class: 'es-stat', style: { background: 'var(--bg-3)', color: 'var(--ink-2)' } }, '전체 ', el('b', inv.length + '개')),
-        lg ? el('span', { class: 'es-stat', title: 'LG 서비스로 따로 옮길 가전' }, '🔌 LG ', el('b', lg + '개')) : null,
+        lg ? el('span', { class: 'es-stat', title: 'LG 서비스로 따로 옮길 가전 (처리 ‘미정’ 포함 여부는 견적 설정을 따름)' }, '🔌 LG ', el('b', lg + '대')) : null,
         assumed ? el('button', {
           type: 'button', class: 'es-fchip es-warnchip' + (mem.onlyAssumed ? ' is-on' : ''), 'aria-pressed': String(mem.onlyAssumed),
           'data-fk': 'assumed-filter', title: '규격이 추정치인 짐만 보기',
@@ -1419,7 +1430,11 @@
     draw();
     return wrap;
   }
-  const wideMQ = window.matchMedia ? window.matchMedia('(min-width: 981px)') : { matches: true, addEventListener() {}, removeEventListener() {} };
+  /* 표는 화면(뷰) 폭이 충분할 때만 — 뷰 폭으로 판단해서 왼쪽 메뉴가 있는 1024px 데스크톱·갤럭시탭 가로처럼
+     표가 잘리는 폭에서는 카드로 보여 줘요 (가로 스크롤로 LG·링크 칸이 숨지 않게) */
+  const TABLE_MIN_VIEW = 1020;
+  function viewWidth() { return (R && R.root && R.root.clientWidth) || document.documentElement.clientWidth || window.innerWidth || 1280; }
+  const tableMode = () => viewWidth() >= TABLE_MIN_VIEW;
   function fateSelect(it) {
     const s = el('select', { class: 'select es-isel', 'aria-label': nm(it) + ' 처리', 'data-fk': 'fate-' + it.id },
       MV.inv.FATES.map((f) => el('option', { value: f.id, selected: f.id === it.fate }, f.label)));
@@ -1464,25 +1479,28 @@
       return el('section', { class: 'card' }, info, el('div', { class: 'empty' }, el('span', { class: 'big', 'aria-hidden': 'true' }, '🔍'), '조건에 맞는 짐이 없어요.'));
     }
     const faded = (it) => it.fate !== 'move' && it.fate !== 'undecided';
-    if (wideMQ.matches) {
+    if (R) R.tableMode = tableMode();
+    if (R ? R.tableMode : tableMode()) {
       const tbl = el('table', { class: 'tbl es-tbl' },
         el('thead', el('tr',
-          el('th', { 'aria-label': '분류' }, ''), el('th', '이름'), el('th', '처리'), el('th', { class: 'num' }, '수량'),
-          el('th', '가로×깊이×높이 (cm)'), el('th', { class: 'num' }, '부피'), el('th', '지금 → 새 집'),
-          el('th', { class: 'center' }, 'LG'), el('th', { class: 'center' }, '링크'), el('th', '메모'))),
+          el('th', { 'aria-label': '분류' }, ''), el('th', '이름 · 메모'), el('th', '처리'), el('th', { class: 'num' }, '수량'),
+          el('th', { title: '가로×깊이×높이' }, '크기 (cm)'), el('th', { class: 'num' }, '부피'), el('th', '지금 → 새 집'),
+          el('th', { class: 'center' }, 'LG · 링크'))),
         el('tbody', list.map((it) => el('tr', { class: faded(it) ? 'is-faded' : '' },
           el('td', { class: 'es-ico', title: MV.inv.cat(it.cat).label }, MV.inv.cat(it.cat).icon),
           el('td', { class: 'es-namecell' }, el('div', { class: 'es-namewrap' }, nameBtn(it),
             it.assumed ? el('span', { class: 'chip warn', title: '규격을 아직 재지 않은 추정치' }, '추정치') : null,
-            isAircon(it) && it.ac ? el('span', { class: 'chip' }, AC_LABEL[it.ac] || it.ac) : null)),
+            isAircon(it) && it.ac ? el('span', { class: 'chip' }, AC_LABEL[it.ac] || it.ac) : null),
+            it.note ? el('div', { class: 'es-memo', title: it.note }, clip(it.note, 80)) : null),
           el('td', fateSelect(it)),
           el('td', { class: 'num' }, qtyInput(it)),
-          el('td', { class: 'es-dim' }, dimTxt(it)),
+          el('td', { class: 'es-dim', title: '가로×깊이×높이' }, dimTxt(it)),
           el('td', { class: 'num' }, m3(MV.inv.volume(it))),
           el('td', { class: 'es-room' }, roomTxt(it)),
-          el('td', { class: 'center' }, it.lg ? el('span', { class: 'chip kid', title: 'LG 서비스로 옮김' }, 'LG ✓') : el('span', { class: 'es-muted' }, '—')),
-          el('td', { class: 'center' }, linkEl(it) || el('span', { class: 'es-muted' }, '—')),
-          el('td', el('div', { class: 'es-memo', title: it.note || '' }, clip(it.note, 60)))))));
+          el('td', { class: 'center es-lgcell' },
+            it.lg ? el('span', { class: 'chip kid', title: 'LG 서비스로 옮김' }, 'LG ✓') : null,
+            linkEl(it),
+            !it.lg && !safeUrl(it.url) ? el('span', { class: 'es-muted' }, '—') : null)))));
       return el('section', { class: 'card' }, info, el('div', { class: 'table-wrap' }, tbl));
     }
     const cards = el('div', { class: 'es-cards' }, list.map((it) => el('article', { class: 'es-icard' + (faded(it) ? ' is-faded' : '') },
@@ -1528,36 +1546,108 @@
     ['storage', /옷장|장롱|행거|서랍|수납|수납장|붙박이|화장대|신발장/], ['table', /책상|식탁|테이블|좌탁/],
     ['electronics', /TV|티비|모니터|컴퓨터|PC|프린터|오디오|스피커/i], ['kids', /아이|키즈|어린이|유아|장난감|놀이|아기/],
   ];
+  /* 규격 프리셋 고르기 — 낱말 단위로만 맞춤 (예전: '건조'가 '빨래 건조대'에 부분 일치해 세탁기로 잘못 분류)
+     · 같은 낱말 → 낱말 길이만큼 점수
+     · 이름 낱말이 프리셋 낱말로 끝남(합성어의 머리말: '퀸침대'⊃'침대') → 점수
+     · 이름 낱말이 3글자 이상이고 프리셋 낱말의 앞부분('매트리스' → '매트리스만') → 점수
+     · 이름 낱말이 프리셋 낱말(3글자 이상)로 시작 → 점수.  2글자 앞부분 일치('건조' → '건조대')는 인정하지 않음 */
+  const tokensOf = (s) => String(s || '').toLowerCase().split(/[\s+·,()\/\[\]{}:;~\-_|]+/).filter(Boolean);
+  function presetWords(p) {
+    return String(p.name || '').toLowerCase()
+      .replace(/\d+(?:\.\d+)?\s*(?:kg|형|인용|인|단|l|리터|인치)?/gi, ' ')
+      .split(/[\s+·,()\/]+/)
+      .map((w) => (w.length > 2 ? w.replace(/(만|용|형)$/, '') : w))
+      .filter(Boolean);
+  }
+  function wordScore(w, toks) {
+    let best = 0;
+    toks.forEach((t) => {
+      let sc = 0;
+      if (t === w) sc = w.length;
+      else if (w.length >= 2 && t.endsWith(w)) sc = w.length;
+      else if (t.length >= 3 && w.startsWith(t)) sc = t.length;
+      else if (w.length >= 3 && t.startsWith(w)) sc = w.length;
+      if (sc > best) best = sc;
+    });
+    return best;
+  }
   function matchPreset(name) {
     const cat = MV.catalog || [];
+    const toks = tokensOf(name);
+    if (!toks.length) return null;
     let best = null, bestScore = 0;
     cat.forEach((p) => {
       let score = 0;
-      String(p.name).replace(/\d+(?:kg|형|인)?/gi, ' ').split(/[\s+·,()/]+/).filter(Boolean).forEach((w) => { if (name.includes(w)) score += w.length; });
+      presetWords(p).forEach((w) => { score += wordScore(w, toks); });
       const kw = TAG_WORDS[p.tag];
       if (score > 0 && kw && kw.test(name)) score += 1;
       if (score > bestScore) { bestScore = score; best = p; }
     });
-    return best;
+    return bestScore >= 2 ? best : null;
   }
   function guessCat(name) { const f = CAT_WORDS.find(([, re]) => re.test(name)); return f ? f[0] : 'misc'; }
+  /* 엑셀 머리줄('이름 가로 깊이 높이 수량')은 짐이 아니라 건너뜀 */
+  const HEADER_WORD = /^(이름|품목|물품|항목|품명|가로|세로|폭|너비|깊이|높이|수량|개수|링크|url|주소|메모|비고|위치|방|분류|처리|w|d|h|cm|크기|규격)$/i;
+  function isHeaderLine(s) {
+    if (/\d/.test(s)) return false;
+    const toks = s.split(/[\t,，;|]+|\s{2,}|\s+/).map((t) => t.trim().replace(/\s*\([^)]*\)\s*$/, '')).filter(Boolean);
+    return toks.length >= 2 && toks.filter((t) => HEADER_WORD.test(t)).length >= 2;
+  }
+  /* '안방:' '[거실]' 같은 위치 머리말 — 방 이름처럼 보일 때만 위치로 (예: '냉장고: LG 디오스'는 이름으로) */
+  const ROOM_WORD = /(방|거실|주방|부엌|베란다|발코니|현관|드레스룸|서재|욕실|화장실|다용도실|창고|복도|침실|팬트리|세탁실|알파룸)\s*\d*$/;
+  function planRoomNames() {
+    const plans = MV.plans || {};
+    const out = new Set();
+    [plans.old, plans.new].forEach((pl) => { ((pl && pl.rooms) || []).forEach((r) => { if (r && r.name) out.add(String(r.name).trim()); }); });
+    return out;
+  }
+  const UNIT_SCALE = { cm: 1, 센티: 1, 센치: 1, mm: 0.1, 미리: 0.1, m: 100, 미터: 100 };
+  const DIM_N = '(\\d+(?:\\.\\d+)?)';
+  const DIM_U = '\\s*(cm|mm|m(?![a-z])|센티|센치|미리|미터)?';
+  const DIM_X = '\\s*[x×X*✕]\\s*';
+  const DIM_RE = new RegExp(DIM_N + DIM_U + DIM_X + DIM_N + DIM_U + '(?:' + DIM_X + DIM_N + DIM_U + ')?', 'i');
   function parseLine(line) {
     let s = String(line || '').replace(/ /g, ' ').trim();
     if (!s) return null;
+    if (isHeaderLine(s)) return null;
     s = s.replace(/^\s*(?:[-•·*▪◦]|\d+[.)])\s+/, '');
     const out = { name: '', qty: 1, w: null, d: null, h: null, url: '', room: '', fate: 'move', note: '' };
     const um = s.match(/https?:\/\/[^\s,，]+/i);
     if (um) { out.url = um[0]; s = s.replace(um[0], ' '); }
-    const rm = s.match(/^\[([^\]]{1,12})\]\s*/) || s.match(/^([가-힣A-Za-z0-9]{1,8})\s*[:：]\s+/);
+    let rm = s.match(/^\[([^\]]{1,12})\]\s*/);
     if (rm) { out.room = rm[1].trim(); s = s.slice(rm[0].length); }
+    else {
+      const m2 = s.match(/^([가-힣A-Za-z0-9][가-힣A-Za-z0-9 ]{0,9}?)\s*[:：]\s*/);
+      if (m2) {
+        const cand = m2[1].trim();
+        if (ROOM_WORD.test(cand) || planRoomNames().has(cand)) { out.room = cand; s = s.slice(m2[0].length); }
+      }
+    }
     const fateWords = [['discard', /[(\[]?\s*(버림|버릴 것|버리기|폐기|처분)\s*[)\]]?/], ['buy', /[(\[]?\s*(새로 ?구매|구매 ?예정|살 것|새로 살 것)\s*[)\]]?/], ['sell', /[(\[]?\s*(판매|나눔)\s*[)\]]?/], ['undecided', /[(\[]?\s*(미정|고민)\s*[)\]]?/]];
     for (const [f, re] of fateWords) { const m = s.match(re); if (m) { out.fate = f; s = s.replace(m[0], ' '); break; } }
     const qm = s.match(/(\d+)\s*(개|대|EA|ea|세트|set|짝|pcs)(?![가-힣A-Za-z])/);
     let qtySet = false;
     if (qm) { out.qty = Math.max(0, parseInt(qm[1], 10)); s = s.replace(qm[0], ' '); qtySet = true; }
     let dims = null;
-    const dm = s.match(/(\d+(?:\.\d+)?)\s*(?:cm|mm)?\s*[x×X*✕]\s*(\d+(?:\.\d+)?)\s*(?:cm|mm)?\s*(?:[x×X*✕]\s*(\d+(?:\.\d+)?))?\s*(cm|mm|m|센티|미리)?/i);
-    if (dm) { dims = [dm[1], dm[2], dm[3]].map((x) => (x == null ? null : parseFloat(x))); if (/mm|미리/i.test(dm[0])) dims = dims.map((x) => (x == null ? null : x / 10)); s = s.replace(dm[0], ' '); }
+    let units = [];
+    const dm = s.match(DIM_RE);
+    if (dm) {
+      dims = [dm[1], dm[3], dm[5]].map((x) => (x == null ? null : parseFloat(x)));
+      units = [dm[2], dm[4], dm[6]].map((u) => (u ? u.toLowerCase() : null));
+      const before = s.slice(0, dm.index);
+      let after = s.slice(dm.index + dm[0].length);
+      // 크기 바로 뒤의 맨 숫자(예: '책장 80x30x180 3', '80*30*180, 2')는 수량
+      if (!qtySet) {
+        const tq = after.match(/^\s*[,，;]?\s*(\d{1,3})(?![\d.]|\s*(?:cm|mm|m(?![a-z])|형|인|단|kg|l\b|리터|평|층|%|년|월|일|시))/i);
+        if (tq) { out.qty = parseInt(tq[1], 10); qtySet = true; after = after.slice(tq[0].length); }
+      }
+      s = before + ' ' + after;
+      // 줄 맨 끝의 맨 숫자도 수량 (예: '80x30x180 책장 3')
+      if (!qtySet) {
+        const te = s.match(/(?:^|\s)(\d{1,3})\s*$/);
+        if (te) { out.qty = parseInt(te[1], 10); qtySet = true; s = s.slice(0, te.index); }
+      }
+    }
     if (!dims) {
       const lab = {};
       [['w', /(?:가로|폭|너비|W)\s*[:=]?\s*(\d+(?:\.\d+)?)/i], ['d', /(?:깊이|세로|D)\s*[:=]?\s*(\d+(?:\.\d+)?)/i], ['h', /(?:높이|H)\s*[:=]?\s*(\d+(?:\.\d+)?)/i]].forEach(([k, re]) => {
@@ -1583,24 +1673,31 @@
       }
     }
     if (dims) {
-      const vals = dims.filter((x) => x != null);
-      if (vals.some((x) => x > 400)) dims = dims.map((x) => (x == null ? null : x / 10));
-      else if (vals.length && vals.every((x) => x > 0 && x < 4) && vals.some((x) => x % 1 !== 0)) dims = dims.map((x) => (x == null ? null : x * 100));
+      // 단위: 숫자마다 붙은 단위 → 없으면 마지막에 적힌 단위(예: '80x30x180cm', '1.6x2.1x0.4m') → 없으면 크기로 짐작
+      const lastU = units.filter(Boolean).pop() || null;
+      const known = units.some(Boolean);
+      dims = dims.map((x, i) => (x == null ? null : x * (UNIT_SCALE[units[i] || lastU] || 1)));
+      if (!known) {
+        const vals = dims.filter((x) => x != null);
+        if (vals.some((x) => x > 400)) dims = dims.map((x) => (x == null ? null : x / 10));
+        else if (vals.length && vals.every((x) => x > 0 && x < 4) && vals.some((x) => x % 1 !== 0)) dims = dims.map((x) => (x == null ? null : x * 100));
+      }
       [out.w, out.d, out.h] = dims.map((x) => (x == null ? null : Math.round(x)));
     }
-    out.name = s.replace(/[()[\]{}]/g, ' ').replace(/\s*[,，;:]\s*/g, ' ').replace(/\s+/g, ' ').replace(/^[-–·\s]+|[-–·\s]+$/g, '').trim();
+    out.name = s.replace(/[()[\]{}]/g, ' ').replace(/\s*[,，;:：]\s*/g, ' ').replace(/\s+/g, ' ').replace(/^[-–·\s]+|[-–·\s]+$/g, '').trim();
     if (!out.name) out.name = '이름 없는 짐';
     const preset = matchPreset(out.name);
     out.cat = preset ? preset.cat : guessCat(out.name);
     out.tag = preset ? (preset.tag || '') : '';
     if (!out.tag) { const t = Object.keys(TAG_WORDS).find((k) => TAG_WORDS[k].test(out.name)); if (t) out.tag = t; }
     out.ac = out.cat === 'aircon' ? (/벽걸이/.test(out.name) ? 'wall' : /2\s?in\s?1|투인원/i.test(out.name) ? '2in1' : /창문/.test(out.name) ? 'window' : /스탠드/.test(out.name) ? 'stand' : (preset && preset.ac) || null) : null;
-    const missing = out.w == null || out.d == null || out.h == null;
-    out.assumed = missing;
+    // 비어 있던 규격(0이나 빈 값 포함)은 프리셋·기본값으로 채우고 ‘추정치’로 표시
+    out.missing = ['w', 'd', 'h'].filter((k) => !(out[k] > 0));
+    out.assumed = out.missing.length > 0;
     out.presetName = '';
-    if (missing) {
-      if (preset) { out.w = out.w == null ? preset.w : out.w; out.d = out.d == null ? preset.d : out.d; out.h = out.h == null ? preset.h : out.h; out.presetName = preset.name; }
-      else { out.w = out.w == null ? 50 : out.w; out.d = out.d == null ? 50 : out.d; out.h = out.h == null ? 50 : out.h; }
+    if (out.assumed) {
+      if (preset) { out.missing.forEach((k) => { out[k] = preset[k]; }); out.presetName = preset.name; }
+      else out.missing.forEach((k) => { out[k] = 50; });
     }
     return out;
   }
@@ -1626,14 +1723,31 @@
         catS.addEventListener('change', () => { r.cat = catS.value; });
         const fateS = el('select', { class: 'select es-pv-fate', 'aria-label': (i + 1) + '번 처리' }, MV.inv.FATES.map((f) => el('option', { value: f.id, selected: f.id === r.fate }, f.label)));
         fateS.addEventListener('change', () => { r.fate = fateS.value; });
+        /* 칸을 비우거나 0을 넣으면(규격) 앞의 값을 그대로 두고, 칸을 떠날 때 그 값으로 되돌림.
+           추정치 표시는 비어 있던 규격을 모두 직접 넣었을 때만 사라짐 */
         const numI = (k, lab) => {
-          const x = el('input', { class: 'input num', type: 'number', min: '0', step: '1', inputmode: 'numeric', value: String(r[k]), 'aria-label': (i + 1) + '번 ' + lab });
-          x.addEventListener('input', () => { const v = Math.max(0, Math.round(num(x.value, 0))); r[k] = v; if (k !== 'qty') { r.assumed = false; chip.hidden = true; } });
+          const x = el('input', { class: 'input num', type: 'number', min: k === 'qty' ? '0' : '1', step: '1', inputmode: 'numeric', value: String(r[k]), 'aria-label': (i + 1) + '번 ' + lab });
+          x.addEventListener('input', () => {
+            const raw = x.value.trim();
+            if (raw === '') return;
+            const v = Math.round(num(raw, NaN));
+            if (!isFinite(v) || v < 0) return;
+            if (k === 'qty') { r.qty = v; return; }
+            if (v > 0) { r[k] = v; r.missing = (r.missing || []).filter((m) => m !== k); r.assumed = r.missing.length > 0; syncChip(); }
+          });
+          x.addEventListener('change', () => { const v = num(x.value, NaN); if (x.value.trim() === '' || !isFinite(v) || v < 0 || (k !== 'qty' && v <= 0)) x.value = String(r[k]); });
           return el('label', { class: 'es-pv-num' }, el('span', { class: 'es-pv-lab' }, lab), x);
         };
         const urlI = el('input', { class: 'input', type: 'url', value: r.url, placeholder: '제품 링크 (선택)', 'aria-label': (i + 1) + '번 링크' });
         urlI.addEventListener('input', () => { r.url = urlI.value.trim(); });
-        const chip = el('span', { class: 'chip warn', hidden: !r.assumed }, r.presetName ? '규격 추정 — ‘' + r.presetName + '’ 기준' : '규격 추정 — 기본값 50×50×50');
+        const chip = el('span', { class: 'chip warn', hidden: !r.assumed });
+        const DIM_LAB = { w: '가로', d: '깊이', h: '높이' };
+        const syncChip = () => {
+          chip.hidden = !r.assumed;
+          const miss = (r.missing || []).map((m) => DIM_LAB[m]).join('·');
+          chip.textContent = (r.presetName ? '규격 추정 — ‘' + r.presetName + '’ 기준' : '규격 추정 — 기본값 50cm') + (miss && (r.missing || []).length < 3 ? ' (' + miss + ')' : '');
+        };
+        syncChip();
         pv.appendChild(el('div', { class: 'es-pv-row' },
           nameI, catS, fateS, numI('qty', '수량'), numI('w', '가로'), numI('d', '깊이'), numI('h', '높이'),
           el('button', { type: 'button', class: 'btn btn-sm btn-ghost btn-icon es-pv-del', 'aria-label': (i + 1) + '번 빼기', onclick: () => { rows.splice(i, 1); draw(); } }, '✕'),
@@ -1647,7 +1761,7 @@
       draw();
     });
     const body = el('div', { class: 'stack' },
-      el('p', { class: 'small es-muted mb-0' }, '한 줄 = 짐 하나. 이름, 크기(가로×깊이×높이, cm), 수량(‘2개’ 또는 네 번째 숫자), 링크를 알아서 읽어요. 크기가 없으면 비슷한 규격을 넣고 ‘추정치’로 표시해요. 줄 앞에 ‘안방:’처럼 쓰면 지금 위치로 넣어요.'),
+      el('p', { class: 'small es-muted mb-0' }, '한 줄 = 짐 하나. 이름, 크기(가로×깊이×높이 — cm가 기본, 1.6m·1600mm도 돼요), 수량(‘2개’ 또는 크기 뒤 숫자), 링크를 알아서 읽어요. 크기가 없으면 비슷한 규격을 넣고 ‘추정치’로 표시해요. 줄 앞에 ‘안방:’처럼 쓰면 지금 위치로 넣어요. 엑셀 머리줄(이름·가로…)은 건너뛰어요.'),
       ta,
       el('div', { class: 'row' }, readBtn, status),
       pv);
@@ -1677,6 +1791,19 @@
     const n = (p && p.name) || fallback;
     return String(n).replace(/^[^·]*·\s*/, '').replace(/\s*\([^)]*\)\s*$/, '').trim() || fallback;
   }
+  /* 업체에 보낼 메모: 앱이 가족에게 하는 안내(‘~해 주세요’, LG 표시 켜고 끄기, 요금 비교, 추정·실측 메모)는 빼고
+     짐 자체에 대한 설명만 남김 (문장 단위, 최대 100자에서 문장 경계로 자름) */
+  const FAMILY_ONLY = /(주세요|하세요|보세요|세요\.?$|집주인|LG 서비스로 옮김|LG 제품일 때만|LG 제품이면|이 표시|LG 요금|추정|실측|만원|배치해 보고|목표|지워|바꿔)/;
+  function vendorNote(it) {
+    const t = String((it && it.note) || '').trim();
+    if (!t) return '';
+    const sents = t.split(/(?<=[.!?。])\s+|\n+/).map((x) => x.trim()).filter(Boolean);
+    const keep = sents.filter((x) => !FAMILY_ONLY.test(x));
+    let out = '';
+    for (const x of keep) { const nx = out ? out + ' ' + x : x; if (nx.length > 100) break; out = nx; }
+    if (!out && keep.length) out = clip(keep[0], 100);
+    return out;
+  }
   function exportData() {
     const st = stGet();
     const inv = (st.inventory || []).filter((x) => x && typeof x === 'object');
@@ -1688,7 +1815,8 @@
       if (isAircon(it) && it.ac) parts.push('[' + (AC_LABEL[it.ac] || it.ac) + ']');
       if (it.lg) parts.push('※ LG 서비스로 별도 이동 — 견적 제외');
       if (it.roomNew && it.roomNew !== it.room) parts.push('→ 새 집 ' + it.roomNew);
-      if (it.note) parts.push('· ' + clip(it.note, 80));
+      const vn = vendorNote(it);
+      if (vn) parts.push('· ' + vn);
       return parts.join(' ');
     };
     const out = [];
@@ -1696,7 +1824,7 @@
     out.push('출발: ' + placeName(plans.old, '지금 집') + ' ' + inp.fromFloor + '층 (' + (METHODS[inp.fromMethod] || '') + ') → 도착: ' + placeName(plans.new, '새 집') + ' ' + inp.toFloor + '층 (' + (METHODS[inp.toMethod] || '') + ')');
     out.push('이사 형태: ' + (PACK_TYPES.find((p) => p.id === inp.packType) || PACK_TYPES[0]).label + ' · 예상 박스 약 ' + est.volumeParts.boxes + '개' + (inp.boxAuto && inp.builtinBoxes ? ' (붙박이장 옷 포함)' : ''));
     if (est.counts.acN) out.push('에어컨 이전 요청: ' + AC_T.filter((t) => est.counts.acUnits[t]).map((t) => AC_LABEL[t] + ' ' + est.counts.acUnits[t] + '대').join(', '));
-    const lgList = inv.filter((it) => it.lg && it.fate === 'move');
+    const lgList = inv.filter((it) => it.lg && isGoing(it, inp) && isApplianceLike(it));
     if (lgList.length) out.push('LG 서비스로 따로 옮길 가전 (견적 제외): ' + lgList.map((it) => nm(it)).join(', '));
     out.push('');
     const moving = inv.filter((it) => it.fate === 'move' && qtyOf(it) > 0);
@@ -1724,7 +1852,7 @@
     out.push('');
     out.push('요청: 부가세 포함 총액(결제수단 무관)으로, ‘가전 포함’과 ‘LG 가전 제외’ 금액을 함께 문자나 PDF로 부탁드립니다.');
     const csvRows = [['처리', '분류', '이름', '수량', '가로cm', '깊이cm', '높이cm', '부피㎥', '지금 위치', '새 집 위치', 'LG 서비스', '규격 추정', '링크', '메모']];
-    inv.forEach((it) => csvRows.push([MV.inv.fate(it.fate).label, MV.inv.cat(it.cat).label, nm(it), qtyOf(it), num(it.w, 0), num(it.d, 0), num(it.h, 0), r2(MV.inv.volume(it)), it.room || '', it.roomNew || '', it.lg ? 'O' : '', it.assumed ? 'O' : '', it.url || '', it.note || '']));
+    inv.forEach((it) => csvRows.push([MV.inv.fate(it.fate).label, MV.inv.cat(it.cat).label, nm(it), qtyOf(it), num(it.w, 0), num(it.d, 0), num(it.h, 0), r2(MV.inv.volume(it)), it.room || '', it.roomNew || '', it.lg ? 'O' : '', it.assumed ? 'O' : '', it.url || '', vendorNote(it)]));
     const csv = csvRows.map((r) => r.map((v) => { const s = String(v == null ? '' : v); return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }).join(',')).join('\r\n');
     return { text: out.join('\n'), csv };
   }
@@ -1732,7 +1860,7 @@
     const data = exportData();
     const ta = el('textarea', { class: 'textarea es-export-ta', readonly: true, 'aria-label': '업체에 보낼 짐 목록', spellcheck: 'false' }, data.text);
     const body = el('div', { class: 'stack' },
-      el('p', { class: 'small es-muted mb-0' }, '방문견적 업체 3곳에 똑같이 보내세요. 버릴 짐과 LG가 옮길 가전은 따로 표시돼요.'),
+      el('p', { class: 'small es-muted mb-0' }, '방문견적 업체 3곳에 똑같이 보내세요. 버릴 짐과 LG가 옮길 가전은 따로 표시돼요. 메모는 앱 안내 문구(‘~해 주세요’ 등)를 빼고 짐 설명만 넣었어요.'),
       el('div', { class: 'row' },
         el('button', { type: 'button', class: 'btn btn-primary', onclick: () => copyText(ta.value, ta) }, '📋 복사'),
         el('button', { type: 'button', class: 'btn', onclick: () => { MV.ui.download('move-inventory-' + D.today() + '.csv', '﻿' + data.csv, 'text/csv;charset=utf-8'); toast('CSV 파일을 저장했어요.'); } }, '⬇ CSV 저장')),
@@ -1979,7 +2107,7 @@
       const lt = est.lifts.to;
       toTip.textContent = inp.toMethod === 'ladder' && inp.toFloor >= 13
         ? '⚠ ' + inp.toFloor + '층은 일반 사다리차가 닿는 높이지만, 새 집 동의 설치 위치·지하주차장 상판·수목·전선 간섭은 아직 미확인이에요. 사전방문 때 관리사무소에 확인하세요.'
-        : (inp.toMethod === 'elevator' ? '엘리베이터만 쓰면 작업이 2~3시간 늘어 추가 인력비 약 ' + won(lt.typical) + '이 붙어요 (추정). 냉장고·소파가 들어가는지 엘리베이터 크기를 재 보세요.' : (lt.typical ? lt.title + ': ' + won(lt.typical) : ''));
+        : (inp.toMethod === 'elevator' ? '엘리베이터만 쓰면 작업이 2~3시간 늘어 추가 인력비 약 ' + josa(won(lt.typical), '이/가') + ' 붙어요 (추정). 냉장고·소파가 들어가는지 엘리베이터 크기를 재 보세요.' : (lt.typical ? lt.title + ': ' + won(lt.typical) : ''));
     });
     card.appendChild(el('div', { class: 'es-fgrid-2 mt-12' },
       moneyField('elevFeeFrom', '엘리베이터 사용료 · 출발 단지', '리서치 추정 5만원 (무료~10만원) — 관리사무소에 확인'),
@@ -2107,7 +2235,7 @@
         el('li', el('b', '본비 ' + won(base)), ' = ' + tonsLabel(est.tons) + ' × ' + won(c.base_per_ton) + ' + ' + est.crew + '명 × ' + won(c.crew_day_rate) + (est.packType !== 'full' ? ' (' + (PACK_TYPES.find((p) => p.id === est.packType) || {}).label + ' 비율 적용)' : '') + '. 차량·연료·포장재와 인건비예요.'),
         el('li', el('b', '날짜 할증 ' + (est.surchargePct ? '+' + r1(est.surchargePct) + '%' : '없음')), ' — ' + est.dateLabel + '. 할증은 본비에만 붙어요 (손없는날 ' + c.sohn_pct + '%, 주말 ' + c.weekend_pct + '%, 월말 ' + c.month_end_pct + '%, 월초 ' + c.month_start_pct + '%; 겹치면 가장 큰 값 + ' + c.multi_add_pct + '%p).'),
         el('li', el('b', '부대비 ' + won(sum(extras, (l) => l.typical))), extras.length ? ' = ' + extras.map((l) => l.label.replace(/\s*\(.*\)$/, '') + ' ' + won(l.typical)).join(', ') + '.' : ' — 없음.'),
-        el('li', el('b', '기준가 ' + won(est.typical)), ' — 하한은 × ' + c.range_low + ' (' + won(est.low) + '), 상한은 × ' + c.range_high + ' (' + won(est.high) + '). 업체마다 인건비·마진·당일 사정이 달라서 범위로 봐요.' + (est.calibFactor !== 1 ? ' 방문견적 중앙값에 맞춘 보정 ×' + est.calibFactor.toFixed(2) + '이 들어 있어요.' : ''))),
+        el('li', el('b', '기준가 ' + won(est.typical)), ' — 하한은 × ' + c.range_low + ' (' + won(est.low) + '), 상한은 × ' + c.range_high + ' (' + won(est.high) + '). 업체마다 인건비·마진·당일 사정이 달라서 범위로 봐요.' + (est.calibFactor !== 1 ? ' 방문견적 중앙값에 맞춘 보정 ' + josa('×' + est.calibFactor.toFixed(2), '이/가') + ' 들어 있어요.' : ''))),
       el('h3', { class: 'es-h3' }, '💡 이렇게 하면 달라져요'),
       el('ul', { class: 'es-tips' }, tips.map((t) => el('li', t))),
       est.notes.length ? el('div', { class: 'callout mt-12' }, el('ul', { class: 'es-tips', style: { marginTop: 0 } }, est.notes.map((n) => el('li', n)))) : null);
@@ -2495,7 +2623,8 @@
   }
 
   /* ======================= 4) LG vs 이삿짐센터 ======================= */
-  function lgCandidates() { return invItems((it) => it.fate === 'move' && qtyOf(it) > 0 && isApplianceLike(it)); }
+  /* 견적 계산(isGoing)과 같은 규칙: ‘가져감’ + (‘미정도 가져가는 것으로 계산’이 켜져 있으면) ‘미정’ — lgCost 와 목록이 늘 같은 가전 */
+  function lgCandidates() { const inp = inpNow(); return invItems((it) => isGoing(it, inp) && isApplianceLike(it)); }
   function lgScenarios() {
     const st = stGet();
     const inv = (st.inventory || []).filter((x) => x && typeof x === 'object');
@@ -2546,7 +2675,7 @@
     if (!items.length) {
       return el('section', { class: 'card' }, el('div', { class: 'empty' },
         el('span', { class: 'big', 'aria-hidden': 'true' }, '🧊'),
-        el('p', '‘가져감’으로 표시된 가전·에어컨이 짐 목록에 없어요.'),
+        el('p', '‘가져감’' + (inpNow().includeUndecided ? '·‘미정’' : '') + '으로 표시된 가전·에어컨이 짐 목록에 없어요.'),
         el('button', { type: 'button', class: 'btn btn-primary', onclick: () => goTab('inventory') }, '짐 목록에서 가전 추가하기 →')));
     }
     const s = lgScenarios();
@@ -2563,7 +2692,7 @@
         isAllMover || isAllLg ? scenCard('🔀 지금 선택 (혼합)', cur, false, '아래에서 품목마다 고르면 바뀌어요') : scenCard('🔀 지금 선택 (혼합)', cur, true, 'LG ' + nLg + '개 · 이삿짐센터 ' + (items.length - nLg) + '개'),
         scenCard('🔌 LG 가능한 가전 전부 LG', s.allLg, isAllLg && !isAllMover, '이삿짐센터는 가구·박스만')),
       el('p', { class: 'small mt-12 mb-0' }, nLg
-        ? '지금 선택하면 이삿짐센터 비용이 약 ' + won(Math.max(0, saveMover)) + ' 줄고 LG에 약 ' + won(cur.lgCost ? cur.lgCost.typical : 0) + '이 들어, 전부 이삿짐센터보다 합계가 ' + (diff >= 0 ? '약 ' + won(diff) + ' 더 들어요.' : '약 ' + won(-diff) + ' 덜 들어요.')
+        ? '지금 선택하면 이삿짐센터 비용이 약 ' + won(Math.max(0, saveMover)) + ' 줄고 LG에 약 ' + josa(won(cur.lgCost ? cur.lgCost.typical : 0), '이/가') + ' 들어, 전부 이삿짐센터보다 합계가 ' + (diff >= 0 ? '약 ' + won(diff) + ' 더 들어요.' : '약 ' + won(-diff) + ' 덜 들어요.')
         : '지금은 가전도 모두 이삿짐센터가 옮기는 것으로 계산 중이에요. 아래에서 품목마다 ‘LG 서비스’를 고르면 합계가 바뀌어요.'));
   }
   function lgItemsCard() {
@@ -2597,13 +2726,14 @@
         el('div',
           el('div', { class: 'es-lgi-name' }, nm(it), qtyOf(it) > 1 ? el('span', { class: 'chip' }, qtyOf(it) + '대') : null,
             brand === 'lg' ? el('span', { class: 'chip good' }, 'LG 제품') : brand === 'other' ? el('span', { class: 'chip bad', title: 'LG 이전설치는 LG 제품만 가능' }, '다른 브랜드 — LG 불가') : el('span', { class: 'chip warn', title: '이름에 브랜드(예: LG 디오스)를 적거나 제품 링크를 넣어 두세요' }, '브랜드 확인 필요'),
-            it.assumed ? el('span', { class: 'chip warn' }, '규격 추정') : null),
+            it.assumed ? el('span', { class: 'chip warn' }, '규격 추정') : null,
+            it.fate !== 'move' ? el('span', { class: 'chip', title: '처리가 ‘미정’이지만 ‘미정 짐도 가져가는 것으로 계산’이 켜져 있어 견적에 넣었어요' }, '처리 미정') : null),
           el('div', { class: 'es-lgi-meta' }, LG_KIND[kind].label + ' · ' + dimTxt(it) + 'cm · ' + roomTxt(it))),
         el('div', { class: 'es-seg', role: 'group', 'aria-label': nm(it) + ' 누가 옮길지' }, segBtn(true, '🔌 LG 서비스'), segBtn(false, '🚚 이삿짐센터')),
         el('div', { class: 'es-lgi-costs' },
           el('div', { class: 'es-lgi-cost' + (it.lg ? ' is-on' : '') }, el('small', 'LG 서비스'),
             el('b', isWin ? '0원' : '약 ' + won(lgc.typical)),
-            el('small', isWin ? '직접 떼고 달기' : won(lgc.low) + ' ~ ' + won(lgc.high) + (lgc.pipe ? ' · 배관 ' + r1(inp.acPipeM) + 'm 포함' : '') + ' · 운송비 ' + won(c.lg_transport) + '는 1건당 합계에 한 번')),
+            el('small', isWin ? '직접 떼고 달기' : won(lgc.low) + ' ~ ' + won(lgc.high) + (lgc.pipe ? ' · 배관 ' + r1(inp.acPipeM) + 'm 포함' : '') + ' · 운송비 ' + josa(won(c.lg_transport), '은/는') + ' 1건당 합계에 한 번')),
           el('div', { class: 'es-lgi-cost' + (!it.lg ? ' is-on' : '') }, el('small', '이삿짐센터'),
             el('b', moverDelta ? '+' + won(moverDelta) : '추가 0원'),
             el('small', parts.join(' · ')))),
@@ -2638,14 +2768,14 @@
       const save = Math.max(0, allMover.typical - est.typical);
       const acPart = Math.max(0, allMover.parts.aircon - est.parts.aircon);
       savingTxt = '이 짐 목록이면 지금 선택으로 이삿짐센터 비용이 약 ' + won(save) + ' 줄어요' + (acPart > 0 ? ' (그중 에어컨 이전설치 몫 약 ' + won(acPart) + ')' : '') +
-        (allMover.tons !== est.tons ? ', 차량도 ' + tonsLabel(allMover.tons) + ' → ' + tonsLabel(est.tons) + '로 내려가요. ' : '. ') +
+        (allMover.tons !== est.tons ? ', 차량도 ' + tonsLabel(allMover.tons) + ' → ' + josa(tonsLabel(est.tons), '으로/로') + ' ' + (est.tons < allMover.tons ? '내려가요' : '바뀌어요') + '. ' : '. ') +
         '리서치는 에어컨을 뺀 가전만 따지면 0~20만원 정도라고 봤어요. ';
     }
     let verdict;
     if (!nLg) verdict = el('p', '지금은 모두 이삿짐센터로 계산 중이에요. 냉장고·건조기·에어컨처럼 파손이 걱정되는 가전부터 LG 견적(1544-7777)을 받아 보세요.');
-    else if (otherBrand.length) verdict = el('p', { style: { color: 'var(--bad)' } }, el('b', '⚠ ' + otherBrand.map(nm).join(', ')), '은(는) 다른 브랜드로 보여요. LG 이전설치는 LG 제품만 돼요 — 이삿짐센터로 바꾸세요.');
+    else if (otherBrand.length) verdict = el('p', { style: { color: 'var(--bad)' } }, el('b', '⚠ ' + otherBrand.map(nm).join(', ')), josa(nm(otherBrand[otherBrand.length - 1]), '은/는').slice(nm(otherBrand[otherBrand.length - 1]).length) + ' 다른 브랜드로 보여요. LG 이전설치는 LG 제품만 돼요 — 이삿짐센터로 바꾸세요.');
     else if (condsOk) verdict = el('p', el('b', '✅ LG 이용을 권해요.'), ' 조건을 모두 채웠어요. 이삿짐센터 계약서에 ‘LG가 옮기는 가전(목록)은 제외’ 특약을 넣으세요.');
-    else if (!under) verdict = el('p', el('b', 'LG 합계가 약 ' + won(total) + '로 30만원을 넘어요.'), ' 이삿짐센터 일괄도 같이 비교해 보세요 — 에어컨만 LG처럼 섞는 것도 방법이에요.');
+    else if (!under) verdict = el('p', el('b', 'LG 합계가 약 ' + josa(won(total), '으로/로') + ' 30만원을 넘어요.'), ' 이삿짐센터 일괄도 같이 비교해 보세요 — 에어컨만 LG처럼 섞는 것도 방법이에요.');
     else verdict = el('p', el('b', '조건 확인 중이에요.'), ' 아래 항목을 모두 확인하면 LG를 쓰고, 하나라도 안 되면 이삿짐센터에 일괄로 맡기세요.');
     return el('section', { class: 'card es-reco tint-kid', 'aria-label': '추천' },
       sectionHead('🧭', '어떻게 할까요?'),
@@ -2705,20 +2835,41 @@
     document.addEventListener('click', onClickCap, true);
     document.addEventListener('change', onChangeCap, true);
     root.addEventListener('focusout', onFocusOut);
-    const onMQ = () => { if (R === myR && tabId === 'inventory') refreshNamed(['invlist']); };
-    if (wideMQ.addEventListener) wideMQ.addEventListener('change', onMQ);
+    let ro = null;
+    if (tabId === 'inventory' && window.ResizeObserver) {
+      ro = new ResizeObserver(() => { if (R === myR && R.tableMode !== undefined && tableMode() !== R.tableMode) refreshNamed(['invlist']); });
+      ro.observe(root);
+    }
     ctx.onCleanup(() => {
+      /* 다른 탭에서 저장하면 core 가 {reset:true} 로 화면 전체를 다시 그려요(app.js). 그때 입력 중이던 칸과 글자를 기억해 두었다가
+         새 화면에서 같은 칸(data-fk)에 되살려, 포커스와 입력이 사라지지 않게 함 */
+      try {
+        const a = document.activeElement;
+        if (R === myR && a && root.contains(a) && isTyping(a) && a.dataset && a.dataset.fk) {
+          mem.restore = { fk: a.dataset.fk, value: a.value, s: a.selectionStart, e: a.selectionEnd, tab: tabId, at: Date.now() };
+        }
+      } catch (e) { /* 무시 */ }
       document.removeEventListener('pointerdown', onPtrDown, true);
       document.removeEventListener('pointerup', onPtrUp, true);
       document.removeEventListener('pointercancel', onPtrUp, true);
       document.removeEventListener('click', onClickCap, true);
       document.removeEventListener('change', onChangeCap, true);
       root.removeEventListener('focusout', onFocusOut);
-      if (wideMQ.removeEventListener) wideMQ.removeEventListener('change', onMQ);
+      if (ro) ro.disconnect();
       clearTimeout(ptr.timer); clearTimeout(ptr.retry); ptr.retry = null;
       ptr.down = false; ptr.sel = null;
       if (R === myR) R = null;
     });
+    // 다른 탭 동기화로 다시 그려졌으면 입력 중이던 칸·글자를 되살림
+    const rs = mem.restore;
+    mem.restore = null;
+    if (rs && rs.tab === tabId && Date.now() - rs.at < 2000) {
+      const n = root.querySelector('[data-fk="' + (window.CSS && CSS.escape ? CSS.escape(rs.fk) : rs.fk) + '"]');
+      if (n && (n.tagName === 'INPUT' || n.tagName === 'TEXTAREA')) {
+        if (n.value !== rs.value) { n.value = rs.value; n.dispatchEvent(new Event('input', { bubbles: true })); }
+        try { n.focus({ preventScroll: true }); if (rs.s != null) n.setSelectionRange(rs.s, rs.e); } catch (e) { /* 무시 */ }
+      }
+    }
     // 탭 버튼을 보이게, 탭을 바꿨으면 탭 위치로
     const act = tabs.querySelector('button.active');
     if (act) tabs.scrollLeft = Math.max(0, act.offsetLeft - 12);

@@ -396,7 +396,7 @@ table.tbl tfoot td { font-weight: 800; border-top: 2px solid var(--line-2); }
   display: flex; gap: 10px; align-items: center;
   animation: mv-up .16s ease-out;
 }
-.toast button { background: transparent; border: 0; color: var(--brand-2); font: inherit; font-weight: 800; cursor: pointer; padding: 0; }
+.toast button { background: transparent; border: 0; color: var(--brand-2); font: inherit; font-weight: 800; cursor: pointer; padding: 0; white-space: nowrap; flex: none; }
 @keyframes mv-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes mv-up { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 

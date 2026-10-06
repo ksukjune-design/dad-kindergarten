@@ -12,6 +12,8 @@
    탭 이동은 history.pushState 로 처리해 위쪽 요약은 그대로 둡니다.
 
    상태   MV.store.ensure('finance', defaults) — 화면의 모든 숫자는 고칠 수 있고 '기본값으로 되돌리기' 가능
+          finance.links { 'prot-키' | 'prep-키' | 'doc-키': 체크리스트 항목 id } — 한 줄은 늘 항목 하나에만 연결
+          금액 칸은 저장 전에 검사(음수·'1억abc' 거부), 1회 한도 초과 이체는 단계 카드에 빨간 경고
    계산   MV.calc.financeSummary(state) → { inflow, outflow, leftover, expensesTotal(아직 낼 이사비),
           expensesAll, expensesPaid, refunds, net, warnings:[{text, level}] } — 순수 함수 (대시보드가 호출)
    근거   리서치 검증본 finance_verified.json (2026-10-06). 규칙·요율 옆에 신뢰도와 짧은 근거,
@@ -1059,16 +1061,14 @@ div.fn-alert { cursor: default; }
 @container (min-width: 940px) {
   .fn-bl-head { display: grid; }
   .fn-bl-head, .fn-bl { grid-template-columns: minmax(0, 1.45fr) minmax(190px, 1fr) 150px 64px minmax(0, .9fr) 40px; grid-template-areas: "label amount date paid memo del"; }
-  .fn-bl-paid { padding-top: 6px; }
 }
 @container (min-width: 700px) {
   .fn-rf { grid-template-columns: minmax(0, 1.4fr) minmax(170px, 1fr) auto minmax(0, 1fr) 40px; grid-template-areas: "label amount paid memo del"; }
-  .fn-rf .fn-bl-paid { padding-top: 6px; }
 }
 .fn-bl-label { grid-area: label; min-width: 0; }
 .fn-bl-amount { grid-area: amount; min-width: 0; }
 .fn-bl-date { grid-area: date; min-width: 0; }
-.fn-bl-paid { grid-area: paid; align-self: center; }
+.fn-bl-paid { grid-area: paid; align-self: start; padding-top: 1px; }
 .fn-bl-memo { grid-area: memo; min-width: 0; }
 .fn-bl-del { grid-area: del; }
 .fn-bl .input, .fn-rf .input { min-height: 38px; }
@@ -1089,6 +1089,7 @@ div.fn-alert { cursor: default; }
 .fn-why .fn-basis { margin-top: 2px; }
 .fn-range .fn-why[open] { flex-basis: 100%; }
 .fn-bad-hint { color: var(--bad) !important; font-weight: 700; }
+.fn-page .input[aria-invalid="true"] { border-color: var(--bad); box-shadow: 0 0 0 2px color-mix(in srgb, var(--bad) 22%, transparent); }
 .fn-bad-hint:empty { display: none; }
 .fn-memo-total { max-width: 240px; margin: 0; }
 .fn-memo-row { align-items: flex-end; }
@@ -1106,7 +1107,8 @@ div.fn-alert { cursor: default; }
 /* --- 보증금 지키기 --- */
 .fn-prot { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
 .fn-prot:last-child { border-bottom: 0; }
-.fn-prot > input[type=checkbox] { width: 22px; height: 22px; margin: 3px 0 0; accent-color: var(--good); }
+.fn-prot-cb { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; margin: -5px -7px 0; cursor: pointer; }
+.fn-prot-cb > input[type=checkbox] { width: 22px; height: 22px; margin: 0; accent-color: var(--good); cursor: pointer; }
 .fn-prot-title { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-weight: 750; }
 .fn-prot-title label { cursor: pointer; }
 .fn-prot.is-done .fn-prot-title label { color: var(--ink-3); text-decoration: line-through; }
@@ -2376,7 +2378,7 @@ div.fn-alert { cursor: default; }
         : el('button', { class: 'btn btn-sm fn-mini-btn', type: 'button', 'data-fk': 'prot-add-' + r.key, onclick: () => addToChecklist(P, r) }, '+ 체크리스트에 추가')));
     body.appendChild(basis(r.conf, r.key === 'report' ? '부동산거래신고법 제6조의2·제6조의5, 과태료는 2025-06-01 이후 기준(구간표 원문 미확인).' : r.key === 'hug' ? 'HUG 요건(2023-05 개편): 수도권 보증금 7억 이하, (보증금+선순위채권) ≤ 주택가격의 90%.' : r.key === 'tax' ? '국세징수법 제109조(2023-04-01), 주임법 제3조의7(2023-04-18).' : '리서치 검증본.', r.links,
       r.key === 'hug' ? 'HUG에 확인' : r.key === 'tax' || r.key === 'report' ? '주민센터·세무서에 확인' : '주민센터·관리사무소에 확인'));
-    box.append(cb,
+    box.append(el('label', { class: 'fn-prot-cb', title: r.title }, cb),
       el('div', { class: 'fn-prot-title' }, el('label', { for: cbId }, r.title), MV.ui.dueChip(due, r.done), r.urgent && !r.done ? chip('긴급', 'bad') : null),
       body);
     return box;

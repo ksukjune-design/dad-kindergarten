@@ -178,35 +178,46 @@
     }
     return null;
   }
+  /* 같은 종류 토큰이 여러 번이면 마지막 것을 쓰고, 미리보기에서 알려 줌 (r.multi) */
   function parseQuick(raw) {
-    const r = { title: '', due: null, priority: null, owner: null, bad: [] };
+    const r = { title: '', due: null, priority: null, owner: null, bad: [], multi: [] };
+    const seen = { due: 0, priority: 0, owner: 0 };
     const keep = [];
     String(raw || '').split(/\s+/).filter(Boolean).forEach((w) => {
       const head = w.charAt(0); const rest = w.slice(1);
       if (head === '~' || head === '～') {
         if (!rest) { keep.push(w); return; }
         const d = parseDue(rest);
-        if (d) { r.due = d; return; }
+        if (d) { r.due = d; seen.due++; return; }
         r.bad.push(w); keep.push(w); return;
       }
       if (head === '!' || head === '！') {
-        const p = PRI_WORDS[rest];
-        if (p) { r.priority = p; return; }
+        const p = PRI_WORDS[rest.replace(/^[!！]+/, '')];   // '!!중요', '!!!' 도 중요로
+        if (p) { r.priority = p; seen.priority++; return; }
         keep.push(w); return;
       }
-      if (head === '@' && OWNER_WORDS[rest]) { r.owner = OWNER_WORDS[rest]; return; }
+      if ((head === '@' || head === '＠') && OWNER_WORDS[rest]) { r.owner = OWNER_WORDS[rest]; seen.owner++; return; }
       keep.push(w);
     });
+    Object.keys(seen).forEach((k) => { if (seen[k] > 1) r.multi.push(k); });
     r.title = keep.join(' ').trim();
     return r;
   }
 
   /* ---------------- 검색 ---------------- */
   const termsOf = (q) => String(q || '').toLowerCase().split(/\s+/).filter(Boolean);
+  /* 백업에서 온 이상한 값(null 메모·링크, 글자가 아닌 제목)도 견딤 */
+  const arr = (v) => (Array.isArray(v) ? v : []);
+  const notesOf = (it) => arr(it && it.notes).filter((n) => n && typeof n === 'object');
+  const linksOf = (it) => arr(it && it.links).filter((l) => l && typeof l === 'object' && l.url);
+  const str = (v) => (v == null ? '' : typeof v === 'string' ? v : String(v));
   function haystack(it) {
-    return [it.title, it.detail].concat((it.notes || []).map((n) => n.text), (it.links || []).map((l) => (l.label || '') + ' ' + (l.url || '')))
+    return [str(it.title), str(it.detail)].concat(notesOf(it).map((n) => str(n.text)), linksOf(it).map((l) => str(l.label) + ' ' + str(l.url)))
       .filter(Boolean).join('\n').toLowerCase();
   }
+  /* 링크로 열어도 되는 주소만 (javascript: 등은 막음) */
+  const SAFE_URL = /^(https?:\/\/|tel:|mailto:)/i;
+  const safeUrl = (u) => { u = str(u).trim(); return SAFE_URL.test(u) ? u : null; };
   const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   function highlight(text, terms) {
     text = String(text == null ? '' : text);
@@ -227,7 +238,7 @@
     if (!terms.length) return null;
     const title = String(it.title || '').toLowerCase();
     if (terms.every((t) => title.includes(t))) return null;
-    const sources = [['📝', it.detail]].concat((it.notes || []).map((n) => ['💬', n.text]));
+    const sources = [['📝', str(it.detail)]].concat(notesOf(it).map((n) => ['💬', str(n.text)]));
     for (const [icon, txt] of sources) {
       const s = String(txt || '');
       const low = s.toLowerCase();
@@ -262,6 +273,26 @@
     const lim = max && h > max;
     ta.style.height = (lim ? max : h) + 'px';
     ta.style.overflowY = lim ? 'auto' : 'hidden';
+  }
+  /* 폰(창 전체가 스크롤): node 를 위쪽 고정 머리와 아래쪽 고정 입력창(+하단 메뉴) 사이에 보이게.
+     scrollIntoView({block:'nearest'}) 는 sticky 입력창을 모르므로 새 줄·새 메모가 그 뒤에 숨었음. */
+  function revealOnPhone(node, footEl, headEl) {
+    if (!node || !node.isConnected || !node.getClientRects().length) return;
+    const vh = window.innerHeight || document.documentElement.clientHeight;
+    let bottom = vh;
+    if (footEl && footEl.isConnected && footEl.getClientRects().length) {
+      const cs = getComputedStyle(footEl);
+      const off = cs.position === 'sticky' || cs.position === 'fixed' ? (parseFloat(cs.bottom) || 0) : 0;
+      bottom = Math.min(vh - off - footEl.offsetHeight, footEl.getBoundingClientRect().top);
+    }
+    let top = 0;
+    if (headEl && headEl.isConnected && headEl.getClientRects().length) top = Math.max(0, headEl.getBoundingClientRect().bottom);
+    top += 8; bottom -= 8;
+    const r = node.getBoundingClientRect();
+    let dy = 0;
+    if (r.height > bottom - top || r.top < top) dy = r.top - top;
+    else if (r.bottom > bottom) dy = r.bottom - bottom;
+    if (Math.abs(dy) >= 1) window.scrollBy(0, Math.round(dy));
   }
   function focusKeyIn(box) {
     const a = document.activeElement;
@@ -464,7 +495,7 @@
       renderSidebar();
       if (chChanged || how === 'init') {
         renderHeader();
-        renderList({ restore: true });
+        renderList();
         updateComposer();
       } else markSelected();
 
@@ -474,6 +505,8 @@
       }
       wrap.classList.toggle('ck-open', !!itemId);
       syncDrawer();
+      // 목록 스크롤은 3열(스레드 열림)·2열 배치가 정해진 뒤에 되살림 → 줄 높이가 달라져 어긋나지 않게
+      if ((chChanged || how === 'init') && !isPhone()) list.scrollTop = mem.listScroll[effCh() + (effCh() === '~search' ? ':' + cur.q : '')] || 0;
       if (chChanged) hideCompNote();
 
       if (how === 'init') {
@@ -639,8 +672,10 @@
         const st = MV.parts.stats(info.part.id);
         sum = ['part', st.pct, st.done, st.total, st.overdue];
       } else if (ch === '~focus' || ch === '~week' || ch === '~all') {
-        const its = MV.items.list((it) => !it.done && SPECIAL_MAP[ch].statuses.includes(statusOf(it)) && ownerMatch(it, u.owner));
-        const n = (x) => its.filter((it) => statusOf(it) === x).length;
+        // 목록과 같은 기준(방금 체크해 잠깐 남아 있는 줄 포함) → 머리 숫자와 묶음 숫자가 어긋나지 않게
+        const its = listItemsFor(ch);
+        const st = (it) => (it.done ? openStatusOf(it) : statusOf(it));
+        const n = (x) => its.filter((it) => st(it) === x).length;
         sum = ['sp', n('overdue'), n('today'), its.length];
       } else if (ch === '~done') {
         sum = ['done', MV.items.list((it) => it.done && ownerMatch(it, u.owner)).length];
@@ -851,7 +886,7 @@
       else meta.push(MV.ui.dueChip(it.due, it.done));
       if (it.priority === 'high' && !it.done) meta.push(el('span', { class: 'chip bad' }, '중요'));
       if (it.owner) meta.push(el('span', { class: 'chip ' + (OWNER_CHIP[it.owner] || '') }, it.owner));
-      const nn = (it.notes || []).length;
+      const nn = notesOf(it).length;
       if (nn) meta.push(el('span', { class: 'ck-meta-n', title: '메모 ' + nn + '개' }, '💬 ' + nn));
       if (it.guide) meta.push(el('span', { class: 'ck-meta-n', title: '관련 가이드가 있어요' }, '📖'));
       if (opts.showPart) {
@@ -957,7 +992,7 @@
     function rowSig(it, ch, opts) {
       const p = MV.parts.get(it.partId);
       return [ch, ch === '~search' ? cur.q + '\u0002' + haystack(it) : '', D.today(), it.title, it.done ? 1 : 0, it.doneAt || '', it.due || '',
-        it.priority || '', it.owner || '', (it.notes || []).length, it.guide ? 1 : 0, it.partId,
+        it.priority || '', it.owner || '', notesOf(it).length, it.guide ? 1 : 0, it.partId,
         opts.showPart && p ? (p.emoji || '') + p.name : '', lingering.has(it.id) ? 1 : 0, opts.showPart ? 1 : 0, opts.doneMeta ? 1 : 0].join('\u0001');
     }
     function getRow(it, ch, opts) {
@@ -1091,7 +1126,8 @@
         if (row) {
           row.classList.remove('ck-flash'); void row.offsetWidth; row.classList.add('ck-flash');
           row.addEventListener('animationend', () => row.classList.remove('ck-flash'), { once: true });
-          row.scrollIntoView({ block: 'nearest' });
+          if (isPhone()) revealOnPhone(row, composer, head);   // 아래 고정 입력창 뒤에 숨지 않게
+          else row.scrollIntoView({ block: 'nearest' });
         } else showCompNote(pf);   // 지금 목록에 안 보이는 곳에 추가됨 → 입력창 위에 알림 (토스트는 입력창을 가림)
       }
     }
@@ -1108,11 +1144,30 @@
         lingering.set(id, setTimeout(() => { lingering.delete(id); if (alive) { rowCache.delete(id); scheduleRefresh(); } }, 1300));
       }
       MV.items.toggle(id);
-      if (willDone) {
-        MV.ui.toast('완료했어요', {
-          action: { label: '되돌리기', onClick: () => { const x = MV.items.get(id); if (x && x.done) { if (lingering.has(id)) { clearTimeout(lingering.get(id)); lingering.delete(id); } MV.items.toggle(id); } } },
-        });
-      } else MV.ui.toast('다시 열었어요');
+      if (willDone) toastDone(id);
+      else {
+        if (doneBatch) doneBatch.ids = doneBatch.ids.filter((x) => x !== id);
+        MV.ui.toast('다시 열었어요');
+      }
+    }
+    /* 연달아 체크하면 토스트를 하나로 합침 ('3개 완료했어요 · 모두 되돌리기') → 폰에서 목록을 덮지 않게 */
+    let doneBatch = null;
+    function undoDone(id) {
+      const x = MV.items.get(id);
+      if (!x || !x.done) return;
+      if (lingering.has(id)) { clearTimeout(lingering.get(id)); lingering.delete(id); }
+      MV.items.toggle(id);
+    }
+    function toastDone(id) {
+      if (doneBatch && doneBatch.toast && doneBatch.toast.isConnected) {
+        doneBatch.toast.remove();
+        if (!doneBatch.ids.includes(id)) doneBatch.ids.push(id);
+      } else doneBatch = { ids: [id], toast: null };
+      const batch = doneBatch;
+      const n = batch.ids.length;
+      batch.toast = MV.ui.toast(n > 1 ? n + '개 완료했어요' : '완료했어요', {
+        action: { label: n > 1 ? '모두 되돌리기' : '되돌리기', onClick: () => { const ids = batch.ids.slice(); if (doneBatch === batch) doneBatch = null; ids.forEach(undoDone); } },
+      });
     }
 
     /* ---------- 입력창 (composer) ---------- */
@@ -1166,6 +1221,10 @@
       if (p.priority) chips.push(el('span', { class: 'chip ' + (p.priority === 'high' ? 'bad' : '') }, PRI_LABEL[p.priority]));
       if (owner) chips.push(el('span', { class: 'chip ' + (OWNER_CHIP[owner] || '') }, '👤 ' + owner + (p.owner == null ? ' (필터)' : '')));
       p.bad.forEach((b) => chips.push(el('span', { class: 'chip warn' }, '“' + b + '” 날짜를 못 읽었어요')));
+      if (p.multi.length) {
+        const nm = { due: '날짜', priority: '중요도', owner: '담당' };
+        chips.push(el('span', { class: 'chip warn', title: '같은 종류를 두 번 이상 적으면 마지막 것만 저장돼요' }, '여러 번 적은 ' + p.multi.map((k) => nm[k]).join('·') + ' → 마지막 것으로'));
+      }
       if (isSpecial(effCh())) {
         const pt = MV.parts.get(compPart.value);
         if (pt) chips.push(el('span', { class: 'ck-prev-to' }, '→ ' + partLabel(pt)));
@@ -1293,20 +1352,47 @@
       if (final) f.detail._orig = v;
     }
     const saveDetailSoon = MV.debounce(() => { if (alive) commitDetail(false); }, 900);
+    const saveDueSoon = MV.debounce(() => { if (alive) commitDue(false); }, 1200);
     function flushThread() {
       if (!T.id) return;
       saveDetailSoon.flush();
+      saveDueSoon.flush();
       commitTitle();
       commitDetail(true);
+      if (T.f.due && T.f.due._dirty) commitDue(true);
       if (T.f.noteInput) mem.noteDrafts[T.id] = T.f.noteInput.value;
     }
 
+    /* 날짜 칸: 키보드로 칠 때는 칸마다 change 가 와서 0002-10-14 → 0020-… → 2027-10-14 처럼 중간값이 저장됐음.
+       → 연도가 2000~2100 인 완성된 날짜만 받고, 키보드 입력은 잠시 멈추거나 칸을 떠날 때(Enter·blur) 한 번만 저장. */
+    const dueOf = (it) => (it && D.valid(it.due) ? D.str(D.parse(it.due)) : '');
+    function saneDate(v) {
+      const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v || ''));
+      return !!m && +m[1] >= 2000 && +m[1] <= 2100 && D.valid(v);
+    }
+    function commitDue(final) {
+      const it = curItem(); const inp = T.f.due;
+      if (!it || !inp) return;
+      const v = inp.value;
+      const partial = !v && inp.validity && inp.validity.badInput;   // 일부 칸만 채운 상태
+      if (v ? saneDate(v) : !partial) { inp._dirty = false; setDue(v || null); return; }
+      if (final) {   // 덜 쓴 날짜·말이 안 되는 연도 → 저장된 값으로 되돌림
+        inp._dirty = false;
+        inp.value = dueOf(it);
+        if (v || partial) MV.ui.toast('날짜를 끝까지 입력하지 않아 원래 마감으로 두었어요');
+      }
+    }
+    function fmtDueLog(v) {
+      const d = D.parse(v);
+      if (!d) return '없음';
+      return (d.getFullYear() !== D.parse(D.today()).getFullYear() ? d.getFullYear() + '년 ' : '') + D.fmt(v);
+    }
     function setDue(v) {
       const it = curItem();
       if (!it) return;
       const nv = v || null;
       if ((it.due || null) === nv) { syncThread(); return; }
-      MV.items.update(it.id, { due: nv }, '📅 마감 변경: ' + it.title + ' → ' + (nv ? D.fmt(nv) : '없음'));
+      MV.items.update(it.id, { due: nv }, '📅 마감 변경: ' + it.title + ' → ' + fmtDueLog(nv));
     }
     function moveTo(partId) {
       const it = curItem(); const p = MV.parts.get(partId);
@@ -1320,15 +1406,19 @@
       const it = curItem();
       if (!it) return;
       const url = el('input', { class: 'input', type: 'url', placeholder: 'https://…', inputmode: 'url' });
+      const hint = el('small', { class: 'hint ck-link-hint', role: 'alert', hidden: true });
+      url.addEventListener('input', () => { url.removeAttribute('aria-invalid'); hint.hidden = true; });
       const label = el('input', { class: 'input', placeholder: '예) 견적서, 제품 페이지 (비워도 돼요)' });
       const id = it.id;
       const save = () => {
         let u = url.value.trim();
-        if (!u) { url.focus(); url.setAttribute('aria-invalid', 'true'); return false; }
-        if (!/^[a-z][a-z0-9+.-]*:/i.test(u)) u = 'https://' + u;
+        const bad = (msg) => { url.focus(); url.setAttribute('aria-invalid', 'true'); hint.textContent = msg; hint.hidden = false; return false; };
+        if (!u) return bad('주소를 입력해 주세요.');
+        if (/^www\./i.test(u) || !/^[a-z][a-z0-9+.-]*:/i.test(u) || /^[^:/]+\.[^:/]+:\d+/.test(u)) u = 'https://' + u.replace(/^\/+/, '');
+        if (!safeUrl(u)) return bad('http(s)://, tel:, mailto: 로 시작하는 주소만 넣을 수 있어요.');
         const x = MV.items.get(id);
         if (!x) return true;
-        const links = (x.links || []).concat([{ label: label.value.trim() || u.replace(/^https?:\/\//, '').slice(0, 40), url: u }]);
+        const links = arr(x.links).concat([{ label: label.value.trim() || u.replace(/^https?:\/\//, '').slice(0, 40), url: u }]);
         MV.items.update(id, { links }, '🔗 링크 추가: ' + x.title);
         return true;
       };
@@ -1338,27 +1428,27 @@
       }));
       m = MV.ui.modal({
         title: '링크 추가',
-        body: el('div', { class: 'stack' }, el('label', { class: 'field' }, el('span', '주소 (URL)'), url), el('label', { class: 'field' }, el('span', '이름'), label)),
+        body: el('div', { class: 'stack' }, el('label', { class: 'field' }, el('span', '주소 (URL)'), url, hint), el('label', { class: 'field' }, el('span', '이름'), label)),
         actions: [{ label: '취소', kind: 'ghost' }, { label: '추가', kind: 'primary', onClick: () => save() }],
       });
     }
     function removeLink(idx) {
       const it = curItem();
       if (!it) return;
-      const links = (it.links || []).slice();
+      const links = arr(it.links).slice();
       const [gone] = links.splice(idx, 1);
       const id = it.id;
       MV.items.update(id, { links });
       MV.ui.toast('링크를 지웠어요', { action: { label: '되돌리기', onClick: () => {
         const x = MV.items.get(id); if (!x) return;
-        const l2 = (x.links || []).slice(); l2.splice(Math.min(idx, l2.length), 0, gone);
+        const l2 = arr(x.links).slice(); l2.splice(Math.min(idx, l2.length), 0, gone);
         MV.items.update(id, { links: l2 });
       } } });
     }
     function deleteItem() {
       const it = curItem();
       if (!it) return;
-      const nn = (it.notes || []).length;
+      const nn = notesOf(it).length;
       MV.ui.confirm('“' + it.title + '” 항목을 지울까요?' + (nn ? ' 메모 ' + nn + '개도 함께 지워져요.' : ''), { danger: true, okLabel: '삭제', title: '항목 삭제' })
         .then((ok) => {
           if (!ok || !alive) return;
@@ -1388,7 +1478,7 @@
       f.moveSel = el('select', { class: 'select ck-move', 'aria-label': '다른 파트로 옮기기', title: '다른 파트로 옮기기' });
       f.moveSel.addEventListener('change', () => { const v = f.moveSel.value; f.moveSel.value = ''; if (v) moveTo(v); });
       f.close = el('button', { type: 'button', class: 'btn btn-ghost btn-icon ck-th-close', 'aria-label': '상세 닫기 (Esc)', title: '닫기 (Esc)', onclick: () => closeThread() }, '✕');
-      const headEl = el('div', { class: 'ck-th-head' }, f.back, f.partChip, el('span', { class: 'ck-spacer' }), f.moveSel, f.close);
+      const headEl = f.head = el('div', { class: 'ck-th-head' }, f.back, f.partChip, el('span', { class: 'ck-spacer' }), f.moveSel, f.close);
 
       // 완료 + 제목
       f.doneBtn = el('button', { type: 'button', class: 'ck-th-done', onclick: () => toggleItem(id) });
@@ -1404,9 +1494,23 @@
       // 마감
       f.due = el('input', { class: 'input ck-due', type: 'date', 'aria-label': '마감일' });
       f.due.value = D.valid(it.due) ? D.str(D.parse(it.due)) : '';
-      f.due.addEventListener('change', () => { if (T.id === id) setDue(f.due.value || null); });
+      let dueKeyAt = -1e9;
+      f.due.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); saveDueSoon.flush(); if (f.due._dirty) commitDue(true); return; }
+        if (e.key !== 'Tab' && e.key !== 'Escape') dueKeyAt = performance.now();
+      });
+      const onDueEdit = () => {
+        if (T.id !== id) return;
+        if (performance.now() - dueKeyAt < 1500) { f.due._dirty = true; saveDueSoon(); }   // 키보드로 치는 중
+        else { f.due._dirty = true; commitDue(true); }                                       // 달력에서 고름 → 바로
+      };
+      f.due.addEventListener('change', onDueEdit);
+      f.due.addEventListener('blur', () => {
+        dueKeyAt = -1e9;
+        if (T.id === id && f.due._dirty) { saveDueSoon.flush(); if (f.due._dirty) commitDue(true); }
+      });
       const base = () => { const x = curItem(); return x && D.valid(x.due) ? D.str(D.parse(x.due)) : D.today(); };
-      const quick = (label, fn, aria) => el('button', { type: 'button', class: 'btn btn-sm ck-quick', 'aria-label': aria || label, onclick: () => setDue(fn()) }, label);
+      const quick = (label, fn, aria) => el('button', { type: 'button', class: 'btn btn-sm ck-quick', 'aria-label': aria || label, onclick: () => { f.due._dirty = false; setDue(fn()); } }, label);
       f.dueInfo = el('div', { class: 'ck-due-info' });
       const dueBox = el('div', { class: 'ck-due-box' },
         el('div', { class: 'ck-due-row' }, f.due),
@@ -1478,7 +1582,7 @@
       });
       f.noteInput.addEventListener('input', () => { mem.noteDrafts[id] = f.noteInput.value; autosize(f.noteInput, 160); });
       f.noteSend.addEventListener('click', sendNote);
-      const foot = el('div', { class: 'ck-th-foot' }, el('div', { class: 'ck-note-row' }, f.noteInput, f.noteSend));
+      const foot = f.foot = el('div', { class: 'ck-th-foot' }, el('div', { class: 'ck-note-row' }, f.noteInput, f.noteSend));
 
       put(thread, headEl, f.body, foot);
       syncThread(true);
@@ -1510,7 +1614,8 @@
       }
       const ae = document.activeElement;
       const p = MV.parts.get(it.partId);
-      f.partChip.textContent = partLabel(p);
+      const pl = partLabel(p);
+      if (f.partChip.textContent !== pl) put(f.partChip, el('span', { class: 'ck-th-part-t' }, pl));
       f.partChip.title = p ? p.name + ' 채널 보기' : '';
       if (ae !== f.moveSel) {
         fillPartSelect(f.moveSel, '', '📁 다른 파트로 옮기기…');
@@ -1528,7 +1633,7 @@
       renderDetailPreview(ae === f.detail ? f.detail.value : (it.detail || ''));
       // 마감
       const dueStr = D.valid(it.due) ? D.str(D.parse(it.due)) : '';
-      if (ae !== f.due && f.due.value !== dueStr) f.due.value = dueStr;
+      if (ae !== f.due && !f.due._dirty && f.due.value !== dueStr) f.due.value = dueStr;
       if (dueStr) {
         const dd = D.dday(dueStr);
         const toMove = D.diff(dueStr, D.moveDate());
@@ -1539,16 +1644,18 @@
       f.prio.set(it.priority || 'mid');
       f.owner.set(it.owner || '');
       // 링크·가이드
-      const links = (it.links || []).filter((l) => l && l.url);
+      const links = linksOf(it);
       const lsig = JSON.stringify(links);
       if (lsig !== T.linksSig) {
         T.linksSig = lsig;
-        put(f.links, ...(links.length ? links.map((l, i) => el('div', { class: 'ck-link' },
-          el('a', { href: l.url, target: '_blank', rel: 'noopener noreferrer' }, '🔗 ', l.label || l.url),
-          el('button', { type: 'button', class: 'ck-x', 'aria-label': '링크 지우기: ' + (l.label || l.url), onclick: () => {
+        put(f.links, ...(links.length ? links.map((l) => el('div', { class: 'ck-link' },
+          safeUrl(l.url)
+            ? el('a', { href: safeUrl(l.url), target: '_blank', rel: 'noopener noreferrer' }, '🔗 ', str(l.label) || str(l.url))
+            : el('span', { class: 'ck-link-bad', title: '열 수 없는 주소예요 (http·https·tel·mailto 만 열려요)' }, '⚠️ ', str(l.label) || str(l.url), el('small', ' · 열 수 없는 주소')),
+          el('button', { type: 'button', class: 'ck-x', 'aria-label': '링크 지우기: ' + (str(l.label) || str(l.url)), onclick: () => {
             const x = curItem(); if (!x) return;
-            const idx = (x.links || []).findIndex((y) => y && y.url === l.url && y.label === l.label);
-            if (idx >= 0) removeLink(idx); else if (i < (x.links || []).length) removeLink(i);
+            const idx = arr(x.links).findIndex((y) => y && y.url === l.url && y.label === l.label);
+            if (idx >= 0) removeLink(idx);
           } }, '×')))
           : [el('p', { class: 'ck-none' }, '견적서·제품 페이지 주소를 붙여 두면 편해요.')]));
       }
@@ -1556,8 +1663,8 @@
       put(f.guide, g ? el('a', { class: 'ck-guide-link', href: guideHash(g) }, '📖 ', it.guide ? '관련 가이드 보기' : (p ? p.name + ' 가이드 보기' : '가이드 보기')) : '');
       f.guide.hidden = !g;
       // 메모
-      const notes = it.notes || [];
-      const nsig = notes.map((n) => n.id + ':' + (n.text || '').length).join(',');
+      const notes = notesOf(it);
+      const nsig = notes.map((n) => n.id + ':' + str(n.text).length).join(',');
       f.notesCount.textContent = String(notes.length);
       if (nsig !== T.notesSig) {
         T.notesSig = nsig;
@@ -1567,12 +1674,12 @@
           el('div', { class: 'ck-note-body' },
             el('div', { class: 'ck-note-meta' },
               el('span', { class: 'ck-note-who' }, '메모'),
-              el('time', { class: 'ck-note-time', datetime: n.at || '' }, D.time(n.at)),
+              el('time', { class: 'ck-note-time', datetime: str(n.at) }, D.time(n.at)),
               el('button', {
                 type: 'button', class: 'ck-x ck-note-del', 'aria-label': '메모 지우기', 'data-fkey': 'nd:' + n.id,
                 onclick: () => MV.ui.confirm('이 메모를 지울까요?', { danger: true, okLabel: '지우기', title: '메모 삭제' }).then((ok) => { if (ok && T.id) MV.items.removeNote(T.id, n.id); }),
               }, '×')),
-            el('div', { class: 'ck-note-text' }, MV.linkify(n.text)))))
+            el('div', { class: 'ck-note-text' }, MV.linkify(str(n.text))))))
           : [el('p', { class: 'ck-none ck-notes-empty' }, '아직 메모가 없어요. 통화 내용, 견적, 결정한 것을 남겨 두면 나중에 찾기 쉬워요.')]));
         restoreFocusIn(f.notes, fk);
         if (T.scrollNotes && !initial) {
@@ -1581,7 +1688,7 @@
           if (last) {
             last.classList.add('ck-flash');
             last.addEventListener('animationend', () => last.classList.remove('ck-flash'), { once: true });
-            if (isPhone()) last.scrollIntoView({ block: 'nearest' });
+            if (isPhone()) revealOnPhone(last, f.foot, f.head);   // 아래 메모 입력창·하단 메뉴에 가리지 않게
             else f.body.scrollTop = f.body.scrollHeight;
           }
         }
@@ -1642,6 +1749,31 @@
     });
     ctx.subscribe(scheduleRefresh);
 
+    /* ---------- 창을 닫거나 새로 고칠 때: 스레드에서 쓰던 제목·설명·마감을 저장 ---------- */
+    /* (core 는 pagehide 때 저장 대기열만 비움 → 아직 blur·디바운스 전인 칸은 여기서 먼저 반영하고 바로 저장) */
+    const onPageHide = () => {
+      if (!alive) return;
+      try { flushThread(); } catch (e) { console.error(e); }
+      try { MV.store.persist(); } catch (e) { /* 무시 */ }
+    };
+    const onVisibility = () => { if (document.visibilityState === 'hidden') onPageHide(); };
+    window.addEventListener('pagehide', onPageHide);
+    window.addEventListener('beforeunload', onPageHide);
+    document.addEventListener('visibilitychange', onVisibility);
+    ctx.onCleanup(() => {
+      window.removeEventListener('pagehide', onPageHide);
+      window.removeEventListener('beforeunload', onPageHide);
+      document.removeEventListener('visibilitychange', onVisibility);
+    });
+
+    /* 더블클릭: 첫 클릭이 연 대화상자를 두 번째 mousedown(배경)이 바로 닫던 문제 → 배경의 연속 클릭은 무시 */
+    const onModalDown = (e) => {
+      const t = e.target;
+      if (e.detail >= 2 && t && t.classList && t.classList.contains('modal-back')) { e.stopPropagation(); e.preventDefault(); }
+    };
+    window.addEventListener('mousedown', onModalDown, true);
+    ctx.onCleanup(() => window.removeEventListener('mousedown', onModalDown, true));
+
     /* ---------- 키보드 ---------- */
     function onKey(e) {
       if (!alive || e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return;
@@ -1670,7 +1802,7 @@
       if (id === cur.itemId) return;
       selectItem(id);
       const r = list.querySelector('.ck-row[data-id="' + cssEsc(id) + '"]');
-      if (r) { r.scrollIntoView({ block: 'nearest' }); if (isDesk()) { const a = r.querySelector('.ck-row-title'); if (a) a.focus({ preventScroll: true }); } }
+      if (r) { if (isPhone()) revealOnPhone(r, composer, head); else r.scrollIntoView({ block: 'nearest' }); if (isDesk()) { const a = r.querySelector('.ck-row-title'); if (a) a.focus({ preventScroll: true }); } }
     }
     document.addEventListener('keydown', onKey);
     ctx.onCleanup(() => document.removeEventListener('keydown', onKey));
@@ -1877,7 +2009,8 @@
 .ck-thread { display: none; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg-2); }
 .ck-th-head { flex: none; display: flex; align-items: center; gap: 8px; min-height: 54px; padding: 8px 10px 8px 14px; border-bottom: 1px solid var(--line); background: var(--bg-2); }
 .ck-th-back { flex: none; white-space: nowrap; padding: 0 8px; }
-.ck-th-part { flex: 0 0 auto; min-width: 0; max-width: 52%; min-height: 30px; font-size: .8rem; }
+.ck-th-part { flex: 0 1 auto; min-width: 0; max-width: 52%; min-height: 30px; font-size: .8rem; }
+.ck-th-part-t { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ck-move { flex: 0 1 160px; width: auto; min-width: 96px; max-width: 170px; min-height: 36px; padding: 4px 8px; font-size: .8rem; }
 .ck-th-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 14px 16px 20px; }
 .ck-th-top { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
@@ -1906,7 +2039,9 @@
 .ck-prev-lbl { display: block; font-size: .7rem; font-weight: 800; color: var(--ink-3); margin-bottom: 2px; }
 .ck-links { display: flex; flex-direction: column; gap: 4px; }
 .ck-link { display: flex; align-items: center; gap: 6px; min-height: 32px; padding: 2px 4px 2px 10px; border-radius: 8px; background: var(--bg-3); font-size: .86rem; }
-.ck-link a { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.ck-link a, .ck-link-bad { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.ck-link-bad { color: var(--ink-3); font-weight: 500; }
+.ck-link-hint { color: var(--bad); }
 .ck-x { flex: none; width: 30px; height: 30px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-3); font: inherit; font-size: 1.05rem; line-height: 1; cursor: pointer; }
 .ck-x:hover { background: var(--bad-bg); color: var(--bad); }
 .ck-none { margin: 0; font-size: .82rem; color: var(--ink-3); }
@@ -2083,7 +2218,8 @@ body:has(.ck) .toast button { white-space: nowrap; flex: none; }
 
   .ck-th-head { position: sticky; top: var(--topbar-h); z-index: 6; margin: -14px -16px 0; padding: 6px 10px 6px 4px; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(10px); }
   .ck-th-close { display: none; }
-  .ck-move { max-width: 46vw; }
+  .ck-move { max-width: 46vw; min-width: 88px; }
+  .ck-th-back { padding: 0 6px; }
   .ck-th-body { overflow: visible; padding: 14px 0 16px; }
   .ck-th-title { font-size: 1.25rem; }
   .ck-field { grid-template-columns: 1fr; gap: 4px; }
