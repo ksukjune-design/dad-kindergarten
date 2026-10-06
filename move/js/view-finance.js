@@ -28,6 +28,9 @@
           finance.v 6 (2026-10-06 저녁 옷 자리 바꾸기): '이동식 행거·보관용품 (필요하면, 이사 전)' 줄(id 'wardrobe-extra',
           '새로 사는 살림', 0원 — 지금 간이옷장이 모자랄 때만, 산 만큼 간이 옷장 줄에서 뺌)을 v5 이하 기록에 없을 때만 더함
           (통돌이 줄 뒤). 안 고친 '간이 옷장' 줄은 메모만 새 기본값(V5_LINES) — 금액 20만원·묶음 그대로, 머리 숫자 변화 없음
+          finance.v 7 (2026-10-06 점검): 11/3 단계 기본 시각(DEFAULT_TIMES)을 통장업무·이사당일 가이드 시간표에 맞춤
+          (A 입금 10:00 → 열쇠 10:30 → 등기부 11:00 → C 잔금 11:10 → 중개보수 11:20 → 완제 11:30 → 전입신고 13:00).
+          v6 이하 기록은 예전 기본 시각 그대로인 단계만 바꿈(V6_TIMES) — 고친 시각은 그대로, 섞여서 순서가 뒤바뀌면 통째로 그대로
    이사 전 결제  LINE_META[].before — 결제일이 비어 있으면 '이사 전에 냄'(에어컨 이전설치), 결제일을 넣으면 그 날짜로 판단.
           묶음은 그대로(꼭 드는 비용)이고, 11/3 돈이 들어오기 전에 지금 통장에서 먼저 나간다고 따로 보여 줌
    계산   MV.calc.financeSummary(state) → { inflow, outflow, leftover, expensesTotal(아직 낼 이사비 전부),
@@ -274,13 +277,25 @@
   /* 가전 결정(2026-10-06): 냉장고(LG)·건조기(삼성)는 이삿짐센터 견적에 포함, 삼성 2in1 에어컨만 삼성전자서비스가
      이사 전에 새 집에 설치. 제조사 서비스 금액은 짐·견적 계산(lgCost)을 쓰고, 그게 없을 때만 아래 가족 결정 금액 */
   const AC_MOVE_FALLBACK = 500000;
+  /* 이사업체 — 짐·견적 계산(moveEstimate)이 없을 때만: 10/6 이사 견적 화면 값(6톤·5명, 부가세 포함 약 250만원, 추정) */
+  const MOVER_FALLBACK = 2500000;
 
   /* ======================= 기본값 ======================= */
-  const DEFAULT_TIMES = { bankA: '09:20', recv: '09:30', keys: '09:45', registry: '10:00', toC: '10:15', broker: '10:40', bank: '11:00', movein: '14:00' };
+  /* 11/3 단계 기본 시각 (v7) — 통장업무·이사당일 가이드 시간표와 같게: A 입금 10:00~10:30 (질권이 있으면 A가 같은 시간 안에
+     은행에 먼저) → 빈집 확인·열쇠 10:30~11:00 → 등기부 재열람 → C 잔금 → 중개보수 11:00~11:30 → 우리전세론 완제 11:30~12:00
+     → 전입신고·확정일자 13:00~14:00 */
+  const DEFAULT_TIMES = { bankA: '10:00', recv: '10:00', keys: '10:30', registry: '11:00', toC: '11:10', broker: '11:20', bank: '11:30', movein: '13:00' };
+  /* v6 이전 기본 시각 — 저장된 시각이 이 값 그대로면(안 고친 시각) v7 에서 새 기본 시각으로 (migrateTimes) */
+  const V6_TIMES = { bankA: '09:20', recv: '09:30', keys: '09:45', registry: '10:00', toC: '10:15', broker: '10:40', bank: '11:00', movein: '14:00' };
+  /* 11/3 단계 순서: 질권 없음(내가 직접 완제) / 질권 있음(A가 은행에 직접 상환) */
+  const FLOW_IDS = {
+    self: ['recv', 'keys', 'registry', 'toC', 'broker', 'bank', 'movein'],
+    direct: ['bankA', 'recv', 'keys', 'registry', 'toC', 'broker', 'movein'],
+  };
   /* 가족 결정(2026-10-06): 옷장은 이사 후 간이 옷장(약 20만원, 선택·나중에), 통돌이 약 50만원(이사 후 배송),
      커튼·소품은 지금 것 가져감(0원), 입주청소는 직접(0원), 예비비 없음 */
   const LINE_META = {
-    mover: { auto: 'mover', low: 1500000, high: 2800000, conf: 'low', basis: '서울 20평대 3인 포장이사 약 150만~280만원(부가세 별도 시세), 리서치 모델 기준가 197만원(에어컨 제외). 냉장고·건조기는 이삿짐센터가 옮겨서 이 견적에 들어가요. 11/3(화)은 손없는날·주말은 아니지만, 월초라 업체에 따라 약 5% 할증이 붙을 수 있어요. 예산에는 실제로 낼 돈(부가세 포함)을 넣어요. 옷장을 이사 전에 사지 않으니 행거박스를 몇 개 가져오는지 물어 견적에 넣기. 방문견적 3곳으로 다시 맞추기' },
+    mover: { auto: 'mover', low: 1500000, high: 2800000, conf: 'low', basis: '서울 20평대 3인 포장이사 약 150만~280만원(부가세 별도 시세). 이사 견적 화면 값 (10/6 기준 약 250만원 부가세 포함, 6톤·5명, 추정)을 그대로 가져와요. 냉장고·건조기는 이삿짐센터가 옮겨서 이 견적에 들어가요. 11/3(화)은 손없는날·주말은 아니지만, 월초라 업체에 따라 약 5% 할증이 붙을 수 있어요. 예산에는 실제로 낼 돈(부가세 포함)을 넣어요. 옷장을 이사 전에 사지 않으니 행거박스를 몇 개 가져오는지 물어 견적에 넣기. 방문견적 3곳으로 다시 맞추기' },
     /* 줄 id 'lg' 는 저장 기록 호환 때문에 그대로 — 내용은 삼성 2in1 에어컨 이전설치 (이사 전에 새 집에 설치) */
     lg: { auto: 'lg', before: true, low: 450000, high: 700000, conf: 'mid', links: [LINK.ssAc], check: '1588-3366 예약 때 견적을 문자로 받아 확인',
       basis: '삼성전자서비스(1588-3366) 이전설치. 2in1(거실 스탠드 + 안방 벽걸이, 실외기 1대) 공식 기본 약 40.4만원(2026-05 단가표) + 배관 연장(1m당 약 1.9만~2.7만원)·실외기 앵글(외벽에 달 때 약 11만~13만원)·냉매 보충·타공 등 추가 → 예산 약 50만원(45만~70만원, 추정). 운반이 포함되는지는 자료마다 달라 예약 때 꼭 확인. 설치가 이사 전이라 11/3 돈이 들어오기 전에 지금 통장에서 나가요. 냉장고·건조기는 이삿짐센터 견적에 들어 있어요' },
@@ -288,8 +303,8 @@
       basis: '이사 후 2주쯤 살아 보고 실측해서 사요. 이케아 클렙스타드 2도어 139,000원(79×55×176), 3도어 169,000원(117×55×176, 조립 서비스 39,600원), 브림네스 2도어 199,000원(2026-10 확인, 배송비 별도). 문 있는 옷장은 옷봉이 약 75cm뿐이라, 같은 20만원이면 행거(리가 29,900원)·시스템행거(800 2단 약 5만원)에 훨씬 많이 걸려요(추정). 이사 전에는 캐비닛장·간이옷장과 여름옷 박스로 지내요. 키 큰 옷장을 고르면 그때 벽 고정이 필요한지 확인. 11/3 현금에는 넣지 않아요' },
     /* 이사 전에 꼭 살 건 없음 — 지금 간이옷장이 모자랄 때만 (0원으로 잡음, 산 만큼 '간이 옷장 (이사 후)' 줄에서 뺌).
        결제일을 넣지 않으면 '이사 전에 냄'으로 보지 않아요 (before 표시 없음) */
-    'wardrobe-extra': { low: 0, high: 80000, conf: 'low', check: '살 때만 금액 넣기',
-      basis: "이사 전에 꼭 살 건 없어요. 지금 간이옷장이 모자랄 때만 바퀴 달린 이동식 행거 1개(이케아 물리그 15,000원·리가 29,900원, 2단 행거 약 3만~5만원)를 사요. 보관용품은 제습제(8개 약 1만원)·방충제(약 2천~5천원)·압축팩(약 5천~1만원)으로 약 2만~3만원이에요(추정). 박스는 집에 있는 리빙박스와 택배 상자를 써서 0원으로 잡았어요. 이 돈은 이사 뒤 간이 옷장 20만원 안에서 쓰는 셈이라, 산 만큼 '간이 옷장 (이사 후)' 줄을 줄여요. 꼭 드는 이사 비용이 아니라 머리 숫자(11/3 전후 꼭 필요한 현금)에는 들어가지 않아요" },
+    'wardrobe-extra': { low: 0, high: 60000, conf: 'low', check: '살 때만 금액 넣기',
+      basis: "이사 전에 꼭 살 건 없어요. 지금 간이옷장이 모자랄 때만 바퀴 달린 이동식 행거 1개(약 1.5만~3만원 — 이케아 물리그 15,000원·리가 29,900원, 2단 행거 약 3만원)를 사요. 보관용품은 제습제(8개 약 1만원)·방충제(약 2천~5천원)·압축팩(약 5천~1만원)으로 약 2만~3만원이에요(추정). 박스는 집에 있는 리빙박스와 택배 상자를 써서 0원으로 잡았어요. 이 돈은 이사 뒤 간이 옷장 20만원 안에서 쓰는 셈이라, 산 만큼 '간이 옷장 (이사 후)' 줄을 줄여요. 꼭 드는 이사 비용이 아니라 머리 숫자(11/3 전후 꼭 필요한 현금)에는 들어가지 않아요" },
     washer: { low: 400000, high: 600000, conf: 'mid', check: '주문 전에 가격·배송비·설치비 포함인지 확인',
       basis: '통돌이 16~17kg급 약 46만~50만원(예: LG 17kg, 온라인 할인가), 18~19kg급은 약 58만~66만원 → 예산 약 50만원(40만~60만원). 이사 후 11/4~11/6 새 집 배송으로 주문. 고장 세탁기는 지금 집에서 폐가전 무상방문수거(1599-0903)' },
     waste: { auto: 'waste', low: 0, high: 100000, conf: 'low', links: [LINK.gangseoWaste], check: '"빼기"에서 신고할 때 금액 확정',
@@ -299,7 +314,7 @@
     internet: { low: 36000, high: 70000, conf: 'mid', check: '쓰는 통신사에 확인',
       basis: '통신사 이전설치비 — 평일 낮 인터넷만 약 3.6만원, TV까지 약 5.6만원(통신 3사 비슷, 2026 정리 기준). 주말·평일 18시 이후는 약 25% 더 붙어요 → 11/3(화)이나 11/4 평일 낮으로 예약' },
     hug: { auto: 'hug', optional: true, low: 410880, high: 793600, conf: 'mid', check: 'HUG 신청 화면의 실제 보증료로 확인',
-      basis: 'HUG 2025-03-31 개편 요율: 아파트·보증금 2억~5억·부채비율 70% 이하 연 약 0.107% → 3.2억 × 0.107% × 2년 = 684,800원 (추정). 신혼·다자녀 40% 할인이면 약 41만원, 요율 구간을 다르게 읽으면 최대 약 79만원. 6·12개월 무이자 분납 가능. 전입·확정일자 뒤 11월 중 가입할 때 내는 돈이라 11/3 당일 현금과는 따로예요' },
+      basis: 'HUG 2025-03-31 개편 요율: 아파트·보증금 2억~5억·부채비율 70% 이하 연 약 0.107% → 3.2억 × 0.107% × 2년 = 684,800원 (추정). 신혼·다자녀 40% 할인이면 약 41만원, 요율 구간을 다르게 읽으면 최대 약 79만원. 6·12개월 무이자 분납 가능(12개월이면 월 약 5.7만원, 57,067원). 전입·확정일자 뒤 11월 중 가입할 때 내는 돈이라 11/3 당일 현금과는 따로예요' },
   };
   /* HUG 미가입 때 생길 수 있는 문제를 실제 숫자로 비교한 별첨 가이드 */
   const HUG_GUIDE = '#/guide/hug';
@@ -336,7 +351,7 @@
   }
   /* 기본 줄 (v6, 2026-10-06 가족 결정 반영 — 'lg' 줄은 삼성 에어컨 이전설치, 'wardrobe-extra' 는 필요할 때만 사는 이동식 행거·보관용품) */
   const DEFAULT_LINES = [
-    { id: 'mover', label: '이사업체 (포장이사 · 부가세 포함)', amount: 2167000, group: 'essential' },
+    { id: 'mover', label: '이사업체 (포장이사 · 부가세 포함)', amount: MOVER_FALLBACK, group: 'essential' },
     { id: 'lg', label: '삼성 에어컨 이전설치 (이사 전)', amount: AC_MOVE_FALLBACK, group: 'essential' },
     { id: 'waste', label: '대형폐기물 스티커', amount: 50000, group: 'essential' },
     { id: 'elevator', label: '엘리베이터 사용료 (두 단지)', amount: 200000, group: 'essential' },
@@ -428,8 +443,34 @@
   }
   /* 2: 임대차 신고 상태 ↔ 체크리스트 맞춤, 3: 예산 기본 줄 가족 결정 반영, 4: 삼성 에어컨 줄·인터넷 3.6만,
      5: HUG 보증료 2025-03-31 개편 요율 (0.107%, 684,800원),
-     6: 옷 자리 바꾸기(10/6 저녁) — '이동식 행거·보관용품 (필요하면, 이사 전)' 0원 줄 추가, 간이 옷장 메모 */
-  const FIN_V = 6;
+     6: 옷 자리 바꾸기(10/6 저녁) — '이동식 행거·보관용품 (필요하면, 이사 전)' 0원 줄 추가, 간이 옷장 메모,
+     7: 11/3 단계 기본 시각을 가이드 시간표에 맞춤 — 안 고친 시각만 (migrateTimes) */
+  const FIN_V = 7;
+  /* 저장된 11/3 단계 시각 중 예전 기본값 그대로인 것만 새 기본 시각으로 (고친 시각은 그대로).
+     고친 시각과 섞여 단계 순서가 새로 뒤바뀌면(앞 단계보다 빨라짐) 이 기록은 통째로 그대로 둠 */
+  function timeAt(t, id) { return t && typeof t[id] === 'string' ? t[id] : (DEFAULT_TIMES[id] || ''); }
+  function timesDisordered(t) {
+    return [FLOW_IDS.self, FLOW_IDS.direct].some((ids) => {
+      let prev = '';
+      return ids.some((id) => {
+        const v = timeAt(t, id);
+        if (v && prev && v < prev) return true;
+        if (v) prev = v;
+        return false;
+      });
+    });
+  }
+  function migrateTimes(times) {
+    if (!times || typeof times !== 'object' || Array.isArray(times)) return times;
+    const out = Object.assign({}, times);
+    let changed = false;
+    Object.keys(V6_TIMES).forEach((k) => {
+      if (out[k] === V6_TIMES[k] && DEFAULT_TIMES[k]) { out[k] = DEFAULT_TIMES[k]; changed = true; }
+    });
+    if (!changed) return times;
+    if (timesDisordered(out) && !timesDisordered(times)) return times;
+    return out;
+  }
   function defaults() {
     return {
       v: FIN_V,
@@ -482,6 +523,10 @@
       /* v6: 안 고친 간이 옷장 줄은 새 메모로, '이동식 행거·보관용품 (필요하면, 이사 전)' 줄은 없을 때만 더함 (0원 — 머리 숫자 그대로) */
       raw = migrateLines(raw, V5_LINES);
       raw = addMissingLines(raw, V6_NEW_LINES);
+    }
+    if (rawV < 7 && f.flow && typeof f.flow === 'object' && f.flow.times && typeof f.flow.times === 'object') {
+      /* v7: 안 고친 11/3 단계 시각만 가이드 시간표(10:00 A 입금 … 13:00 전입신고)로 */
+      f.flow = Object.assign({}, f.flow, { times: migrateTimes(f.flow.times) });
     }
     f.budget.lines = raw.map(normLine);
     f.v = Math.max(rawV, FIN_V);
@@ -568,9 +613,7 @@
     const perTx = pos(f.flow.limits && f.flow.limits.perTx);
     const daily = pos(f.flow.limits && f.flow.limits.daily);
     const txLimit = perTx || 100000000;
-    const ids = direct
-      ? ['bankA', 'recv', 'keys', 'registry', 'toC', 'broker', 'movein']
-      : ['recv', 'keys', 'registry', 'toC', 'broker', 'bank', 'movein'];
+    const ids = (direct ? FLOW_IDS.direct : FLOW_IDS.self).slice();
     const amountOf = {
       bankA: payoff, recv: direct ? receive - payoff : receive, toC: cTotal, broker, bank: payoff,
     };
@@ -654,7 +697,7 @@
       value,
       low: discounted ? value : calc(rate * (1 - HUG_DISCOUNT)),
       high: Math.max(value, calc(HUG_RATE_HIGH)),
-      monthly12: Math.round(value / 12 / 10) * 10,
+      monthly12: Math.round(value / 12), /* 12개월 무이자 분납 한 달 몫 (원 단위 — HUG 별첨과 같은 57,067원) */
       years, rate, dep,
     };
   }
@@ -665,7 +708,7 @@
         const p = (est.pay && isNum(est.pay.typical) && est.pay.typical > 0) ? est.pay : est;
         return { value: Math.round(p.typical / 1000) * 1000, src: 'est', note: '짐·견적 화면 계산값 · 부가세 포함' + (isNum(p.low) && isNum(p.high) ? ' (범위 ' + krw(p.low) + '~' + krw(p.high) + ')' : '') };
       }
-      return { value: 2167000, src: 'research', note: '리서치 모델 기준가 197만원 + 부가세 10% (에어컨 제외) — 짐·견적 계산이 생기면 자동으로 바뀌어요' };
+      return { value: MOVER_FALLBACK, src: 'research', note: '이사 견적 화면 값 (10/6 기준 약 250만원 부가세 포함, 6톤·5명, 추정) — 짐·견적 계산이 생기면 자동으로 바뀌어요' };
     }
     if (kind === 'lg') {
       /* 짐·견적의 제조사 서비스 전체(lgCost — 지금은 삼성 2in1 에어컨 세트, 부가세 포함 소비자가) */
@@ -1277,7 +1320,8 @@ div.fn-alert { cursor: default; }
 .fn-src { font-weight: 650; white-space: nowrap; max-width: 100%; }
 /* 좁은 화면: 긴 출처 이름(예: '서울시 공동주택 통합정보마당 (단지별 승강기 사용료)')이 화면 밖으로 나가지 않게 줄바꿈 */
 @media (max-width: 640px) { .fn-src { white-space: normal; overflow-wrap: anywhere; } }
-.fn-verify { color: var(--warn); font-weight: 700; white-space: nowrap; }
+/* '⚠ 확인할 곳' — 좁은 칸·접힌 근거 안에서도 칸 밖으로 나가지 않게 줄바꿈 (예전 nowrap 은 390px 에서 화면 밖으로 나갔어요) */
+.fn-verify { color: var(--warn); font-weight: 700; white-space: normal; overflow-wrap: anywhere; }
 
 .fn-seg { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px; background: var(--bg-3); border-radius: 12px; }
 .fn-seg-btn { flex: 1 1 auto; min-height: 38px; border: 0; border-radius: 9px; background: transparent; color: var(--ink-2); font: inherit; font-weight: 700; font-size: .88rem; padding: 6px 12px; cursor: pointer; }
@@ -2345,8 +2389,9 @@ div.fn-alert { cursor: default; }
     const PREP = [
       { key: 'otp', re: [/OTP|이체\s*한도/], off: -20, text: 'OTP 발급 + 이체한도 1회 1억·1일 5억으로 증액 (영업점 방문이 필요할 수 있어요)' },
       { key: 'aSend', re: [/A의\s*송금/], off: -18, text: 'A에게 송금 시각·1일 이체한도(' + eok(nn(P.c.f.old.receive)) + ' 이상) 확인 요청, 우리 수취계좌는 문자로 전달' },
-      { key: 'delay', off: -10, text: '지연이체·안심이체(입금계좌지정)가 켜져 있으면 해제하거나 C·중개사·대출 상환계좌를 미리 등록' },
-      { key: 'limitAcct', off: -10, text: '받는 통장이 한도제한계좌(1일 100만원 안팎)가 아닌지 확인' },
+      /* 지연이체·한도제한계좌는 가이드(통장업무 → 이체 준비)·체크리스트 OTP 항목과 같은 10/14까지 */
+      { key: 'delay', off: -20, text: '지연이체·안심이체(입금계좌지정)가 켜져 있으면 해제하거나 C·중개사·대출 상환계좌를 미리 등록' },
+      { key: 'limitAcct', off: -20, text: '받는 통장이 한도제한계좌(1일 100만원 안팎)가 아닌지 확인' },
       { key: 'payoff', re: [/완제\s*금액/], off: -1, text: '우리은행에서 11/3 기준 완제금액(원 단위)·상환계좌·마감시각 받기' },
       { key: 'payee', re: [/예금주/], off: -1, text: 'C·중개사·상환계좌 예금주 조회 — 처음 보내는 계좌는 이상거래탐지로 보류될 수 있어요' },
       { key: 'registry1', re: [/전입\s*세대\s*확인/], off: -1, text: '새 집 등기부 1차 열람 + 전입세대확인서 발급' },
@@ -2503,8 +2548,13 @@ div.fn-alert { cursor: default; }
     const fields = [
       ['A', '구집 임대인 A'], ['C', '새 집 임대인 C'], ['broker', '새 집 중개사'], ['oldBroker', '구집 중개사'], ['bank', '우리은행 (지점·콜센터)'], ['mover', '이사업체'],
     ];
+    /* claude.ai 공유 버전(window.claude 있음): 인쇄가 안 되고, 기록은 부부가 함께 쓰는 저장소에 저장돼요.
+       GitHub Pages 등 보통 브라우저: 인쇄할 수 있고, 기록은 이 브라우저(localStorage)에만 있어요 */
+    const where = isSharedEdition()
+      ? '당일 시트에 함께 보여요 · 함께 쓰는 기록에 저장돼요'
+      : '당일 시트에 함께 인쇄돼요 · 이 브라우저에만 저장돼요';
     return el('section', { class: 'card' },
-      el('div', { class: 'fn-card-h' }, el('h3', '📞 당일 연락처'), el('span', { class: 'small muted' }, '당일 시트에 함께 인쇄돼요 · 이 기기에만 저장')),
+      el('div', { class: 'fn-card-h' }, el('h3', '📞 당일 연락처'), el('span', { class: 'small muted fn-ct-note' }, where)),
       el('div', { class: 'fn-contacts' }, fields.map(([k, l]) => textField(l, ct[k], (v) => updSilent((fin) => { fin.contacts[k] = v; }), { fk: 'ct-' + k, placeholder: '이름 · 전화번호' }))));
   }
 
@@ -2875,7 +2925,7 @@ div.fn-alert { cursor: default; }
       ]),
       sec(GROUP_BY_ID.purchase, [
         li('통돌이 세탁기 약 50만원', ' — 16~17kg급이 약 46만~50만원이에요. 이사 후 11/4~11/6 새 집 배송으로 주문하고, 배송·설치비가 포함인지 확인하세요. 고장 난 세탁기는 지금 집에서 폐가전 무상방문수거(1599-0903). 카드 무이자 할부로 나누면 ' + D.fmt(c.move) + ' 현금이 줄지 않아요.'),
-        li('(필요하면) 이동식 행거·보관용품 — 0원으로 잡음', " — 이사 전에 꼭 살 건 없어요. 지금 간이옷장이 모자랄 때만 바퀴 달린 이동식 행거(약 1.5만~5만원)와 제습제·방충제·압축팩(약 2만~3만원, 추정)을 사요. 사면 금액을 넣고, 그만큼 '간이 옷장 (이사 후)' 줄에서 빼요."),
+        li('(필요하면) 이동식 행거·보관용품 — 0원으로 잡음', " — 이사 전에 꼭 살 건 없어요. 지금 간이옷장이 모자랄 때만 바퀴 달린 이동식 행거(약 1.5만~3만원)와 제습제·방충제·압축팩(약 2만~3만원, 추정)을 사요. 사면 금액을 넣고, 그만큼 '간이 옷장 (이사 후)' 줄에서 빼요."),
         li('커튼·소품은 지금 것 가져가기 (0원)', ' — 새로 사지 않아요. 사전방문 때 창 치수만 재서 지금 커튼이 맞는지 보고, 안 맞으면 이사 후에 조정해요.'),
         li('안 쓰는 물건 중고 판매', ' — 붙박이장에서 나온 물건·책·장난감.'),
       ]),
@@ -3278,7 +3328,7 @@ div.fn-alert { cursor: default; }
         const h = hugPremium(P.c.f);
         return [el('span', '예상 보증료 (추정)'), el('b', won(h.value)),
           el('span', { class: 'fn-formula' }, eok(h.dep) + ' × 연 ' + pctTxt(h.rate, 4) + ' × ' + h.years + '년'),
-          el('span', { class: 'fn-formula' }, '범위 ' + won(h.low) + '(신혼·다자녀 40% 할인) ~ ' + won(h.high) + ' · 12개월 무이자 분납이면 월 약 ' + won(h.monthly12))];
+          el('span', { class: 'fn-formula' }, '범위 ' + won(h.low) + '(신혼·다자녀 40% 할인) ~ ' + won(h.high) + ' · 12개월 무이자 분납이면 월 약 ' + krw(h.monthly12) + ' (' + won(h.monthly12) + ')')];
       }),
       hugLine ? checkbox('가입 예정 — 예산에 보증료 넣기', hugLine.on !== false, (v) => upd((fin) => { const x = fin.budget.lines.find((l) => l.id === 'hug'); if (x) { x.on = v; x.edited = true; } }), { fk: 'p-hug-on' }) : null,
       el('ul', { class: 'fn-ul small' },
@@ -3319,6 +3369,10 @@ div.fn-alert { cursor: default; }
      GitHub Pages 등 보통 브라우저에서는 그대로 인쇄 */
   function canPrint() {
     try { return typeof window.claude === 'undefined' && typeof window.print === 'function'; } catch (e) { return false; }
+  }
+  /* claude.ai 공유 버전인지 (window.claude 있음 — sync.js 가 부부 공용 저장소와 동기화) */
+  function isSharedEdition() {
+    try { return typeof window.claude !== 'undefined' && window.claude !== null; } catch (e) { return false; }
   }
   function openSheet(P) {
     if (P.sheet) { try { P.sheet.close(); } catch (e) { /* 무시 */ } }

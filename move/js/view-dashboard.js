@@ -9,6 +9,8 @@
    - 저장소 변경 시 스크롤·가로 스크롤·펼침 상태·포커스를 유지한 채 다시 그립니다.
      다시 그리기는 다음 프레임 뒤에, 내용이 바뀐 카드·줄·주 칸만 바꿔 끼웁니다 (patchNode — 태블릿 가로 화면 체크 속도).
    - 11/3 돈 흐름: 머리 숫자는 '꼭 필요한 현금 기준'(financeSummary.netEssential), 아래 작은 줄에 살림 구입까지 / 전부 포함.
+     11/3에 월세를 함께 낸다고 넣었으면(financeSummary.rentPart > 0) 머리 숫자 바로 아래에
+     '월세가 계약서대로 후불이면 여유 X'(= netEssential + rentPart — 자금흐름 → 이사 예산 탭과 같은 숫자).
      이사 전에 지금 통장에서 먼저 나갈 돈(financeSummary.beforeMoveUnpaid — 꼭 드는 비용에 이미 들어 있음)은 작은 줄로만.
      자금 모듈의 주의사항은 'info' 와 머리 숫자(부족)와 겹치는 것은 빼고 보여 줌 (필드가 없어도 동작).
      자금 모듈이 없으면 가족 결정(2026-10-06)을 반영한 계획값으로 같은 모양을 그림.
@@ -247,6 +249,11 @@
 .db-total.is-bad { background:var(--bad-bg); color:var(--bad); }
 .db-total span { font-weight:750; font-size:.88rem; }
 .db-total b { font-size:1.25rem; font-weight:900; font-variant-numeric:tabular-nums; letter-spacing:-.02em; }
+.db-rent-alt { display:flex; align-items:baseline; justify-content:space-between; gap:2px 10px; flex-wrap:wrap; margin-top:4px; padding:5px 12px; border-radius:10px; border:1px dashed var(--line-2); font-size:.84rem; color:var(--ink-2); }
+.db-rent-alt span { font-weight:650; min-width:0; }
+.db-rent-alt b { font-weight:800; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.db-rent-alt b.is-good { color:var(--good); }
+.db-rent-alt b.is-bad { color:var(--bad); }
 .db-alts { list-style:none; margin:6px 0 0; padding:0 2px; display:flex; flex-direction:column; gap:2px; }
 .db-alt { display:grid; grid-template-columns:minmax(0, 1fr) auto; align-items:baseline; gap:0 10px; padding:3px 2px; font-size:.84rem; color:var(--ink-2); }
 .db-alt-k { min-width:0; font-weight:650; }
@@ -697,11 +704,12 @@ button.db-wk-head:hover { background:var(--bg-3); }
     { label: '집주인 A에게 받을 돈', sub: '보증금 4.2억 − 먼저 받은 0.42억', amt: 378000000, sign: 1 },
     { label: '우리은행 전세대출 상환', sub: '남은 대출 0.78억 (일할이자가 조금 붙을 수 있어요)', amt: 78000000, sign: -1 },
     { label: '집주인 C 잔금', sub: '1억 + 1억 + 9,500만으로 나눠 이체', amt: 295000000, sign: -1 },
-    { label: '11월 월세 (11/3에 낸다면)', sub: '계약서상 후불 — 낸다면 잔금과 따로 이체하고 영수증도 따로 받기', amt: 700000, sign: -1 },
+    { label: '11월 월세 (11/3에 낸다면)', sub: '계약서상 후불 — 낸다면 잔금과 따로 이체하고 영수증도 따로 받기', amt: 700000, sign: -1, rent: true },
     { label: '중개보수 (상한)', sub: '법정 상한 117만원 · 부가세 별도', amt: 1170000, sign: -1 },
   ];
   // 짐 목록에서 이삿짐센터가 옮기는 에어컨 수 (자금 모듈과 같은 규칙: 견적은 있는데 제조사 서비스가 없으면 에어컨 이전설치 0원)
   const moverAircons = () => MV.inv.list().filter((x) => x && (x.cat === 'aircon' || x.tag === 'aircon') && x.fate === 'move').length;
+  const MOVER_FALLBACK = 2500000;              // 견적 계산이 없을 때만: 10/6 이사 견적 화면 값 (6톤·5명, 부가세 포함 약 250만원, 추정)
   const ELEV_FALLBACK = 200000;                // 견적 계산이 없을 때만: 두 단지 각 약 10만원 (서울 평균 약 10.4만원)
   /* 엘리베이터 사용료가 이사 견적(moveEstimate)에 이미 들어 있는지 — 자금 모듈(autoAmount 'elevator')과 같은 규칙:
      견적 줄에 '엘리베이터 사용료'(key elevFee)가 있으면 들어 있음, 짐·견적에 양쪽 0원으로 넣었으면 0원 */
@@ -723,7 +731,7 @@ button.db-wk-head:hover { background:var(--bg-3); }
     // 엘리베이터: 견적값(est.pay)을 쓰면 그 안에 이미 들어 있어서 더하지 않음. 견적이 없을 때만 따로 약 20만원
     const elevIn = pay != null && elevInEst(est);
     const elev = elevIn ? 0 : ELEV_FALLBACK;
-    const essential = (pay != null ? pay : 2167000)       // 이사업체 (부가세 포함, 모델 중간값 — 견적값이면 엘리베이터 사용료 포함)
+    const essential = (pay != null ? pay : MOVER_FALLBACK) // 이사업체 (부가세 포함 — 견적값이면 엘리베이터 사용료 포함)
       + ac                                                 // 삼성 에어컨 이전설치 (이사 전)
       + 50000 + elev + 36000;                              // 대형폐기물 · 엘리베이터(견적에 없을 때만) · 인터넷 이전설치
     return {
@@ -740,6 +748,13 @@ button.db-wk-head:hover { background:var(--bg-3); }
     box.appendChild(el('div', { class: 'db-total' + (bad ? ' is-bad' : '') },
       el('span', '꼭 필요한 현금 기준'),
       el('b', { title: MV.fmt.won(r.netEssential) }, (bad ? '⚠ ' : '') + verdict(r.netEssential))));
+    /* 11/3에 함께 낸다고 넣은 월세(rentPart)가 있으면: 계약서대로 후불이면 그만큼 덜 나가요 (자금흐름 → 이사 예산 탭과 같은 숫자) */
+    if (isNum(r.rentPart) && r.rentPart > 0) {
+      const alt = r.netEssential + r.rentPart;
+      box.appendChild(el('div', { class: 'db-rent-alt' },
+        el('span', '월세가 계약서대로 후불이면'),
+        el('b', { class: alt < 0 ? 'is-bad' : 'is-good', title: MV.fmt.won(alt) }, verdict(alt))));
+    }
     const alts = [];
     if (isNum(r.netWithPurchases)) {
       alts.push(el('li', { class: 'db-alt' },
@@ -801,7 +816,7 @@ button.db-wk-head:hover { background:var(--bg-3); }
           }
         }
         body.appendChild(led);
-        body.appendChild(cashResult({ netEssential: fs.netEssential, netWithPurchases: nwp, net, purchase, optional }));
+        body.appendChild(cashResult({ netEssential: fs.netEssential, netWithPurchases: nwp, net, purchase, optional, rentPart: rent }));
       } else {
         // 예전 요약 (묶음 없음): 최종 여유 = 남는 돈 − 아직 낼 이사 비용 전부
         const net = isNum(fs.net) ? fs.net : (leftover != null && exp != null ? leftover - exp : null);
@@ -842,7 +857,8 @@ button.db-wk-head:hover { background:var(--bg-3); }
       if (pc.ac > 0 && pc.acName.when === '이사 전') led.appendChild(beforeNote(pc.ac, pc.acName.name));
       body.appendChild(led);
       const nE = bal - pc.essential;
-      body.appendChild(cashResult({ netEssential: nE, netWithPurchases: nE - pc.purchase, net: nE - pc.purchase - pc.optional, purchase: pc.purchase, optional: pc.optional }));
+      const planRent = PLAN_FLOW.filter((s) => s.rent).reduce((a, s) => a + s.amt, 0);
+      body.appendChild(cashResult({ netEssential: nE, netWithPurchases: nE - pc.purchase, net: nE - pc.purchase - pc.optional, purchase: pc.purchase, optional: pc.optional, rentPart: planRent }));
       body.appendChild(el('div', { class: 'db-basis' }, '계획값 기준 (약) · 옷장은 이사 뒤 간이 옷장(선택·나중에), 커튼·소품은 지금 것, 입주청소는 직접, 예비비는 없어요. 11월 월세 70만원은 11/3에 낸다고 넣었어요 (계약서대로 후불이면 그만큼 여유). 자금흐름 화면에서 실제 금액을 넣으면 자동으로 바뀝니다.'));
     }
     return el('section', { class: 'card db-money', 'aria-label': '11월 3일 돈 흐름' },
