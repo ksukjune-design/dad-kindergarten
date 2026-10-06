@@ -29,6 +29,7 @@ node tools/package-ghpages.js
 
 ## 함께 들어 있는 앱: 우리집 이사 관리
 
-`move/` 폴더에 2026년 11월 이사를 준비하는 앱이 있습니다 (체크리스트·도면 배치·이사 견적·자금 흐름·가이드).
+`move/` 폴더에 2026년 11월 이사를 준비하는 앱이 있습니다 (체크리스트·도면 배치·이사 견적·자금 흐름·가이드·AI 비서).
+부부가 함께 쓰고 AI 비서를 쓰려면 클로드 공유 버전을 여세요 (링크는 [move/README.md](move/README.md)).
 
 **바로 열기 → https://ksukjune-design.github.io/dad-kindergarten/move/** · 자세한 설명은 [move/README.md](move/README.md)
