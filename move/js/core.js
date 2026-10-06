@@ -26,7 +26,10 @@
    짐목록   MV.inv.list(filterFn) / get / add / update / remove / volume(item) m³
             MV.inv.CATS / MV.inv.FATES / MV.inv.cat(id) / MV.inv.fate(id)
             MV.inv.editor(idOrNull, {preset, defaults, onSave}) 편집 모달
-                     ('추정 규격'은 가로·깊이·높이를 고치면 꺼지고, 프리셋을 고르면 켜짐 — catalog assumed:false 는 제외)
+                     ('추정 규격'은 가로·깊이·높이를 고치면 꺼지고, 프리셋을 고르면 켜짐 — catalog assumed:false 는 제외.
+                      모델명(model)만 바꾸면 '추정'은 그대로)
+            규격 확인  MV.inv.specTarget(it) / specStatus(it) → 'need'|'model'|'done' / SPEC_STATUS / specList() / specStats()
+                     MV.inv.specUrls(model) → { naver, danawa } (모델명으로 규격 찾는 검색 주소)
    계산     MV.calc.* — 모듈이 등록 (moveEstimate, financeSummary 등). 없을 수 있으니 ?.() 로 호출.
    라우팅   MV.view(name, {title, icon, order, nav, badge(), render(root, params, ctx)})
             ctx.onCleanup(fn) / ctx.subscribe(fn) (뷰를 떠날 때 자동 해제)
@@ -245,7 +248,8 @@
        parts: [{ id, name, emoji, group, desc, guide, order }],
        items: [{ id, partId, title, detail, due, done, doneAt, priority, owner,
                  notes: [{ id, text, at }], links: [{label,url}], guide, order, seed, createdAt, updatedAt }],
-       inventory: [{ id, name, cat, fate, qty, w, d, h, url, room, roomNew, lg, ac, tag, note, assumed, seed }],
+       inventory: [{ id, name, cat, fate, qty, w, d, h, url, room, roomNew, brand, model, lg, ac, tag, note, assumed, seed }],
+                 // model: 명판·라벨에 적힌 모델명 (규격 확인용, 없으면 '')
                  // tag: 'fridge'|'washer'|'dryer'|'wardrobe'|'bed'|'sofa'|'tv'|'desk'|'table'|'shelf'|'aircon'|'' (의미 검색용)
        activity: [{ at, text }],
        ...모듈 하위 상태 (ensure 로 생성): layouts, planEdits, estimate, finance, ui
@@ -266,7 +270,7 @@
   function normInv(it, seed) {
     return Object.assign({
       id: MV.uid('inv'), name: '', cat: 'misc', fate: 'move', qty: 1, w: 60, d: 60, h: 60,
-      url: '', room: '', roomNew: '', brand: '', lg: false, ac: null, tag: '', note: '', assumed: false, seed: !!seed,
+      url: '', room: '', roomNew: '', brand: '', model: '', lg: false, ac: null, tag: '', note: '', assumed: false, seed: !!seed,
     }, it);
   }
   function freshState() {
@@ -323,16 +327,28 @@
         if (state.meta.deletedSeed.indexOf(iid) < 0) state.meta.deletedSeed.push(iid);
         n++;
       });
-      // 기본 짐 목록 항목의 글이 바뀐 경우: { inventory: { id: { from: { note: 옛 글 } } } }
-      // 지금 값이 from 과 모두 같을 때만(사용자가 고치지 않았을 때만) from 에 적은 칸을 새 기본값으로 바꿔요
+      // 기본 짐 목록 항목이 바뀐 경우: { inventory: { id: { from: { note: 옛 글 }, set?: { 칸: 새 값 } } } }
+      // 지금 값이 from 과 모두 같을 때만(사용자가 고치지 않았을 때만) 바꿔요.
+      //  · set 이 없으면: from 에 적은 칸을 이 버전의 기본값(seed)으로
+      //  · set 이 있으면: set 에 적은 칸은 set 값으로, from 에만 적은 칸은 기본값(seed)으로
+      //    (from 에 적지 않은 칸 — 모델명·추정 표시 등 — 도 함께 바꿀 수 있어요. 예: 모델명으로 찾은 규격 넣기)
+      // 칸 값이 없으면(옛 기록에 model 칸이 없을 때 등) normInv 기본값과 비교해요
+      const invDef = normInv({ id: '_' }, true);
+      const cur = (it, k) => (it[k] === undefined ? invDef[k] : it[k]);
       Object.keys(m.inventory || {}).forEach((iid) => {
-        const it = state.inventory.find((x) => x.id === iid);
+        const it = state.inventory.find((x) => x && x.id === iid);
         const sp = (seed.inventory || []).find((x) => x.id === iid);
-        const f = (m.inventory[iid] && m.inventory[iid].from) || {};
+        const rule = m.inventory[iid] || {};
+        const f = rule.from || {};
+        const set = (rule.set && typeof rule.set === 'object') ? rule.set : null;
         const keys = Object.keys(f);
-        if (!it || !sp || !keys.length || !keys.every((k) => it[k] === f[k])) return;
-        if (keys.every((k) => it[k] === sp[k])) return;
-        keys.forEach((k) => { it[k] = MV.clone(sp[k]); });
+        if (!it || !sp || !keys.length || !keys.every((k) => JSON.stringify(cur(it, k)) === JSON.stringify(f[k]))) return;
+        const target = {};
+        keys.forEach((k) => { target[k] = sp[k] === undefined ? invDef[k] : sp[k]; });
+        if (set) Object.keys(set).forEach((k) => { if (k !== 'id' && k !== 'seed') target[k] = set[k]; });
+        const tk = Object.keys(target);
+        if (tk.every((k) => JSON.stringify(cur(it, k)) === JSON.stringify(target[k]))) return;
+        tk.forEach((k) => { it[k] = MV.clone(target[k]); });
         n++;
       });
       // 묶음 이름이 바뀐 경우: 사용자가 만들거나 이름을 고친 파트도 같은 새 묶음으로 옮겨요
@@ -648,6 +664,56 @@
   });
   V.volume = (it) => Math.max(0, (+it.w || 0) * (+it.d || 0) * (+it.h || 0) / 1e6) * Math.max(0, +it.qty || 0);
 
+  /* ---- 규격 확인 (모델명으로 규격 확정) ----
+     대상: 처리가 '가져감'·'미정'인 짐 중 ① 규격이 추정이거나 ② 모델명을 받았거나 ③ 처음에 추정이었던 기본 짐
+     (③ 덕분에 크기를 고쳐 '확정'된 기본 짐도 목록에 남아 진행률 n/m 이 줄지 않아요).
+     버릴 짐·팔 짐·살 짐은 빼요 (살 물건은 살 때 정해요). */
+  V.SPEC_FATES = ['move', 'undecided'];
+  V.SPEC_STATUS = {
+    need: { label: '확인 필요', short: '확인 필요', cls: 'warn', icon: '📸' },
+    model: { label: '모델명 받음 — 규격 찾는 중', short: '모델명 받음', cls: 'brand', icon: '🔎' },
+    done: { label: '확정', short: '확정', cls: 'good', icon: '✅' },
+  };
+  const modelOf = (it) => String((it && it.model) || '').trim();
+  const fateOf = (it) => (V.FATES.some((f) => f.id === it.fate) ? it.fate : 'undecided');
+  const seedAssumed = (id) => {
+    const sp = MV.seed && Array.isArray(MV.seed.inventory) ? MV.seed.inventory.find((x) => x && x.id === id) : null;
+    return !!(sp && sp.assumed);
+  };
+  V.specTarget = (it) => {
+    if (!it || typeof it !== 'object' || V.SPEC_FATES.indexOf(fateOf(it)) < 0) return false;
+    return !!it.assumed || !!modelOf(it) || (!!it.seed && seedAssumed(it.id));
+  };
+  V.specStatus = (it) => (!it.assumed ? 'done' : modelOf(it) ? 'model' : 'need');
+  V.specList = () => V.list(V.specTarget);
+  V.specStats = () => {
+    const r = { total: 0, done: 0, model: 0, need: 0 };
+    V.specList().forEach((it) => { r.total++; r[V.specStatus(it)]++; });
+    return r;
+  };
+  V.specUrls = (model) => {
+    const m = String(model || '').trim();
+    if (!m) return null;
+    return {
+      naver: 'https://search.naver.com/search.naver?query=' + encodeURIComponent(m + ' 규격 크기'),
+      danawa: 'https://search.danawa.com/dsearch.php?query=' + encodeURIComponent(m),
+    };
+  };
+  /** 모델명 검색 링크 두 개 (네이버·다나와) — 모델명이 없으면 null */
+  V.specLinks = (model, cls) => {
+    const u = V.specUrls(model);
+    if (!u) return null;
+    MV.css('mv-speclinks', `
+      .mv-speclinks { display: inline-flex; flex-wrap: wrap; gap: 0 12px; font-size: .82rem; font-weight: 700; }
+      .mv-speclinks a { display: inline-flex; align-items: center; min-height: 32px; }
+      .mv-modelfield { gap: 2px; }
+      @media (pointer: coarse) { .mv-speclinks a { min-height: 44px; } }
+    `);
+    return MV.el('span', { class: 'mv-speclinks' + (cls ? ' ' + cls : '') },
+      MV.el('a', { href: u.naver, target: '_blank', rel: 'noopener' }, '🔎 네이버에서 규격 찾기'),
+      MV.el('a', { href: u.danawa, target: '_blank', rel: 'noopener' }, '🔎 다나와에서 찾기'));
+  };
+
   V.editor = function editor(id, opts) {
     opts = opts || {};
     const existing = id ? V.get(id) : null;
@@ -670,9 +736,15 @@
     f.roomNew = el('input', { class: 'input', value: draft.roomNew, placeholder: '예: 거실' });
     f.url = el('input', { class: 'input', type: 'url', value: draft.url, placeholder: '제품 페이지 주소를 붙여 넣으세요' });
     f.brand = el('select', { class: 'select' }, V.BRANDS.map((b) => el('option', { value: b.id, selected: b.id === (draft.brand || '') }, b.label)));
+    // 모델명: 바꿔도 '추정 규격'은 그대로 (크기를 고쳐야 꺼짐). 적으면 검색 링크가 바로 생겨요
+    f.model = el('input', { class: 'input', value: draft.model || '', placeholder: '예) 명판·라벨에 적힌 모델명', autocomplete: 'off', spellcheck: 'false' });
+    const modelLinks = el('div', { class: 'mv-speclinks-wrap' });
+    const syncModelLinks = () => { modelLinks.replaceChildren(...[V.specLinks(f.model.value)].filter(Boolean)); };
+    f.model.addEventListener('input', syncModelLinks);
+    syncModelLinks();
     f.lg = el('input', { type: 'checkbox', checked: !!draft.lg });
     f.ac = el('select', { class: 'select' }, el('option', { value: '' }, '해당 없음'), V.AC.map((a) => el('option', { value: a.id, selected: a.id === draft.ac }, a.label)));
-    f.note = el('textarea', { class: 'textarea', placeholder: '모델명, 상태, 분해 필요 여부 등' }, draft.note || '');
+    f.note = el('textarea', { class: 'textarea', placeholder: '상태, 분해 필요 여부 등' }, draft.note || '');
     /* '추정 규격' 표시: 이름·메모·위치·처리만 고치면 그대로 두고, 가로·깊이·높이를 고치면 꺼짐(실측값).
        프리셋을 고르면 일반 규격이라 켜짐. 사용자가 직접 켜고 끌 수도 있음 (그때는 지금 크기를 기준으로) */
     f.assumed = el('input', { type: 'checkbox', checked: !!draft.assumed });
@@ -710,6 +782,8 @@
       el('label', { class: 'check' }, f.assumed, '추정 규격 — 아직 재지 않은 예시 크기 (가로·깊이·높이를 고치면 저절로 꺼져요)'),
       el('div', { class: 'form-grid' },
         field('지금 집 위치', f.room), field('새 집 위치', f.roomNew), field('제조사', f.brand), acRow),
+      el('div', { class: 'field mv-modelfield' }, el('label', { class: 'field' }, el('span', '모델명'), f.model,
+        el('small', { class: 'hint' }, '명판·라벨 사진의 모델명을 적어 두면 정확한 규격을 찾을 수 있어요')), modelLinks),
       field('제품 링크 (URL)', f.url, '인터넷에서 찾은 제품 페이지를 붙여 두면 규격 확인이 쉽습니다'),
       el('label', { class: 'check' }, f.lg, '제조사 서비스(LG·삼성전자서비스)로 옮김 — 이삿짐센터 대신'),
       field('메모', f.note));
@@ -719,7 +793,7 @@
       qty: MV.clamp(parseInt(f.qty.value, 10) || 0, 0, 999),
       w: Math.max(0, +f.w.value || 0), d: Math.max(0, +f.d.value || 0), h: Math.max(0, +f.h.value || 0),
       room: f.room.value.trim(), roomNew: f.roomNew.value.trim(), url: f.url.value.trim(),
-      brand: f.brand.value, lg: f.lg.checked, ac: f.cat.value === 'aircon' ? (f.ac.value || null) : null,
+      brand: f.brand.value, model: f.model.value.trim().slice(0, 80), lg: f.lg.checked, ac: f.cat.value === 'aircon' ? (f.ac.value || null) : null,
       tag: draft.tag || '', note: f.note.value, assumed: !!f.assumed.checked,
     });
     const actions = [];

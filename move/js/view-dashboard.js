@@ -903,6 +903,12 @@ button.db-wk-head:hover { background:var(--bg-3); }
       if (isNum(est.tons)) facts.appendChild(el('span', { class: 'chip' }, '📦 짐량 약 ' + (Math.round(est.tons * 10) / 10) + '톤'));
       if (isNum(est.crew)) facts.appendChild(el('span', { class: 'chip' }, '👷 ' + est.crew + '명'));
       facts.appendChild(el('span', { class: 'chip' }, '짐 ' + inv.count + '개'));
+      // 규격 확인 (모델명으로 크기 확정) — 추정 규격인 가져갈 짐이 있을 때만, 누르면 규격 확인 목록
+      const sp = MV.inv && typeof MV.inv.specStats === 'function' ? MV.inv.specStats() : null;
+      if (sp && sp.total) {
+        facts.appendChild(el('a', { class: 'chip ' + (sp.done >= sp.total ? 'good' : 'warn'), href: '#/stuff/inventory/spec', style: { textDecoration: 'none' },
+          title: '모델명으로 크기 확정 ' + sp.done + '/' + sp.total + (sp.model ? ' · 모델명 받음 ' + sp.model : '') + ' — 눌러서 규격 확인 목록 보기' }, '📸 규격 확인 ' + sp.done + '/' + sp.total));
+      }
       body.appendChild(facts);
       // 제조사 서비스(지금은 삼성 에어컨 이사 전 설치)는 제조사에 따로 내는 돈 (소비자가, 부가세 포함) — 이삿짐센터 금액에 섞지 않음
       const mk = makerOf(est);
@@ -1459,7 +1465,9 @@ button.db-wk-head:hover { background:var(--bg-3); }
         keyed('road', safe('db-span-12', () => roadCard(acc, pm))),
         partsSection(cols),
         keyed('activity', late(safe('db-span-7', activityCard))),
-        keyed('links', late(safe('db-span-5', linksCard))))));
+        keyed('links', late(safe('db-span-5', linksCard))),
+        // 깃허브 버전·함께 쓰기 설정 전에만: 아래쪽 작은 안내 한 줄 (view-together.js)
+        keyed('together', safe('db-span-12', () => (MV.fb && MV.fb.dashHint ? MV.fb.dashHint() : null))))));
   }
 
   // 화면 전체가 그려지지 않을 때 (카드별 오류는 safe() 가 따로 받음)

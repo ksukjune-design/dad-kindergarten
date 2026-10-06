@@ -1838,7 +1838,10 @@
       if (lsig !== T.linksSig) {
         T.linksSig = lsig;
         put(f.links, ...(links.length ? links.map((l) => el('div', { class: 'ck-link' },
-          safeUrl(l.url)
+          /^#\/[^\s]*$/.test(str(l.url).trim())
+            // 앱 안 화면 주소(예: '#/stuff/inventory/spec') — 같은 창에서 열어요
+            ? el('a', { href: str(l.url).trim() }, '➡️ ', str(l.label) || str(l.url))
+            : safeUrl(l.url)
             ? el('a', { href: safeUrl(l.url), target: '_blank', rel: 'noopener noreferrer' }, '🔗 ', str(l.label) || str(l.url))
             : el('span', { class: 'ck-link-bad', title: '열 수 없는 주소예요 (인터넷 주소·전화·메일 링크만 열려요)' }, '⚠️ ', str(l.label) || str(l.url), el('small', ' · 열 수 없는 주소')),
           el('button', { type: 'button', class: 'ck-x', 'aria-label': '링크 지우기: ' + (str(l.label) || str(l.url)), onclick: () => {

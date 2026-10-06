@@ -20,7 +20,7 @@
                   get_workplan(주별 일정), get_move_day(이사 당일 순서), list_inventory
             고치기: update_item, add_item, add_note, update_budget, add_budget_line,
                   add_quote, update_quote, update_inventory, add_inventory
-            짐: brand('LG'|'삼성'|'기타'|'' = 모름) 제조사, lg(true = 제조사 서비스(LG 베스트케어·삼성전자서비스)로 옮김,
+            짐: brand('LG'|'삼성'|'기타'|'' = 모름) 제조사, model(명판·라벨 모델명 — 규격 확인용, 바꿔도 '추정'은 그대로), lg(true = 제조사 서비스(LG 베스트케어·삼성전자서비스)로 옮김,
                 false = 이삿짐센터 — 필드 이름은 호환 때문에 lg). 견적의 lgCost 는 제조사 서비스 전체(label·byBrand)라
                 AI에게는 makerService 로 보여 주고 'LG 이전'이라고 부르지 않게 함
             고치는 도구는 MV.items/MV.inv/MV.store.update 로만 바꾸고 활동 기록에 '🤖 ' 를 붙입니다.
@@ -778,8 +778,19 @@
       upcomingMore: Math.max(0, soon.length - 40),
       finance: financeNumbers(),
       estimate: estimateNumbers(),
-      inventory: { total: (st.inventory || []).length, byFate: fateCount, bigAppliances: bigAppliances(st) },
+      inventory: { total: (st.inventory || []).length, byFate: fateCount, bigAppliances: bigAppliances(st), specCheck: specCheck() },
       recentActivity: (st.activity || []).slice(0, 6).map((a) => D.time(a.at) + ' ' + clip(a.text, 80)),
+    };
+  }
+  /** 규격 확인(모델명으로 크기 확정) 진행 — 가져갈·미정 짐 중 추정 규격·모델명 받은 것 (core MV.inv.spec*) */
+  function specCheck() {
+    if (!MV.inv || typeof MV.inv.specList !== 'function') return undefined;
+    const list = MV.inv.specList();
+    const c = MV.inv.specStats();
+    const open = list.filter((x) => MV.inv.specStatus(x) !== 'done');
+    return {
+      confirmed: c.done, modelReceived: c.model, needed: c.need, total: c.total, link: '#/stuff/inventory/spec',
+      open: open.slice(0, 30).map((x) => ({ id: x.id, name: clip(x.name, 40), room: x.room || '', size: num(x.w) + '×' + num(x.d) + '×' + num(x.h) + 'cm', assumedSize: !!x.assumed, model: String(x.model || '') })),
     };
   }
   /** 큰 가전(가전·에어컨) — 누가 옮기는지 앱 데이터 그대로 (가족 결정과 다르면 모델이 알려 줄 수 있게) */
@@ -788,7 +799,7 @@
     let bl = {};
     try { bl = blockedMap(); } catch (e) { bl = {}; }
     return inv.filter((x) => x.cat === 'appliance' || x.cat === 'aircon').slice(0, 12).map((x) => ({
-      id: x.id, name: clip(x.name, 50), fate: MV.inv.fate(x.fate).label, brand: x.brand || '', moveBy: moveByOf(x), serviceNote: bl[x.id] || undefined,
+      id: x.id, name: clip(x.name, 50), fate: MV.inv.fate(x.fate).label, brand: x.brand || '', model: x.model || undefined, assumedSize: !!x.assumed, moveBy: moveByOf(x), serviceNote: bl[x.id] || undefined,
     }));
   }
   /** 사전 이삿짐 정리 묶음의 파트 (이름은 앱 데이터에서 — 파트 id 는 sort-*) */
@@ -832,11 +843,12 @@
       '4. 사람 이름·전화번호·계좌번호·주민등록번호·동·호수 같은 개인 식별 정보는 쓰지 마세요. 사람은 A·B·C·중개사로 부르세요.',
       '5. 날짜는 M/D(요일) 형식(예: ' + D.fmt(move) + '), 금액은 "32만원", "2억 9,500만원"처럼 쓰세요. "다음 주 월요일" 같은 말은 [날짜 참고]로 실제 날짜(YYYY-MM-DD)를 계산하세요.',
       '6. 할 일을 추가·수정할 때 "@아내"·"@나"·"@함께"는 담당자, "!중요"는 priority high("!보통" mid, "!여유" low)예요. 파트를 말하지 않으면 가장 알맞은 파트를 고르세요.',
-      '7. 앱 화면 링크를 마크다운으로 붙일 수 있어요: [할 일](#/checklist/<partId>/<itemId>), [지금 할 일](#/checklist/~focus), [예산](#/money/budget), [' + D.fmt(move) + ' 돈 흐름](#/money/flow), [업체 견적](#/stuff/quotes), [이사 견적](#/stuff/estimate), [짐 목록](#/stuff/inventory), [대시보드](#/dashboard), [가이드](#/guide/<partId>), [HUG 보증 비교](#/guide/hug). finance.warnings 끝의 (화면: #/money/…)는 그 경고의 링크예요.',
+      '7. 앱 화면 링크를 마크다운으로 붙일 수 있어요: [할 일](#/checklist/<partId>/<itemId>), [지금 할 일](#/checklist/~focus), [예산](#/money/budget), [' + D.fmt(move) + ' 돈 흐름](#/money/flow), [업체 견적](#/stuff/quotes), [이사 견적](#/stuff/estimate), [짐 목록](#/stuff/inventory), [규격 확인](#/stuff/inventory/spec), [대시보드](#/dashboard), [가이드](#/guide/<partId>), [HUG 보증 비교](#/guide/hug). finance.warnings 끝의 (화면: #/money/…)는 그 경고의 링크예요.',
       '8. 예산·부족을 물으면(예: "' + moveMD() + '에 현금 모자라?") 예산 화면(#/money/budget)과 같은 순서로 답하세요: ① 꼭 드는 이사 비용 기준 ' + D.fmt(move) + ' 전후 현금 여유/부족(머리 숫자 — finance.cashVsEssential, numbers.netEssential) ② 새로 사는 살림까지 ③ 선택·나중에까지 전부. "부족"을 한 숫자로 뭉뚱그리지 마세요. 돈 흐름에 11월 월세가 들어 있으면 계약서대로 후불일 때의 숫자(finance.rentNote)도 같이 말하고, 이사 전에 먼저 나갈 돈(finance.beforeMove)도 알려 주세요. 중개보수·잔금·대출 상환·월세는 예산이 아니라 돈 흐름에 이미 들어 있어요.',
       '9. 지난 답에 "(이 답에서 앱에 이미 반영한 변경: …)"이 붙어 있으면 그 변경은 이미 저장됐어요 — 같은 변경을 다시 하지 마세요.',
       '10. 대화의 마지막 사용자 메시지에만 답하세요. 지난 질문 뒤에 "(사용자가 이 요청을 중지했어요…)", "(…처리하지 못했어요…)", "(…끊겼어요…)" 같은 표시가 있으면 그 요청은 끝난 것이니 실행하거나 이어서 하지 마세요 — 사용자가 마지막 메시지에서 다시 해 달라고 할 때만 하세요.',
       '11. [가족 결정]을 따르세요. 그와 다른 옛 안내(냉장고·건조기를 LG 서비스로 옮기기, 이사 전 옷장 주문·벽 고정 동의, 간이옷장 하나 더 사기, \'나\' 잡화를 간이옷장에 넣기, 입주청소 업체, 예비비, 새 커튼·소품 구매)는 권하지 마세요. 앱 데이터(짐 목록 inventory.bigAppliances·예산)가 결정과 다르면 다르다고 알려 주고 고칠지 물어보세요. 짐의 lg=true 는 "제조사 서비스(LG 베스트케어·삼성전자서비스)로 옮김", brand 는 제조사예요.',
+      '12. 규격 확인: 짐 목록의 많은 가구 크기는 추정(assumedSize)이라, 사용자가 10/7에 명판·라벨 모델명을 하나씩 알려 줘요. 짐의 model 은 그 모델명이에요. 모델명을 받으면 그 짐의 model 에 넣고(추정 표시는 그대로), 그 모델의 가로·깊이·높이를 확실히 알 때만 w·d·h 를 넣으세요(그러면 추정이 꺼져요). 크기를 모르면 지어내지 말고 [규격 확인](#/stuff/inventory/spec) 화면의 검색 링크로 찾아보거나 줄자로 재 달라고 하세요. 진행 상황은 overview 의 inventory.specCheck 에 있어요.',
     ];
     const est = modelEstimate();
     const mk = makerCostOf(est);
@@ -1220,7 +1232,7 @@
     return {
       id: x.id, name: x.name, cat: x.cat, catLabel: MV.inv.cat(x.cat).label, fate: x.fate, fateLabel: MV.inv.fate(x.fate).label,
       qty: num(x.qty), size: num(x.w) + '×' + num(x.d) + '×' + num(x.h) + 'cm', assumedSize: !!x.assumed,
-      brand: typeof x.brand === 'string' ? x.brand : '', lg: !!x.lg, moveBy: moveByOf(x), serviceNote: why || undefined,
+      brand: typeof x.brand === 'string' ? x.brand : '', model: typeof x.model === 'string' ? x.model : '', lg: !!x.lg, moveBy: moveByOf(x), serviceNote: why || undefined,
       room: x.room || '', roomNew: x.roomNew || '', note: clip(x.note, 120),
     };
   }
@@ -1275,6 +1287,8 @@
       if (!base) p.lg = v;
       else if (!!base.lg !== v) { p.lg = v; diffs.push('제조사 서비스로 옮김 ' + (base.lg ? '예' : '아니오') + ' → ' + (v ? '예' : '아니오')); }
     }
+    // 모델명: 바꿔도 '추정' 표시는 그대로 (크기 w·d·h 를 넣어야 꺼짐)
+    if (has(input, 'model')) set('model', str(input.model, 80), '모델명', (v) => (v ? v : '-'));
     if (has(input, 'room')) set('room', str(input.room, 40), '지금 집 위치');
     if (has(input, 'roomNew')) set('roomNew', str(input.roomNew, 40), '새 집 위치');
     return { p, diffs };
@@ -1287,6 +1301,7 @@
   const S_MONEY = { type: ['number', 'string'], description: '원 단위 숫자 또는 "32만원"·"5만 5천원"·"2.1억" 같은 금액 하나 (범위는 안 됨)' };
   const S_GROUP = { type: 'string', enum: ['essential', 'purchase', 'optional'], description: 'essential=꼭 드는 이사 비용, purchase=새로 사는 살림, optional=선택·나중에' };
   const S_BRAND = { type: 'string', enum: ['LG', '삼성', '기타', ''], description: '제조사 (LG·삼성이 아니면 기타, 모르면 "")' };
+  const S_MODEL = { type: 'string', description: '명판·라벨에 적힌 모델명 (지우려면 "")' };
   const S_VIA = { type: 'boolean', description: 'true = 제조사 서비스(LG 베스트케어·삼성전자서비스)로 옮김, false = 이삿짐센터가 옮김' };
   const TOOLS = [
     {
@@ -1695,45 +1710,49 @@
     },
     {
       name: 'list_inventory', label: '짐 목록 보는 중',
-      description: '짐 목록(가구·가전)을 찾아요. 결과 {total, items:[{id, name, cat, fate, qty, size(가로×깊이×높이), brand(제조사 LG·삼성·기타, ""=모름), lg(true=제조사 서비스(LG 베스트케어·삼성전자서비스)로 옮김, false=이삿짐센터), moveBy(누가 옮기는지), serviceNote, room, roomNew, note}]}. fate: move=가져감, buy=새로 구매, discard=버림, sell=판매·나눔, undecided=미정.',
+      description: '짐 목록(가구·가전)을 찾아요. 결과 {total, items:[{id, name, cat, fate, qty, size(가로×깊이×높이), assumedSize(true=추정 규격), brand(제조사 LG·삼성·기타, ""=모름), model(명판 모델명, ""=아직 없음), lg(true=제조사 서비스(LG 베스트케어·삼성전자서비스)로 옮김, false=이삿짐센터), moveBy(누가 옮기는지), serviceNote, room, roomNew, note}]}. fate: move=가져감, buy=새로 구매, discard=버림, sell=판매·나눔, undecided=미정.',
       inputSchema: {
         type: 'object',
         properties: {
           fate: { type: 'string', enum: ['move', 'buy', 'discard', 'sell', 'undecided'] },
           cat: { type: 'string', enum: MV.inv.CATS.map((c) => c.id) },
           brand: { type: 'string', enum: ['LG', '삼성', '기타', '모름'], description: '제조사로 거르기' },
-          query: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 80 },
+          spec: { type: 'string', enum: ['need', 'model', 'done', 'open'], description: '규격 확인 대상만: need=확인 필요(추정·모델명 없음), model=모델명 받음(아직 추정), done=확정, open=need+model' },
+          query: { type: 'string', description: '이름·메모·위치·모델명에서 찾기' }, limit: { type: 'integer', minimum: 1, maximum: 80 },
         },
       },
       run: (a) => {
         const fate = a.fate ? parseFate(a.fate) : null;
         const cat = a.cat ? parseCat(a.cat) : null;
         const brand = has(a, 'brand') && a.brand !== '' ? parseBrand(a.brand) : null;
+        const spec = ['need', 'model', 'done', 'open'].indexOf(String(a.spec || '')) >= 0 ? String(a.spec) : null;
+        const specFn = spec && MV.inv.specTarget ? (x) => MV.inv.specTarget(x) && (spec === 'open' ? MV.inv.specStatus(x) !== 'done' : MV.inv.specStatus(x) === spec) : null;
         const words = str(a.query, 80).toLowerCase().split(/\s+/).filter(Boolean);
         const limit = MV.clamp(Math.round(num(a.limit) || 40), 1, 80);
         const list = MV.inv.list((x) => {
           if (fate && x.fate !== fate) return false;
           if (cat && x.cat !== cat) return false;
           if (brand !== null && (x.brand || '') !== brand) return false;
+          if (specFn && !specFn(x)) return false;
           if (words.length) {
-            const hay = (x.name + ' ' + (x.note || '') + ' ' + (x.room || '') + ' ' + (x.roomNew || '') + ' ' + (x.tag || '') + ' ' + (x.brand || '')).toLowerCase();
+            const hay = (x.name + ' ' + (x.note || '') + ' ' + (x.room || '') + ' ' + (x.roomNew || '') + ' ' + (x.tag || '') + ' ' + (x.brand || '') + ' ' + (x.model || '')).toLowerCase();
             if (!words.every((w) => hay.indexOf(w) >= 0)) return false;
           }
           return true;
         });
         const bl = blockedMap();
-        return { total: list.length, items: list.slice(0, limit).map((x) => invView(x, bl)), link: '#/stuff/inventory' };
+        return { total: list.length, items: list.slice(0, limit).map((x) => invView(x, bl)), link: spec ? '#/stuff/inventory/spec' : '#/stuff/inventory' };
       },
     },
     {
       name: 'update_inventory', label: '짐 고치는 중',
-      description: '짐 하나를 고쳐요: name, cat, fate(처리), qty, w·d·h(cm, 실측하면 추정 표시가 없어짐), url, note, brand(제조사 LG·삼성·기타, 모르면 ""), lg(true = 제조사 서비스(LG 베스트케어·삼성전자서비스)로 옮김, false = 이삿짐센터), room, roomNew. 바꿀 것만 넣으세요.',
+      description: '짐 하나를 고쳐요: name, cat, fate(처리), qty, w·d·h(cm, 실측하면 추정 표시가 없어짐), url, note, brand(제조사 LG·삼성·기타, 모르면 ""), model(명판·라벨의 모델명 — 넣어도 추정 표시는 그대로, 그 모델의 정확한 크기를 알 때만 w·d·h 도 넣기), lg(true = 제조사 서비스(LG 베스트케어·삼성전자서비스)로 옮김, false = 이삿짐센터), room, roomNew. 바꿀 것만 넣으세요.',
       inputSchema: {
         type: 'object',
         properties: {
           id: { type: 'string' }, name: { type: 'string' }, cat: { type: 'string' }, fate: { type: 'string', enum: ['move', 'buy', 'discard', 'sell', 'undecided'] },
           qty: { type: 'integer' }, w: { type: 'number' }, d: { type: 'number' }, h: { type: 'number' },
-          url: { type: 'string' }, note: { type: 'string' }, brand: S_BRAND, lg: S_VIA, room: { type: 'string' }, roomNew: { type: 'string' },
+          url: { type: 'string' }, note: { type: 'string' }, brand: S_BRAND, model: S_MODEL, lg: S_VIA, room: { type: 'string' }, roomNew: { type: 'string' },
         },
         required: ['id'],
       },
@@ -1752,13 +1771,13 @@
     },
     {
       name: 'add_inventory', label: '짐 추가하는 중',
-      description: '짐 목록에 가구·가전을 추가해요. 크기(w·d·h, cm)를 모르면 비워 두세요 — 비슷한 규격 프리셋으로 추정하고 "추정"으로 표시해요. fate 기본 move(가져감). 가전은 brand(제조사 LG·삼성·기타)를 넣고, 제조사 서비스(LG 베스트케어·삼성전자서비스)로 옮길 때만 lg:true (기본 false = 이삿짐센터).',
+      description: '짐 목록에 가구·가전을 추가해요. 크기(w·d·h, cm)를 모르면 비워 두세요 — 비슷한 규격 프리셋으로 추정하고 "추정"으로 표시해요. fate 기본 move(가져감). 모델명을 알면 model 에 넣어요. 가전은 brand(제조사 LG·삼성·기타)를 넣고, 제조사 서비스(LG 베스트케어·삼성전자서비스)로 옮길 때만 lg:true (기본 false = 이삿짐센터).',
       inputSchema: {
         type: 'object',
         properties: {
           name: { type: 'string' }, cat: { type: 'string', enum: MV.inv.CATS.map((c) => c.id) }, fate: { type: 'string', enum: ['move', 'buy', 'discard', 'sell', 'undecided'] },
           qty: { type: 'integer' }, w: { type: 'number' }, d: { type: 'number' }, h: { type: 'number' },
-          url: { type: 'string' }, note: { type: 'string' }, brand: S_BRAND, lg: S_VIA, room: { type: 'string' }, roomNew: { type: 'string' },
+          url: { type: 'string' }, note: { type: 'string' }, brand: S_BRAND, model: S_MODEL, lg: S_VIA, room: { type: 'string' }, roomNew: { type: 'string' },
         },
         required: ['name'],
       },
@@ -1791,7 +1810,7 @@
         const it = MV.store.normInv(p);
         mutate(ctx, () => MV.store.update((st) => { if (!Array.isArray(st.inventory)) st.inventory = []; st.inventory.push(it); }, { log: '🤖 짐 추가: ' + it.name }), { inventory: [it.id] });
         record(ctx, '📦 짐 추가: ' + clip(it.name, 30) + ' (' + MV.inv.fate(it.fate).label + ', ' + it.w + '×' + it.d + '×' + it.h + 'cm' + (it.assumed ? ' 추정' : '') +
-          (it.brand ? ', 제조사 ' + brandName(it.brand) : '') + (it.lg ? ', 제조사 서비스로 옮김' : '') + ')', '#/stuff/inventory');
+          (it.brand ? ', 제조사 ' + brandName(it.brand) : '') + (it.model ? ', 모델명 ' + clip(it.model, 30) : '') + (it.lg ? ', 제조사 서비스로 옮김' : '') + ')', '#/stuff/inventory');
         const bl = blockedMap();
         return { id: it.id, item: invView(it, bl), sizeNote: it.assumed ? (preset ? '규격은 “' + preset.name + '” 프리셋으로 추정했어요 — 실측하면 알려 주세요.' : '규격을 몰라 60×60×60cm 로 넣었어요 — 실측하면 알려 주세요.') : '',
           brandNote: brandNote || undefined, warning: bl[it.id] || undefined };

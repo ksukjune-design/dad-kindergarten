@@ -85,7 +85,33 @@
       connecting: '⏳ 공유 저장소에 연결하는 중이에요.',
     };
     const extraText = (typeof Y.statusText === 'function') ? Y.statusText() : '';
-    const syncCard = (Y.mode !== 'local' || Y.status === 'offline' || (!SYNC_TEXT[Y.status] && extraText)) ? el('div', { class: 'card flat tint-kid' },
+    // 깃허브 페이지 버전: 함께 쓰기(파이어베이스) — 설정 전에는 설정 안내, 설정 뒤에는 상태 + 함께 쓰기 화면 열기
+    const FB = MV.fb && MV.fb.available ? MV.fb : null;
+    const goTogether = () => { m.close(); MV.go('#/together'); };
+    const fbText = () => {
+      if (FB.state === 'error') return '⚠ ' + (FB.error || '함께 쓰기를 시작하지 못했어요.') + ' 그동안 바꾼 내용은 이 기기에 저장돼요.';
+      if (FB.state === 'loading' || FB.state === 'off') return '⏳ 함께 쓰기를 준비하는 중이에요.';
+      if (FB.state === 'login') return extraText || '🔑 로그인하면 부부가 같은 기록을 봐요.';
+      const who = FB.user && FB.user.email ? ' (' + FB.user.email + ')' : '';
+      if (Y.status === 'synced') return '🔗 공유 중이에요' + who + '. 부부가 같은 기록을 보고, 바꾼 내용이 바로 서로에게 보여요.';
+      return SYNC_TEXT[Y.status] || extraText || '이 기기에만 저장돼요.';
+    };
+    const fbCard = FB ? el('div', { class: 'card flat tint-kid' },
+      el('h3', '함께 쓰기'),
+      FB.configured
+        ? el('p', { class: 'small' }, fbText())
+        : el('p', { class: 'small' }, '아내와 같은 기록을 보고 함께 고치려면 함께 쓰기를 설정하세요 (처음 한 번, 약 15분).'),
+      FB.configured && Y.empty && !Y.readOnly && Y.mode === 'shared' ? el('button', { class: 'btn btn-kid', type: 'button', onclick: () => {
+        MV.ui.confirm('지금 이 기기의 체크·메모·짐 목록으로 공유를 시작할까요?', { okLabel: '공유 시작' }).then((ok) => {
+          if (ok && Y.initFromLocal()) { m.close(); MV.ui.toast('공유를 시작했어요.'); }
+        });
+      } }, '이 기기 기록으로 공유 시작') : null,
+      el('div', { class: 'row mt-8' },
+        el('button', { class: 'btn' + (FB.configured ? '' : ' btn-kid'), type: 'button', onclick: goTogether }, FB.configured ? '함께 쓰기 화면 열기' : '함께 쓰기 설정'),
+        Y.localBackup && Y.localBackup() ? el('button', { class: 'btn btn-sm btn-ghost', type: 'button', onclick: () => {
+          MV.ui.download('move-before-share.json', Y.localBackup());
+        } }, '공유 전 이 기기 기록 받기') : null)) : null;
+    const syncCard = FB ? fbCard : (Y.mode !== 'local' || Y.status === 'offline' || (!SYNC_TEXT[Y.status] && extraText)) ? el('div', { class: 'card flat tint-kid' },
       el('h3', '함께 쓰기'),
       el('p', { class: 'small' }, SYNC_TEXT[Y.status] || extraText || '이 기기에만 저장돼요.'),
       Y.empty && !Y.readOnly ? el('button', { class: 'btn btn-kid', type: 'button', onclick: () => {
@@ -99,7 +125,9 @@
     const body = el('div', { class: 'stack' },
       el('p', { class: 'small muted' }, shared
         ? '기록은 공유 저장소와 이 브라우저에 함께 저장돼요. 혹시 모르니 중요한 날 전에는 백업 파일도 받아 두세요.'
-        : '모든 기록은 이 브라우저 안에만 저장됩니다 (서버로 나가지 않음). 다른 기기·배우자와 맞추려면 백업 파일을 보내고 그쪽에서 복원하세요.'),
+        : FB
+          ? '지금 기록은 이 브라우저 안에만 저장돼요. 아내와 같은 기록을 쓰려면 함께 쓰기에 로그인하거나, 백업 파일을 보내고 그쪽에서 복원하세요.'
+          : '모든 기록은 이 브라우저 안에만 저장됩니다 (서버로 나가지 않음). 다른 기기·배우자와 맞추려면 백업 파일을 보내고 그쪽에서 복원하세요.'),
       syncCard,
       el('div', { class: 'card flat' },
         el('h3', '백업 · 복원'),
