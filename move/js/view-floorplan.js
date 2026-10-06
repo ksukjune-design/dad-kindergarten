@@ -2991,6 +2991,8 @@
       // 새 방: 이름을 직접 안 고쳤으면 종류를 바꿀 때 이름도 따라감
       let nameTouched = !isNew;
       f.name.addEventListener('input', () => { nameTouched = true; });
+      // 새 방: 미리 넣은 이름('방 2' 등)은 처음 칸에 들어가면 통째로 골라 두어, 바로 치면 바뀌게
+      if (isNew) f.name.addEventListener('focus', () => { if (!nameTouched) { try { f.name.select(); } catch (e) { /* 무시 */ } } });
       const prev = el('div', { class: 'fp-area-prev', 'aria-live': 'polite' });
       const read = () => ({ name: f.name.value.trim(), kind: f.kind.value, w: parseFloat(f.w.value), h: parseFloat(f.h.value), x: parseFloat(f.x.value), y: parseFloat(f.y.value) });
       const fallbackName = (v) => v.name || (isNew ? uniqName(plan, kindLabel(v.kind)) : r.orig.name);
