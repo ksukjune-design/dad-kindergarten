@@ -79,15 +79,15 @@
   /* ---------- 스타일 ---------- */
   MV.css('db', `
 .db-sr { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
-.db-grid { display:grid; gap:14px; grid-template-columns:repeat(12, minmax(0, 1fr)); align-items:start; }
+.db-grid { display:grid; gap:14px; grid-template-columns:repeat(12, minmax(0, 1fr)); align-items:stretch; }
 .db-grid > .card, .db-side > .card { margin:0; min-width:0; }
 .db-span-12 { grid-column:1 / -1; }
 .db-span-7 { grid-column:span 7; }
 .db-span-5 { grid-column:span 5; }
-.db-side { grid-column:span 5; display:grid; gap:14px; align-content:start; min-width:0; }
+.db-side { grid-column:span 5; display:grid; gap:14px; align-content:start; align-items:stretch; min-width:0; }
 @media (max-width: 1100px) {
   .db-span-7, .db-span-5 { grid-column:1 / -1; }
-  .db-side { grid-column:1 / -1; grid-template-columns:repeat(2, minmax(0, 1fr)); align-items:start; }
+  .db-side { grid-column:1 / -1; grid-template-columns:repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 680px) { .db-side { grid-template-columns:1fr; } .db-grid { gap:12px; } }
 
@@ -95,6 +95,7 @@
 .db-head h2 { margin:0; font-size:1.02rem; display:flex; align-items:center; gap:7px; }
 .db-head-ico { font-size:1.05rem; }
 .db-head-sub { color:var(--ink-3); font-size:.8rem; }
+@media (max-width: 420px) { .db-now-sub { display:none; } }
 .db-more { margin-left:auto; display:inline-flex; align-items:center; min-height:36px; padding:0 4px; font-size:.85rem; font-weight:700; text-decoration:none; white-space:nowrap; }
 .db-more:hover { text-decoration:underline; }
 
@@ -252,10 +253,24 @@ button.db-wk-head:hover { background:var(--bg-3); }
 .db-tile-emo { font-size:1.2rem; flex:none; }
 .db-tile-name { font-weight:750; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .db-tile-count { margin-left:auto; flex:none; font-size:.8rem; color:var(--ink-3); font-variant-numeric:tabular-nums; font-weight:700; }
-.db-tile .progress { height:6px; }
+.db-tile .progress { height:6px; flex:1; min-width:0; }
+.db-tile-bar { display:flex; align-items:center; gap:6px; }
+.db-tile-count2 { display:none; font-size:.72rem; color:var(--ink-3); font-variant-numeric:tabular-nums; font-weight:700; }
 .db-tile-next { font-size:.78rem; color:var(--ink-3); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .db-tile-next.is-late { color:var(--bad); }
 .db-tile.is-complete .db-tile-next { color:var(--good); font-weight:700; }
+@media (max-width: 520px) {
+  .db-tiles { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:6px; }
+  .db-tile { padding:8px 10px; gap:4px; }
+  .db-tile-top { gap:5px; }
+  .db-tile-top { align-items:flex-start; }
+  .db-tile-emo { font-size:1.05rem; line-height:1.3; }
+  .db-tile-name { font-size:.86rem; line-height:1.3; white-space:normal; overflow:visible; }
+  .db-tile-count { display:none; }
+  .db-tile-count2 { display:inline; }
+  .db-tile .badge { height:18px; min-width:18px; padding:0 5px; margin-left:auto; flex:none; }
+  .db-tile-next { font-size:.72rem; line-height:1.35; white-space:normal; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
+}
 
 /* 최근 활동 · 바로가기 */
 .db-acts { list-style:none; margin:0; padding:0; }
@@ -382,7 +397,7 @@ button.db-wk-head:hover { background:var(--bg-3); }
       upcoming.forEach((i) => body.appendChild(taskRow(i, pm)));
     }
     return el('section', { class: 'card db-now db-span-7', 'aria-label': '지금 할 일' },
-      head('✅', '지금 할 일', sub, moreLink('전체 보기 →', '#/checklist/~focus')),
+      head('✅', '지금 할 일', sub ? el('span', { class: 'db-now-sub' }, sub) : null, moreLink('전체 보기 →', '#/checklist/~focus')),
       body);
   }
 
@@ -754,7 +769,7 @@ button.db-wk-head:hover { background:var(--bg-3); }
           el('span', { class: 'db-tile-name' }, p.name),
           st.overdue ? el('span', { class: 'badge', title: '기한 지난 항목' }, String(st.overdue)) : null,
           el('span', { class: 'db-tile-count' }, st.done + '/' + st.total)),
-        MV.ui.progress(st.pct),
+        el('div', { class: 'db-tile-bar' }, MV.ui.progress(st.pct), el('span', { class: 'db-tile-count2', 'aria-hidden': 'true' }, st.done + '/' + st.total)),
         nextEl);
     };
     const body = parts.length

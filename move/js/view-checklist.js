@@ -222,6 +222,19 @@
   }
 
   /* ---------------- DOM 도우미 ---------------- */
+  /* 자식 바꾸기: 배열은 펴고 null/false/'' 는 건너뜀 (replaceChildren 은 배열·null 을 글자로 바꿔 버림) */
+  function put(node, ...kids) {
+    const flat = [];
+    (function walk(list) {
+      list.forEach((k) => {
+        if (k === null || k === undefined || k === false || k === '') return;
+        if (Array.isArray(k)) walk(k);
+        else flat.push(k instanceof Node ? k : document.createTextNode(String(k)));
+      });
+    })(kids);
+    node.replaceChildren(...flat);
+    return node;
+  }
   function autosize(ta, max) {
     if (!ta || !ta.isConnected || !ta.getClientRects().length) return;
     ta.style.height = 'auto';
@@ -349,7 +362,7 @@
       chans,
       el('div', { class: 'ck-side-foot' },
         el('button', { type: 'button', class: 'ck-addpart', onclick: () => addPart() }, el('span', { 'aria-hidden': 'true' }, '＋'), ' 파트 추가'),
-        el('p', { class: 'ck-keys' }, el('kbd', '/'), ' 검색 · ', el('kbd', 'n'), ' 새 할 일 · ', el('kbd', 'j'), el('kbd', 'k'), ' 이동 · ', el('kbd', 'Esc'), ' 닫기')));
+        el('p', { class: 'ck-keys' }, el('kbd', '/'), ' 검색 · ', el('kbd', 'n'), ' 추가 · ', el('kbd', 'j'), el('kbd', 'k'), ' 이동 · ', el('kbd', 'Esc'), ' 닫기')));
 
     const head = el('header', { class: 'ck-head' });
     const sub = el('div', { class: 'ck-sub' });
@@ -504,7 +517,7 @@
       const fk = focusKeyIn(side);
       const active = cur.ch === '~search' ? null : (cur.ch || (isPhone() ? null : '~focus'));
       const dd = D.dday(D.moveDate());
-      sideTop.replaceChildren(
+      put(sideTop, 
         el('div', { class: 'ck-ws-row' },
           el('h1', { class: 'ck-ws-title' }, '체크리스트'),
           el('span', { class: 'ck-ws-sub' }, c.done + '/' + c.total + ' 완료')),
@@ -534,7 +547,7 @@
           })));
       });
       if (!groups.length) nodes.push(el('p', { class: 'ck-side-empty' }, '파트가 없어요. 아래에서 새 파트를 만들어 보세요.'));
-      chans.replaceChildren(...nodes);
+      put(chans, ...nodes);
       restoreFocusIn(side, fk);
     }
 
@@ -565,7 +578,7 @@
         type: 'button', class: 'btn btn-ghost btn-icon ck-menu-btn', 'aria-label': '채널 메뉴', 'data-fkey': 'menu', title: '수정·복사·삭제',
         onclick: () => openMenu(),
       }, '⋯') : null;
-      head.replaceChildren(el('div', { class: 'ck-head-top' },
+      put(head, el('div', { class: 'ck-head-top' },
         backBtn,
         el('span', { class: 'ck-head-emo', 'aria-hidden': 'true' }, info.emoji),
         el('h2', { class: 'ck-head-title', title: info.name }, info.name),
@@ -604,7 +617,7 @@
             onclick: () => { mem.doneOpen = {}; setUI({ hideDone: !ui().hideDone }); },
           }, el('span', { class: 'ck-switch', 'aria-hidden': 'true' }), '완료 숨기기') : null);
       }
-      sub.replaceChildren(
+      put(sub, 
         info.desc ? el('p', { class: 'ck-head-desc' }, info.desc) : null,
         (summary || filters) ? el('div', { class: 'ck-head-bar' }, summary, filters) : null);
       sub.hidden = !sub.firstChild;
@@ -905,7 +918,7 @@
       const fk = focusKeyIn(list);
       let nodes;
       try { nodes = buildList(ch); } catch (e) { console.error(e); nodes = [emptyState('⚠️', '목록을 그리다 문제가 생겼어요: ' + (e && e.message))]; }
-      list.replaceChildren(...nodes);
+      put(list, ...nodes);
       if (!isPhone()) list.scrollTop = opts.restore ? (mem.listScroll[key] || 0) : prevScroll;
       restoreFocusIn(list, fk);
       if (pendingFlash) {
@@ -948,7 +961,7 @@
         sel.dataset.sig = sig;
         const groups = []; const gmap = new Map();
         parts.forEach((p) => { const g = p.group || '기타'; if (!gmap.has(g)) { gmap.set(g, []); groups.push(g); } gmap.get(g).push(p); });
-        sel.replaceChildren(
+        put(sel, 
           placeholder ? el('option', { value: '' }, placeholder) : null,
           groups.map((g) => el('optgroup', { label: g }, gmap.get(g).map((p) => el('option', { value: p.id }, partLabel(p))))));
       }
@@ -975,7 +988,7 @@
       mem.draft = raw;
       composer.classList.toggle('ck-has-text', !!raw.trim());
       if (!raw.trim()) {
-        compPrev.replaceChildren(el('span', { class: 'ck-hint' },
+        put(compPrev, el('span', { class: 'ck-hint' },
           '빠른 입력: ', el('code', '~10/15'), ' ', el('code', '~내일'), ' ', el('code', '~D-3'), ' 마감 · ', el('code', '!중요'), ' · ', el('code', '@아내')));
         return;
       }
@@ -995,7 +1008,7 @@
         if (pt) chips.push(el('span', { class: 'ck-prev-to' }, '→ ' + partLabel(pt)));
       }
       if (!p.title) chips.push(el('span', { class: 'ck-prev-warn' }, '할 일 내용을 적어 주세요'));
-      compPrev.replaceChildren(...chips);
+      put(compPrev, ...chips);
     }
     function addFromComposer() {
       const raw = compInput.value.trim();
@@ -1064,7 +1077,7 @@
 
     function clearThread() {
       T.id = null; T.f = {}; T.notesSig = ''; T.linksSig = '';
-      thread.replaceChildren();
+      put(thread);
     }
     function curItem() { return T.id ? MV.items.get(T.id) : null; }
 
@@ -1272,7 +1285,7 @@
       f.noteSend.addEventListener('click', sendNote);
       const foot = el('div', { class: 'ck-th-foot' }, el('div', { class: 'ck-note-row' }, f.noteInput, f.noteSend));
 
-      thread.replaceChildren(headEl, f.body, foot);
+      put(thread, headEl, f.body, foot);
       syncThread(true);
       f.body.scrollTop = 0;
       requestAnimationFrame(() => { if (T.f === f) { autosize(f.title); autosize(f.detail, 420); autosize(f.noteInput, 160); } });
@@ -1283,8 +1296,8 @@
       if (!f.detailPrev) return;
       const has = /https?:\/\//.test(text || '');
       f.detailPrev.hidden = !has;
-      if (has) f.detailPrev.replaceChildren(el('span', { class: 'ck-prev-lbl' }, '링크 미리보기'), el('div', MV.linkify(text)));
-      else f.detailPrev.replaceChildren();
+      if (has) put(f.detailPrev, el('span', { class: 'ck-prev-lbl' }, '링크 미리보기'), el('div', MV.linkify(text)));
+      else put(f.detailPrev);
     }
 
     function syncThread(initial) {
@@ -1312,7 +1325,7 @@
       // 완료
       f.doneBtn.className = 'ck-th-done' + (it.done ? ' ck-on' : '');
       f.doneBtn.setAttribute('aria-pressed', String(!!it.done));
-      f.doneBtn.replaceChildren(el('span', { class: 'ck-cb-box', 'aria-hidden': 'true' }), it.done ? '완료됨 · ' + D.time(it.doneAt) : '완료로 표시');
+      put(f.doneBtn, el('span', { class: 'ck-cb-box', 'aria-hidden': 'true' }), it.done ? '완료됨 · ' + D.time(it.doneAt) : '완료로 표시');
       thread.classList.toggle('ck-th-isdone', !!it.done);
       // 제목·설명 (입력 중이면 건드리지 않음)
       if (ae !== f.title && f.title.value !== (it.title || '')) { f.title.value = it.title || ''; autosize(f.title); }
@@ -1324,10 +1337,10 @@
       if (dueStr) {
         const dd = D.dday(dueStr);
         const toMove = D.diff(dueStr, D.moveDate());
-        f.dueInfo.replaceChildren(MV.ui.dueChip(dueStr, it.done), el('span', { class: 'ck-due-move' },
+        put(f.dueInfo, MV.ui.dueChip(dueStr, it.done), el('span', { class: 'ck-due-move' },
           toMove > 0 ? '이사 ' + toMove + '일 전' : toMove === 0 ? '이사 당일' : '이사 ' + (-toMove) + '일 후'));
         f.dueInfo.title = D.fmtLong(dueStr) + ' · ' + dd.label;
-      } else f.dueInfo.replaceChildren(el('span', { class: 'chip' }, '기한 없음'));
+      } else put(f.dueInfo, el('span', { class: 'chip' }, '기한 없음'));
       f.prio.set(it.priority || 'mid');
       f.owner.set(it.owner || '');
       // 링크·가이드
@@ -1335,7 +1348,7 @@
       const lsig = JSON.stringify(links);
       if (lsig !== T.linksSig) {
         T.linksSig = lsig;
-        f.links.replaceChildren(...(links.length ? links.map((l, i) => el('div', { class: 'ck-link' },
+        put(f.links, ...(links.length ? links.map((l, i) => el('div', { class: 'ck-link' },
           el('a', { href: l.url, target: '_blank', rel: 'noopener noreferrer' }, '🔗 ', l.label || l.url),
           el('button', { type: 'button', class: 'ck-x', 'aria-label': '링크 지우기: ' + (l.label || l.url), onclick: () => {
             const x = curItem(); if (!x) return;
@@ -1345,7 +1358,7 @@
           : [el('p', { class: 'ck-none' }, '견적서·제품 페이지 주소를 붙여 두면 편해요.')]));
       }
       const g = it.guide || (p && p.guide) || '';
-      f.guide.replaceChildren(g ? el('a', { class: 'ck-guide-link', href: guideHash(g) }, '📖 ', it.guide ? '관련 가이드 보기' : (p ? p.name + ' 가이드 보기' : '가이드 보기')) : '');
+      put(f.guide, g ? el('a', { class: 'ck-guide-link', href: guideHash(g) }, '📖 ', it.guide ? '관련 가이드 보기' : (p ? p.name + ' 가이드 보기' : '가이드 보기')) : '');
       f.guide.hidden = !g;
       // 메모
       const notes = it.notes || [];
@@ -1354,7 +1367,7 @@
       if (nsig !== T.notesSig) {
         T.notesSig = nsig;
         const fk = focusKeyIn(f.notes);
-        f.notes.replaceChildren(...(notes.length ? notes.map((n) => el('div', { class: 'ck-note', 'data-nid': n.id },
+        put(f.notes, ...(notes.length ? notes.map((n) => el('div', { class: 'ck-note', 'data-nid': n.id },
           el('span', { class: 'ck-note-ava', 'aria-hidden': 'true' }, '📝'),
           el('div', { class: 'ck-note-body' },
             el('div', { class: 'ck-note-meta' },
@@ -1585,7 +1598,7 @@
 .ck-composer { flex: none; padding: 10px 12px 12px; border-top: 1px solid var(--line); background: var(--bg-2); }
 .ck-comp-row { display: flex; align-items: center; gap: 8px; }
 .ck-comp-part { flex: 0 1 auto; width: auto; max-width: 38%; min-height: 44px; font-size: .85rem; }
-.ck-comp-input { flex: 1 1 auto; min-width: 0; min-height: 44px; }
+.ck-comp-input { flex: 1 1 0; min-width: 0; min-height: 44px; }
 .ck-comp-btn { flex: none; min-height: 44px; }
 .ck-comp-prev { display: none; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 7px; min-height: 22px; font-size: .76rem; color: var(--ink-3); }
 .ck-composer:focus-within .ck-comp-prev, .ck-composer.ck-has-text .ck-comp-prev { display: flex; }
@@ -1706,17 +1719,23 @@
   .ck-th-foot { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
   .ck-backdrop { display: block; position: fixed; inset: 0; z-index: 55; background: rgba(20,18,15,.4); opacity: 0; pointer-events: none; transition: opacity .2s; }
   .ck.ck-open .ck-backdrop { opacity: 1; pointer-events: auto; }
-  .ck-guide-lbl { display: none; }
 }
 
 /* ---------- 폰: 화면을 쌓아서 ---------- */
 @media (max-width: 699px) {
+  .view[data-view="checklist"] { padding-bottom: calc(var(--bottom-h) + env(safe-area-inset-bottom)); }
   .ck-phone-only { display: inline-flex !important; }
-  .ck { display: block; }
+  .ck { display: block; --ck-screen-h: calc(100vh - var(--topbar-h) - var(--bottom-h) - 14px); }
+  @supports (height: 100dvh) { .ck { --ck-screen-h: calc(100dvh - var(--topbar-h) - var(--bottom-h) - 14px - env(safe-area-inset-bottom)); } }
+  .ck[data-screen="list"] .ck-main, .ck[data-screen="search"] .ck-main { min-height: var(--ck-screen-h); flex-direction: column; }
+  .ck[data-screen="list"] .ck-list { flex: 1 0 auto; }
+  .ck[data-screen="thread"] .ck-thread { min-height: var(--ck-screen-h); flex-direction: column; }
+  .ck[data-screen="thread"] .ck-th-body { flex: 1 0 auto; }
+  .ck[data-screen="channels"] .ck-side { padding-bottom: 20px; }
   .ck-side, .ck-main, .ck-thread, .ck-backdrop { display: none; }
   .ck[data-screen="channels"] .ck-side, .ck[data-screen="search"] .ck-side { display: block; background: transparent; border: 0; }
-  .ck[data-screen="list"] .ck-main, .ck[data-screen="search"] .ck-main { display: block; background: transparent; }
-  .ck[data-screen="thread"] .ck-thread { display: block; background: transparent; }
+  .ck[data-screen="list"] .ck-main, .ck[data-screen="search"] .ck-main { display: flex; background: transparent; }
+  .ck[data-screen="thread"] .ck-thread { display: flex; background: transparent; }
   .ck[data-screen="search"] .ck-ws, .ck[data-screen="search"] .ck-chans, .ck[data-screen="search"] .ck-side-foot { display: none; }
   .ck[data-screen="search"] .ck-side-head { padding: 0 0 8px; }
   .ck[data-screen="search"] .ck-head { display: none; }
@@ -1791,7 +1810,7 @@
         mount(root, params, ctx);
       } catch (e) {
         console.error(e);
-        root.replaceChildren(el('div', { class: 'card tint-bad' }, el('h2', '체크리스트를 여는 중 문제가 생겼어요'), el('p', { class: 'small' }, String(e && e.message || e)),
+        put(root, el('div', { class: 'card tint-bad' }, el('h2', '체크리스트를 여는 중 문제가 생겼어요'), el('p', { class: 'small' }, String(e && e.message || e)),
           el('button', { type: 'button', class: 'btn', onclick: () => MV.rerender() }, '다시 시도')));
       }
     },

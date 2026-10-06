@@ -259,7 +259,9 @@
     radial-gradient(farthest-side at 100% 50%, color-mix(in srgb, var(--ink) 22%, transparent), transparent) right center / 12px 100% no-repeat scroll,
     var(--bg-2); }
 .gd-tablewrap table { width:100%; border-collapse:collapse; margin:0; font-size:.88rem; line-height:1.5; }
-.gd-tablewrap th, .gd-tablewrap td { padding:8px 11px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; overflow-wrap:normal; min-width:4.5em; }
+.gd-tablewrap th, .gd-tablewrap td { padding:8px 11px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; overflow-wrap:normal; }
+.gd-tablewrap td { min-width:6.5em; }
+.gd-tablewrap td.num, .gd-tablewrap td:first-child { min-width:4em; }
 .gd-tablewrap thead th { font-size:.78rem; color:var(--ink-2); font-weight:800; white-space:nowrap; background:color-mix(in srgb, var(--bg-3) 70%, transparent); }
 .gd-tablewrap tr:last-child td { border-bottom:0; }
 .gd-tablewrap td.num, .gd-tablewrap th.num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
@@ -272,8 +274,8 @@
 .gd-copybtn.is-done { border-color:var(--good); color:var(--good); }
 .gd-copybtn.is-inline { min-height:26px; padding:0 7px; margin-left:5px; vertical-align:1px; }
 @media (pointer: coarse) { .gd-copybtn { min-height:36px; } .gd-copybtn.is-inline { min-height:32px; } }
-@keyframes gd-flash { 0%, 30% { background:color-mix(in srgb, var(--brand) 22%, transparent); box-shadow:0 0 0 6px color-mix(in srgb, var(--brand) 22%, transparent); } 100% { background:transparent; box-shadow:0 0 0 6px transparent; } }
-.gd-flash { animation:gd-flash 2s ease-out; border-radius:6px; }
+@keyframes gd-flash { 0%, 35% { background-color:color-mix(in srgb, var(--brand) 20%, transparent); } 100% { background-color:transparent; } }
+.gd-flash { animation:gd-flash 2s ease-out; background-clip:content-box; border-radius:6px; }
 
 /* 꼬리말 */
 .gd-foot { margin-top:32px; display:flex; flex-direction:column; gap:14px; }
