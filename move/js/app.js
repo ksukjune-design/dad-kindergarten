@@ -61,7 +61,9 @@
             m.close();
             MV.ui.toast('백업에서 복원했어요.');
           } catch (e) {
-            MV.ui.toast('복원하지 못했어요: ' + e.message, { ms: 6000 });
+            console.error('[복원]', e);
+            const why = MV.ui.errorText ? MV.ui.errorText(e, '백업 파일 내용을 이 앱에서 읽을 수 없어요. 이 앱에서 저장한 백업 파일인지 확인해 주세요.') : '이 앱에서 저장한 백업 파일인지 확인해 주세요.';
+            MV.ui.toast('복원하지 못했어요. ' + why, { ms: 6000 });
           }
         });
       };
@@ -71,7 +73,7 @@
     const theme = document.documentElement.dataset.theme || '';
     const stamp = new Date();
     const pad = (n) => String(n).padStart(2, '0');
-    const fname = 'move-backup-' + stamp.getFullYear() + pad(stamp.getMonth() + 1) + pad(stamp.getDate()) + '-' + pad(stamp.getHours()) + pad(stamp.getMinutes()) + '.json';
+    const fname = '이사관리-백업-' + stamp.getFullYear() + pad(stamp.getMonth() + 1) + pad(stamp.getDate()) + '-' + pad(stamp.getHours()) + pad(stamp.getMinutes()) + '.json';
     const Y = MV.sync || { mode: 'local', status: 'local' };
     const shared = Y.mode === 'shared';
     const SYNC_TEXT = {
@@ -91,7 +93,7 @@
         });
       } }, '이 기기 기록으로 공유 시작') : null,
       Y.localBackup && Y.localBackup() ? el('button', { class: 'btn btn-sm btn-ghost mt-8', type: 'button', onclick: () => {
-        MV.ui.download('move-before-share.json', Y.localBackup());
+        MV.ui.download('이사관리-공유전-기록.json', Y.localBackup());
       } }, '공유 전 이 기기 기록 받기') : null) : null;
     const body = el('div', { class: 'stack' },
       el('p', { class: 'small muted' }, shared

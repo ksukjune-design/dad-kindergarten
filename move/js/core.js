@@ -36,6 +36,9 @@
             MV.ui.toast(msg, {action:{label, onClick}, ms})
             MV.ui.progress(pct, cls) / MV.ui.dueChip(dateStr, done) / MV.ui.moneyInput(value, onChange, opts)
             MV.ui.download(filename, text, mime)  (공유 버전에서는 Promise)
+            MV.ui.errorBox(title, err, {small, hint, retry, cls}) 화면 오류 카드 (쉬운 안내 + 접힌 '자세히'에 오류 원문)
+            MV.ui.errorText(err, fallback) 한국어 메시지면 그대로, 영어 원문·코드면 fallback
+            MV.ui.saveErrorText(code) 공유 버전 파일 저장 오류 코드 → 한국어 (취소면 null)
    ============================================================ */
 (function (global) {
   'use strict';
@@ -435,7 +438,7 @@
   S.exportJSON = () => JSON.stringify(Object.assign({ _app: 'mv-move', _exportedAt: MV.nowISO() }, S.get()), null, 1);
   S.importJSON = function importJSON(text) {
     let st;
-    try { st = JSON.parse(text); } catch (e) { throw new Error('파일을 읽을 수 없어요. 이 앱에서 저장한 백업 파일(.json)인지 확인해 주세요.'); }
+    try { st = JSON.parse(text); } catch (e) { throw new Error('파일을 읽을 수 없어요. 이 앱에서 저장한 백업 파일인지 확인해 주세요.'); }
     const looksOk = validState(st) && (st._app === 'mv-move' || (typeof st.seedVersion === 'number' && st.items.every((i) => i && typeof i.id === 'string' && typeof i.title === 'string')));
     if (!looksOk) throw new Error('이 앱의 백업 파일이 아니에요.');
     delete st._app; delete st._exportedAt;
@@ -635,7 +638,7 @@
     f.h = el('input', { class: 'input num', type: 'number', min: '0', step: '1', value: draft.h });
     f.room = el('input', { class: 'input', value: draft.room, placeholder: '예: 안방' });
     f.roomNew = el('input', { class: 'input', value: draft.roomNew, placeholder: '예: 거실' });
-    f.url = el('input', { class: 'input', type: 'url', value: draft.url, placeholder: 'https:// 제품 페이지 주소' });
+    f.url = el('input', { class: 'input', type: 'url', value: draft.url, placeholder: '제품 페이지 주소를 붙여 넣으세요' });
     f.brand = el('select', { class: 'select' }, V.BRANDS.map((b) => el('option', { value: b.id, selected: b.id === (draft.brand || '') }, b.label)));
     f.lg = el('input', { type: 'checkbox', checked: !!draft.lg });
     f.ac = el('select', { class: 'select' }, el('option', { value: '' }, '해당 없음'), V.AC.map((a) => el('option', { value: a.id, selected: a.id === draft.ac }, a.label)));
@@ -801,14 +804,55 @@
     wrap.input = input;
     return wrap;
   };
+  /** 오류를 '자세히'에 넣을 글로 (코드·메시지·스택). 화면 본문에는 쓰지 않습니다. */
+  U.errorDetail = function errorDetail(err) {
+    if (err == null) return '';
+    if (typeof err !== 'object') return String(err);
+    const head = [err.code ? '코드: ' + err.code : '', err.message && !(err.stack && String(err.stack).indexOf(err.message) >= 0) ? String(err.message) : ''].filter(Boolean).join('\n');
+    return [head, err.stack ? String(err.stack) : ''].filter(Boolean).join('\n') || String(err);
+  };
+  /** 오류 메시지가 한국어로 쓴 안내이면 그대로, 아니면(영어 원문·코드) fallback */
+  U.errorText = function errorText(err, fallback) {
+    const m = err && typeof err === 'object' ? err.message : err;
+    return (typeof m === 'string' && /[가-힣]/.test(m)) ? m : (fallback || '문제가 생겼어요. 잠시 뒤 다시 해 보세요.');
+  };
+  /** 화면을 그리다 난 오류: 쉬운 안내 + 접힌 '자세히'(오류 원문). o: {small, hint, retry, cls} */
+  U.errorBox = function errorBox(title, err, o) {
+    o = o || {};
+    MV.css('mv-err', `
+      .mv-err-more { margin-top: 8px; font-size: .82rem; color: var(--ink-3); }
+      .mv-err-more > summary { cursor: pointer; display: inline-flex; align-items: center; min-height: 36px; font-weight: 700; color: var(--ink-2); }
+      .mv-err-more > pre { margin: 4px 0 0; padding: 8px 10px; max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: .74rem; background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px; }
+      .mv-err .mv-err-act { margin-top: 8px; }
+    `);
+    const detail = U.errorDetail(err);
+    return MV.el('div', { class: 'card tint-bad mv-err' + (o.cls ? ' ' + o.cls : ''), role: 'alert' },
+      o.small ? MV.el('p', { class: 'strong mb-0' }, title) : MV.el('h2', title),
+      MV.el('p', { class: 'small mb-0' }, o.hint || '이 부분만 문제가 생겼고, 저장된 기록은 그대로예요. 새로고침하거나 다른 화면에 갔다가 다시 와 보세요.'),
+      o.retry ? MV.el('button', { type: 'button', class: 'btn btn-sm mv-err-act', onclick: o.retry }, '다시 시도') : null,
+      detail ? MV.el('details', { class: 'mv-err-more' }, MV.el('summary', '자세히 (문제를 알릴 때 보여 주세요)'), MV.el('pre', detail)) : null);
+  };
+  /** 공유 버전의 파일 저장(downloads) 오류 코드 → 한국어 안내. 사용자가 취소했으면 null */
+  U.saveErrorText = function saveErrorText(code) {
+    switch (code) {
+      case 'declined': return null;
+      case 'rate_limited': return '저장 창이 이미 열려 있어요. 잠시 뒤 다시 눌러 주세요.';
+      case 'too_large': return '파일이 너무 커서 저장할 수 없어요.';
+      case 'rejected_extension': case 'extension_not_enabled': return '이 파일 형식은 이 화면에서 저장할 수 없어요.';
+      case 'bad_request': case 'transform_error': case 'request_unknown': return '파일을 만들지 못해 저장하지 못했어요. 새로고침한 뒤 다시 해 보세요.';
+      default: return '이 화면에서는 파일을 저장할 수 없어요. 깃허브 페이지 버전 주소로 열어서 저장해 주세요.';
+    }
+  };
   U.download = function download(filename, text, mime) {
     // claude.ai 공유 버전: 브라우저 다운로드가 막혀 있어 downloads 기능으로 저장
     const dl = MV.sync && MV.sync.cap && MV.sync.cap.downloads;
     if (dl && typeof dl.save === 'function') {
       return dl.save({ filename, data: text }).then(() => true).catch((e) => {
         const code = e && e.code;
-        if (code === 'declined') return false;
-        U.toast(code === 'rate_limited' ? '저장 창이 이미 열려 있어요. 잠시 뒤 다시 눌러 주세요.' : '파일 저장을 할 수 없어요 (' + (code || '오류') + ').');
+        const msg = U.saveErrorText(code);
+        if (!msg) return false;
+        console.warn('[파일 저장] 실패', code, e && e.message);
+        U.toast(msg, { ms: 5000 });
         return false;
       });
     }
@@ -851,7 +895,7 @@
       if (typeof ret === 'function') cleanups.push(ret);
     } catch (e) {
       console.error(e);
-      root.appendChild(MV.el('div', { class: 'card tint-bad' }, MV.el('h2', '화면을 그리다 문제가 생겼어요'), MV.el('pre', { class: 'small' }, String(e && e.stack || e))));
+      root.appendChild(U.errorBox('화면을 그리다 문제가 생겼어요', e, { retry: () => MV.rerender(true) }));
     }
     document.title = (v.title ? v.title + ' · ' : '') + '우리집 이사 관리';
     MV.store.emit('route', MV.route);

@@ -112,6 +112,13 @@
     return t;
   }
 
+  /** 화면 오류 카드: 쉬운 한국어 안내 + 접힌 '자세히'(오류 원문은 여기와 콘솔에만) */
+  function errCard(title, e, small) {
+    if (MV.ui.errorBox) return MV.ui.errorBox(title, e, { small, cls: 'es-err' });
+    return el('div', { class: 'card tint-bad es-err', role: 'alert' }, small ? el('p', { class: 'strong mb-0' }, title) : el('h2', title),
+      el('p', { class: 'small mb-0' }, '저장된 기록은 그대로예요. 새로고침하거나 다른 화면에 갔다가 다시 와 보세요.'));
+  }
+
   /* ======================= 출처 ======================= */
   const SRC = {
     daum: { label: '2025 포장이사 시세 정리 (다음)', url: 'https://v.daum.net/v/4ul7Nh7vM6' },
@@ -167,8 +174,8 @@
     { k: 'crew_day_rate', g: 'base', label: '작업 인원 1명 일당 (고객 청구 기준)', unit: '원/명', v: 210000, lo: 180000, hi: 270000, money: true, conf: 'low', basis: '업계 통상치 추정 (업체 몫 포함). 작업자가 받는 일당은 약 12만~18만원이라는 자료가 있어요. 위 플랫폼 기본가 범위에 맞춘 보정 (추정·확인 필요)', src: ['miso24', 'jpt'] },
     { k: 'half_pct', g: 'base', label: '반포장이사 요금 (포장이사 대비)', unit: '%', v: 85, conf: 'low', basis: '리서치에 없음 — 짐 풀기·정리를 직접 하는 만큼 인건비가 줄어듦 (통상 80~90% 추정)', src: [] },
     { k: 'general_pct', g: 'base', label: '일반이사 요금 (포장이사 대비)', unit: '%', v: 65, conf: 'low', basis: '리서치에 없음 — 포장·정리를 모두 직접 (통상 60~70% 추정)', src: [] },
-    { k: 'free_km', g: 'base', label: '거리 추가 없는 기본 거리', unit: 'km', v: 20, conf: 'low', basis: '리서치: 1km 이동은 운송비 영향이 거의 없음. 시내 기본 거리는 추정', src: ['misoCost'] },
-    { k: 'per_km', g: 'base', label: '기본 거리 넘는 1km당', unit: '원/km', v: 3000, money: true, conf: 'low', basis: '리서치에 없음 (장거리 요율 미조사) — 추정', src: [] },
+    { k: 'free_km', g: 'base', label: '거리 추가 없는 기본 거리', unit: '㎞', v: 20, conf: 'low', basis: '리서치: 1㎞ 이동은 운송비 영향이 거의 없음. 시내 기본 거리는 추정', src: ['misoCost'] },
+    { k: 'per_km', g: 'base', label: '기본 거리 넘는 1㎞당', unit: '원/㎞', v: 3000, money: true, conf: 'low', basis: '리서치에 없음 (장거리 요율 미조사) — 추정', src: [] },
     // 부피
     { k: 'm3_per_ton', g: 'vol', label: '1톤에 싣는 실제 짐 부피', unit: '㎥/톤', v: 5, lo: 4.5, hi: 6, step: 0.1, conf: 'low', basis: '리서치 추정 (출처 없음). 22.1㎥ ÷ 5 = 4.4톤 → 5톤 계산에 사용', src: ['misoSize'] },
     { k: 'truck_margin', g: 'vol', label: '톤수 여유분', unit: '%', v: 5, conf: 'low', basis: '리서치 견적 모델: 필요 톤수에 5%를 더해 위 등급 차량으로 올림', src: [] },
@@ -246,7 +253,7 @@
     { k: 'lg_dryer', g: 'lg', label: 'LG 건조기 이전설치 (철거+설치)', unit: '원/대', v: 110000, lo: 73000, hi: 150000, money: true, conf: 'low', basis: '건조기 단가를 못 찾아 세탁기 요금으로 추정', src: ['lxPrice'] },
     { k: 'lg_washer', g: 'lg', label: 'LG 세탁기 이전설치', unit: '원/대', v: 98000, lo: 73000, hi: 130000, money: true, conf: 'low', basis: '예전 요금표 기준 (이번엔 세탁기를 버려서 참고용)', src: ['lxPrice'] },
     { k: 'lg_other', g: 'lg', label: 'LG TV·기타 가전 이전설치', unit: '원/대', v: 100000, lo: 60000, hi: 180000, money: true, conf: 'low', basis: 'TV 등 단가 미조사 — 냉장고·세탁기 요금 범위의 중간값으로 둠. 1544-7777에서 확인', src: ['lgCare'] },
-    { k: 'lg_transport', g: 'lg', label: 'LG 운송비 (10km 미만)', unit: '원', v: 40000, lo: 40000, hi: 80000, money: true, conf: 'low', basis: '검색 요약 기준. 제품별인지 건별인지 몰라 상한은 2건분', src: ['lgCare'] },
+    { k: 'lg_transport', g: 'lg', label: 'LG 운송비 (10㎞ 미만)', unit: '원', v: 40000, lo: 40000, hi: 80000, money: true, conf: 'low', basis: '검색 요약 기준. 제품별인지 건별인지 몰라 상한은 2건분', src: ['lgCare'] },
     { k: 'lg_discount_pct', g: 'lg', label: '2개 이상 맡길 때 철거·설치비 할인', unit: '%', v: 10, conf: 'low', basis: '에어컨·정수기·빌트인 제외 (2차 출처)', src: ['lgCare'] },
     { k: 'lg_visit_fee', g: 'lg', label: 'LG 출장비 (유상수리 때)', unit: '원', v: 20000, lo: 18000, hi: 30000, money: true, ref: true, conf: 'low', basis: '출처 없는 추정. 이전설치 패키지에는 보통 포함 → 계산에 넣지 않음 (예약 때 확인)', src: [] },
     // 삼성전자서비스 (삼성케어플러스) — 2026-05-22 기준으로 소개된 공식 단가표 (출장비 포함). 운반 포함 여부는 자료마다 달라 예약 때 확인
@@ -767,7 +774,7 @@
     add('date', '날짜 할증 (' + dateLabel + ')', baseCost * surPct / 100,
       surPct ? '본비 ' + won(baseCost) + ' × ' + r1(surPct) + '%' : '손없는날·주말·월말이 아니라 할증이 없어요', 'base');
     const km = Math.max(0, num(inp.distanceKm, 0));
-    if (km > c.free_km) add('distance', '거리 추가 (' + r1(km) + 'km)', (km - c.free_km) * c.per_km, r1(km - c.free_km) + 'km × ' + won(c.per_km), 'base');
+    if (km > c.free_km) add('distance', '거리 추가 (' + r1(km) + '㎞)', (km - c.free_km) * c.per_km, r1(km - c.free_km) + '㎞ × ' + won(c.per_km), 'base');
 
     const fromFloor = Math.round(num(inp.fromFloor, 2));
     const toFloor = Math.round(num(inp.toFloor, 14));
@@ -1414,7 +1421,7 @@
     let kids;
     try { kids = reg.build(); } catch (e) {
       console.error('[estimate]', e);
-      kids = el('div', { class: 'card tint-bad es-err' }, '이 부분을 그리다 문제가 생겼어요: ' + ((e && e.message) || e));
+      kids = errCard('이 부분을 그리다 문제가 생겼어요', e, true);
     }
     reg.node.replaceChildren(...[].concat(kids).flat(Infinity).filter((k) => k !== null && k !== undefined && k !== false).map((k) => (k instanceof Node ? k : document.createTextNode(String(k)))));
     reg.dirty = false;
@@ -2273,7 +2280,7 @@
     inv.forEach((it) => {
       const b = brandOf(it);
       const who = lgActive(it, inp) ? MAKERS[makerOf(it)].who : (isGoing(it, inp) ? MOVER_WHO : '');
-      csvRows.push([MV.inv.fate(it.fate).label, MV.inv.cat(it.cat).label, nm(it), qtyOf(it), num(it.w, 0), num(it.d, 0), num(it.h, 0), r2(rawVol(it)), it.room || '', it.roomNew || '', b ? BRAND_LABEL[b] : '', who, it.assumed ? 'O' : '', it.url || '', vendorNote(it)]);
+      csvRows.push([MV.inv.fate(it.fate).label, MV.inv.cat(it.cat).label, nm(it), qtyOf(it), num(it.w, 0), num(it.d, 0), num(it.h, 0), r2(rawVol(it)), it.room || '', it.roomNew || '', b ? BRAND_LABEL[b] : '', who, it.assumed ? '추정' : '', it.url || '', vendorNote(it)]);
     });
     const csv = csvRows.map((r) => r.map((v) => { const s = String(v == null ? '' : v); return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }).join(',')).join('\r\n');
     return { text: out.join('\n'), csv };
@@ -2285,7 +2292,7 @@
       el('p', { class: 'small es-muted mb-0' }, '방문견적 업체 3곳에 똑같이 보내세요. 버릴 짐과 제조사 서비스(LG·삼성)가 옮길 가전은 따로 표시돼요. 메모는 앱 안내 문구(‘~해 주세요’ 등)를 빼고 짐 설명만 넣었어요.'),
       el('div', { class: 'row' },
         el('button', { type: 'button', class: 'btn btn-primary', onclick: () => copyText(ta.value, ta) }, '📋 복사'),
-        el('button', { type: 'button', class: 'btn', onclick: () => { MV.ui.download('move-inventory-' + D.today() + '.csv', '﻿' + data.csv, 'text/csv;charset=utf-8'); toast('CSV 파일을 저장했어요.'); } }, '⬇ CSV 저장')),
+        el('button', { type: 'button', class: 'btn', onclick: () => { Promise.resolve(MV.ui.download('이사-짐목록-' + D.today() + '.csv', '﻿' + data.csv, 'text/csv;charset=utf-8')).then((ok) => { if (ok !== false) toast('CSV 파일을 저장했어요.'); }); } }, '⬇ CSV 저장')),
       ta);
     MV.ui.modal({ title: '업체에 보낼 짐 목록', wide: true, body, actions: [{ label: '닫기', kind: 'ghost' }] });
   }
@@ -2541,7 +2548,7 @@
     card.appendChild(el('div', { class: 'mt-12' }, fieldWrap('날짜 유형 (할증)', dsel, null)));
     card.appendChild(dfact);
     card.appendChild(el('div', { class: 'es-fgrid mt-12' },
-      fieldWrap('거리 (km)', numInput('distanceKm', { decimal: true, step: 0.5, max: 500 }), '같은 동네 1km — 거리 할증 거의 없음')));
+      fieldWrap('거리 (㎞)', numInput('distanceKm', { decimal: true, step: 0.5, max: 500 }), '같은 동네 1㎞ — 거리 할증 거의 없음')));
 
     // 층·반출입
     card.appendChild(el('h3', { class: 'es-h3' }, '🏗️ 층 · 사다리차'));
@@ -3511,7 +3518,7 @@
     root.appendChild(body);
     try { TAB_RENDER[tabId](body); } catch (e) {
       console.error('[estimate]', e);
-      body.appendChild(el('div', { class: 'card tint-bad es-err' }, el('h2', '이 화면을 그리다 문제가 생겼어요'), el('pre', { class: 'small' }, String((e && e.stack) || e))));
+      body.appendChild(errCard('이 화면을 그리다 문제가 생겼어요', e, false));
     }
     ctx.subscribe((e) => { if (R !== myR) return; if (e && e.reset) return; requestRefresh(); });
     document.addEventListener('pointerdown', onPtrDown, true);

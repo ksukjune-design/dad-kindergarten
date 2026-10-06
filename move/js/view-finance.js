@@ -1488,6 +1488,10 @@ div.fn-alert { cursor: default; }
 .fn-why .fn-basis { margin-top: 2px; }
 .fn-range .fn-why[open] { flex-basis: 100%; }
 .fn-bad-hint { color: var(--bad) !important; font-weight: 700; }
+.fn-err { min-width: 0; }
+.fn-err-inline { color: var(--bad); font-weight: 650; font-size: .86rem; }
+.fn-err-more > summary { cursor: pointer; display: inline-flex; align-items: center; min-height: 36px; font-size: .84rem; font-weight: 700; color: var(--ink-2); }
+.fn-err-more pre { margin: 4px 0 0; max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink-2); font-weight: 400; }
 .fn-page .input[aria-invalid="true"] { border-color: var(--bad); box-shadow: 0 0 0 2px color-mix(in srgb, var(--bad) 22%, transparent); }
 .fn-bad-hint:empty, .fn-num-msg:empty { display: none; }
 .fn-warn-hint { color: var(--warn) !important; font-weight: 700; }
@@ -1741,6 +1745,15 @@ div.fn-alert { cursor: default; }
     return el('label', { class: 'check fn-chk ' + (o.cls || '') }, cb, el('span', label));
   }
   function chip(text, cls) { return el('span', { class: 'chip ' + (cls || '') }, text); }
+  /* 오류 안내: 화면엔 쉬운 말만, 기술적인 내용은 '자세히'를 펼쳐야 보임 (콘솔에도 남김).
+     inline = 글 줄 안(span·p·li)에 넣을 때 — 블록 상자 대신 글자 크기 그대로 */
+  const ERR_MSG = '화면을 그리다 문제가 생겼어요. 새로고침해 보세요. 계속되면 ⋯ 메뉴에서 백업을 받아 두세요.';
+  function errBox(e, inline) {
+    const tech = String((e && (e.stack || e.message)) || e || '');
+    const more = el('details', { class: 'fn-err-more' }, el('summary', '자세히'), el('pre', { class: 'tiny' }, tech));
+    if (inline) return el('span', { class: 'fn-err fn-err-inline', role: 'alert' }, '⚠ ' + ERR_MSG + ' ', more);
+    return el('div', { class: 'callout bad fn-err', role: 'alert' }, el('p', { class: 'mb-0' }, ERR_MSG), more);
+  }
 
   /* ======================= 뷰 ======================= */
   let lastTab = 'flow';
@@ -1755,7 +1768,7 @@ div.fn-alert { cursor: default; }
   const validTab = (t) => (TABS.some((x) => x.id === t) ? t : null);
   let alertsOpen = false;
 
-  function render(root, params, ctx) {
+  function renderMoney(root, params, ctx) {
     MV.css('fn', CSS);
     ensureState();
     const P = {
@@ -1784,7 +1797,8 @@ div.fn-alert { cursor: default; }
         let kids;
         try { kids = fn(); } catch (e) {
           console.error('[money]', e);
-          kids = el('p', { class: 'small muted mb-0' }, '이 부분을 계산하다 문제가 생겼어요: ' + ((e && e.message) || e));
+          // 글 줄(span·p·li) 안이면 짧게, 아니면 상자로 — 기술 내용은 '자세히' 안에만
+          kids = errBox(e, /^(span|p|li|b|small)$/i.test(tag));
         }
         node.replaceChildren(...flatKids(kids));
         if (fk) refocus(node, fk);
@@ -1845,7 +1859,7 @@ div.fn-alert { cursor: default; }
       let content;
       try { content = buildTab(P); } catch (e) {
         console.error('[money]', e);
-        content = el('div', { class: 'card tint-bad' }, el('h3', '이 탭을 그리다 문제가 생겼어요'), el('p', { class: 'small' }, String((e && e.message) || e)));
+        content = el('div', { class: 'card' }, errBox(e));
       }
       P.panel.replaceChildren(content);
       P.target = P.shell;
@@ -2874,8 +2888,8 @@ div.fn-alert { cursor: default; }
     const g = P.c.f.father;
     const setG = (k) => (v) => upd((fin) => { fin.father[k] = v; });
     const qa = el('section', { class: 'card tint-good fn-anchor', id: 'fn-qa' },
-      el('div', { class: 'fn-qa-q' }, 'Q. 11/3에 돈을 아버지 통장으로 보냈다가 다시 받아야 하나요?'),
-      el('div', { class: 'fn-qa-a' }, 'A. 아니요. 필요 없고, 하지 않는 편이 나아요.'),
+      el('div', { class: 'fn-qa-q' }, '질문: 11/3에 돈을 아버지 통장으로 보냈다가 다시 받아야 하나요?'),
+      el('div', { class: 'fn-qa-a' }, '답: 아니요. 필요 없고, 하지 않는 편이 나아요.'),
       el('ol', { class: 'fn-ul' },
         el('li', '세금 쟁점은 2024년에 받은 3억이 "빌린 돈"인지 "받은 돈(증여)"인지예요. 11/3에 돈이 어떤 길로 움직이는지가 아니에요. 11/3에 A에게 받는 돈은 내 보증금이 돌아오는 것이고, 아버지께 갚을 3억은 그대로 남아요.'),
         el('li', '왕복하면 "갚고 다시 빌림"이 돼 새 차용 약정이 필요하고, 2026년에 "아버지 → 나 3억" 이체 기록이 새로 생겨 오히려 증여로 오해받을 근거가 돼요.'),
@@ -3205,7 +3219,7 @@ div.fn-alert { cursor: default; }
         const over = x.overDays;
         return [
           el('span', { class: 'k' }, '계약일 → 법정 신고기한'), el('span', { class: 'v' }, D.fmt(x.contractDate) + ' → ' + D.fmt(x.deadline)),
-          el('span', { class: 'k' }, '오늘 기준'), el('span', { class: 'v ' + (over > 0 && !x.done ? 'is-bad' : '') }, over > 0 ? over + '일 지남' : over === 0 ? '오늘까지' : 'D-' + (-over)),
+          el('span', { class: 'k' }, '오늘 기준'), el('span', { class: 'v ' + (over > 0 && !x.done ? 'is-bad' : '') }, over > 0 ? over + '일 지남' : over === 0 ? '오늘까지' : (-over) + '일 남음'),
           el('span', { class: 'k' }, '과태료 (지연신고, 추정)'), el('span', { class: 'v' }, '약 2만~30만원'),
           el('span', { class: 'k' }, '거짓신고'), el('span', { class: 'v' }, '100만원'),
         ];
@@ -3355,6 +3369,12 @@ div.fn-alert { cursor: default; }
         return c.alerts.filter((a) => a.overdue).length;
       } catch (e) { return 0; }
     },
-    render,
+    // 화면 전체가 그려지지 않을 때도 앱이 멈추지 않게 쉬운 말로 알림 (탭·칸별 오류는 rebuildPanel·P.live 가 따로 받음)
+    render(root, params, ctx) {
+      try { renderMoney(root, params, ctx); } catch (e) {
+        console.error('[money]', e);
+        root.appendChild(el('div', { class: 'fn-page' }, el('div', { class: 'card' }, errBox(e))));
+      }
+    },
   });
 })();

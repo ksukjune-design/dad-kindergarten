@@ -343,6 +343,14 @@
     node.set = (val) => btns.forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.v === (val || ''))));
     return node;
   }
+  /** 화면 오류 카드: 쉬운 한국어 안내 + 접힌 '자세히'(오류 원문은 여기와 콘솔에만). o: {small, retry} */
+  function errCard(title, e, o) {
+    o = o || {};
+    if (MV.ui.errorBox) return MV.ui.errorBox(title, e, o);
+    return el('div', { class: 'card tint-bad', role: 'alert' }, el(o.small ? 'p' : 'h2', title),
+      el('p', { class: 'small' }, '저장된 기록은 그대로예요. 새로고침하거나 다른 화면에 갔다가 다시 와 보세요.'),
+      o.retry ? el('button', { type: 'button', class: 'btn', onclick: o.retry }, '다시 시도') : null);
+  }
   function emptyState(icon, text, ...extra) {
     return el('div', { class: 'empty ck-empty' }, el('span', { class: 'big', 'aria-hidden': 'true' }, icon), el('p', { class: 'mb-0' }, text), extra.length ? el('div', { class: 'ck-empty-act' }, extra) : null);
   }
@@ -1209,7 +1217,7 @@
         fkIndex = fr ? MV.$$('.ck-row', list).indexOf(fr) : -1;
       }
       let blocks;
-      try { blocks = buildList(ch); } catch (e) { console.error(e); blocks = [{ node: emptyState('⚠️', '목록을 그리다 문제가 생겼어요: ' + (e && e.message)) }]; }
+      try { blocks = buildList(ch); } catch (e) { console.error(e); blocks = [{ node: errCard('목록을 그리다 문제가 생겼어요', e, { small: true }) }]; }
       const usedRows = new Set(); const usedSecs = new Set();
       const top = [];
       blocks.forEach((b) => {
@@ -1529,7 +1537,7 @@
     function addLink() {
       const it = curItem();
       if (!it) return;
-      const url = el('input', { class: 'input', type: 'url', placeholder: 'https://…', inputmode: 'url' });
+      const url = el('input', { class: 'input', type: 'url', placeholder: '인터넷 주소를 붙여 넣으세요', inputmode: 'url' });
       const hint = el('small', { class: 'hint ck-link-hint', role: 'alert', hidden: true });
       url.addEventListener('input', () => { url.removeAttribute('aria-invalid'); hint.hidden = true; });
       const label = el('input', { class: 'input', placeholder: '예) 견적서, 제품 페이지 (비워도 돼요)' });
@@ -1539,7 +1547,7 @@
         const bad = (msg) => { url.focus(); url.setAttribute('aria-invalid', 'true'); hint.textContent = msg; hint.hidden = false; return false; };
         if (!u) return bad('주소를 입력해 주세요.');
         if (/^www\./i.test(u) || !/^[a-z][a-z0-9+.-]*:/i.test(u) || /^[^:/]+\.[^:/]+:\d+/.test(u)) u = 'https://' + u.replace(/^\/+/, '');
-        if (!safeUrl(u)) return bad('인터넷 주소(https://…)나 전화·메일 링크만 넣을 수 있어요.');
+        if (!safeUrl(u)) return bad('인터넷 주소나 전화·메일 링크만 넣을 수 있어요.');
         const x = MV.items.get(id);
         if (!x) return true;
         const links = arr(x.links).concat([{ label: label.value.trim() || u.replace(/^https?:\/\//, '').slice(0, 40), url: u }]);
@@ -2430,8 +2438,7 @@ body:has(.ck) .toast button { white-space: nowrap; flex: none; }
         mount(root, params, ctx);
       } catch (e) {
         console.error(e);
-        put(root, el('div', { class: 'card tint-bad' }, el('h2', '체크리스트를 여는 중 문제가 생겼어요'), el('p', { class: 'small' }, String(e && e.message || e)),
-          el('button', { type: 'button', class: 'btn', onclick: () => MV.rerender() }, '다시 시도')));
+        put(root, errCard('체크리스트를 여는 중 문제가 생겼어요', e, { retry: () => MV.rerender() }));
       }
     },
   });

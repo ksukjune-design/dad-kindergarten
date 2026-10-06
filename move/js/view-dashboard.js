@@ -121,10 +121,17 @@
       more || null);
   }
   const moreLink = (label, href) => el('a', { class: 'db-more', href }, label);
+  /* 오류 안내: 화면엔 쉬운 말만, 기술적인 내용은 '자세히'를 펼쳐야 보임 (콘솔에도 남김) */
+  const ERR_MSG = '화면을 그리다 문제가 생겼어요. 새로고침해 보세요. 계속되면 ⋯ 메뉴에서 백업을 받아 두세요.';
+  function errBody(e) {
+    const tech = String((e && (e.stack || e.message)) || e || '');
+    return [el('p', { class: 'small mb-0' }, ERR_MSG),
+      el('details', { class: 'db-err-more' }, el('summary', '자세히'), el('pre', { class: 'tiny' }, tech))];
+  }
   function safe(cls, fn) {
     try { return fn(); } catch (e) {
       console.error('[dashboard]', e);
-      return el('section', { class: 'card ' + cls }, el('p', { class: 'small muted mb-0' }, '이 영역을 그리다 문제가 생겼어요: ' + ((e && e.message) || e)));
+      return el('section', { class: 'card db-err ' + cls, role: 'alert' }, errBody(e));
     }
   }
 
@@ -134,6 +141,9 @@
 .toast.db-toast > span { min-width:0; max-width:calc(100vw - 150px); overflow:hidden; text-overflow:ellipsis; }
 .toast.db-toast > button { flex:none; min-height:36px; }
 .db-sr { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+.db-err { border-color:color-mix(in srgb, var(--bad) 35%, var(--line)); background:var(--bad-bg); }
+.db-err-more > summary { cursor:pointer; display:inline-flex; align-items:center; min-height:36px; font-size:.84rem; font-weight:700; color:var(--ink-2); }
+.db-err-more pre { margin:4px 0 0; max-height:220px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; color:var(--ink-2); }
 .db-grid { display:grid; gap:14px; grid-template-columns:repeat(12, minmax(0, 1fr)); align-items:stretch; }
 .db-grid > .card, .db-side > .card { margin:0; min-width:0; }
 .db-span-12 { grid-column:1 / -1; }
@@ -431,7 +441,7 @@ button.db-wk-head:hover { background:var(--bg-3); }
       eyebrow = '이사까지';
       big = el('div', { class: 'db-big', 'aria-label': '이사까지 ' + dd.n + '일' }, String(dd.n), el('small', '일'));
     } else if (dd.n === 0) {
-      eyebrow = 'D-day'; big = el('div', { class: 'db-big is-today' }, '오늘 이사! 🚚');
+      eyebrow = '이사 당일'; big = el('div', { class: 'db-big is-today' }, '오늘 이사! 🚚');
     } else {
       eyebrow = '이사한 지'; big = el('div', { class: 'db-big' }, String(-dd.n), el('small', '일 지났어요'));
     }
@@ -684,16 +694,32 @@ button.db-wk-head:hover { background:var(--bg-3); }
   ];
   // 짐 목록에서 이삿짐센터가 옮기는 에어컨 수 (자금 모듈과 같은 규칙: 견적은 있는데 제조사 서비스가 없으면 에어컨 이전설치 0원)
   const moverAircons = () => MV.inv.list().filter((x) => x && (x.cat === 'aircon' || x.tag === 'aircon') && x.fate === 'move').length;
+  const ELEV_FALLBACK = 200000;                // 견적 계산이 없을 때만: 두 단지 각 약 10만원 (서울 평균 약 10.4만원)
+  /* 엘리베이터 사용료가 이사 견적(moveEstimate)에 이미 들어 있는지 — 자금 모듈(autoAmount 'elevator')과 같은 규칙:
+     견적 줄에 '엘리베이터 사용료'(key elevFee)가 있으면 들어 있음, 짐·견적에 양쪽 0원으로 넣었으면 0원 */
+  function elevInEst(est) {
+    const lines = est && Array.isArray(est.lines) ? est.lines : null;
+    if (!lines) return false;
+    if (lines.some((l) => l && (l.key === 'elevFee' || /엘리베이터\s*사용료/.test(String(l.label || ''))))) return true;
+    let ei = null;
+    try { ei = (MV.store.get().estimate || {}).inputs || null; } catch (e) { ei = null; }
+    return !!(ei && isNum(ei.elevFeeFrom) && isNum(ei.elevFeeTo) && ei.elevFeeFrom + ei.elevFeeTo === 0);
+  }
+  // '꼭 드는 이사 비용' 줄 설명: 엘리베이터 사용료가 이사 견적에 들어 있으면 이사업체 괄호 안에 (두 번 세지 않게)
+  const moverTxt = (inEst) => (inEst ? '이사업체(엘리베이터 사용료 포함)' : '이사업체');
   function planCosts(est) {
     const pay = est && est.pay && isNum(est.pay.typical) ? est.pay.typical : null;
     const mk = makerOf(est);
     // 에어컨 이전설치: 짐·견적의 제조사 서비스 합계 → (견적은 있는데 에어컨도 이삿짐센터가 옮기면 0) → 없으면 가족 결정 약 50만원
     const ac = mk && isNum(mk.typical) ? mk.typical : (est && moverAircons() > 0 ? 0 : AC_FALLBACK);
-    const essential = (pay != null ? pay : 2167000)       // 이사업체 (부가세 포함, 모델 중간값)
+    // 엘리베이터: 견적값(est.pay)을 쓰면 그 안에 이미 들어 있어서 더하지 않음. 견적이 없을 때만 따로 약 20만원
+    const elevIn = pay != null && elevInEst(est);
+    const elev = elevIn ? 0 : ELEV_FALLBACK;
+    const essential = (pay != null ? pay : 2167000)       // 이사업체 (부가세 포함, 모델 중간값 — 견적값이면 엘리베이터 사용료 포함)
       + ac                                                 // 삼성 에어컨 이전설치 (이사 전)
-      + 50000 + 200000 + 36000;                            // 대형폐기물 · 엘리베이터(두 단지 각 약 10만원) · 인터넷 이전설치
+      + 50000 + elev + 36000;                              // 대형폐기물 · 엘리베이터(견적에 없을 때만) · 인터넷 이전설치
     return {
-      essential, ac, acName: makerName(mk),
+      essential, ac, acName: makerName(mk), elev, elevIn,
       purchase: 500000,                                    // 통돌이 세탁기 (이사 후 배송)
       optional: 200000 + 684800,                           // 간이 옷장(이사 후) + HUG 보증료 (선택·나중에)
       fromEst: pay != null,
@@ -755,7 +781,9 @@ button.db-wk-head:hover { background:var(--bg-3); }
           // 견적 계산이 있는데 제조사 서비스가 없으면(에어컨도 이삿짐센터) 에어컨 이전설치는 빼고 적음
           const mk = makerOf(est);
           const acTxt = mk ? makerName(mk).name : !est ? makerName(null).name : null;
-          led.appendChild(ledgerRow('꼭 드는 이사 비용', ['이사업체', acTxt, '엘리베이터 등'].filter(Boolean).join(' · '), signed(essential, -1), '', null, MV.fmt.won(essential)));
+          // 엘리베이터 사용료가 이사 견적에 들어 있으면 이사업체 괄호 안에, 아니면(견적 계산 없음) 따로 적음
+          const elevIn = elevInEst(est);
+          led.appendChild(ledgerRow('꼭 드는 이사 비용', [moverTxt(elevIn), acTxt, elevIn ? null : '엘리베이터', '폐기물', '인터넷'].filter(Boolean).join(' · '), signed(essential, -1), '', null, MV.fmt.won(essential)));
           // 이사 전에 지금 통장에서 먼저 나갈 돈 (꼭 드는 비용 안에 이미 들어 있음 — 더하지 않음)
           const before = isNum(fs.beforeMoveUnpaid) && fs.beforeMoveUnpaid > 0 ? fs.beforeMoveUnpaid : 0;
           if (before) {
@@ -801,7 +829,7 @@ button.db-wk-head:hover { background:var(--bg-3); }
       });
       const pc = planCosts(est);
       led.appendChild(ledgerRow('꼭 드는 이사 비용 (약)',
-        [pc.fromEst ? '이사업체(견적 계산값)' : '이사업체', pc.ac > 0 ? nameWhen(pc.acName) : null, '엘리베이터', '폐기물', '인터넷'].filter(Boolean).join(' · '),
+        [pc.elevIn ? moverTxt(true) : pc.fromEst ? '이사업체(견적 계산값)' : '이사업체', pc.ac > 0 ? nameWhen(pc.acName) : null, pc.elev > 0 ? '엘리베이터' : null, '폐기물', '인터넷'].filter(Boolean).join(' · '),
         signed(pc.essential, -1), '', null, MV.fmt.won(pc.essential)));
       if (pc.ac > 0 && pc.acName.when === '이사 전') led.appendChild(beforeNote(pc.ac, pc.acName.name));
       body.appendChild(led);
@@ -1410,119 +1438,135 @@ button.db-wk-head:hover { background:var(--bg-3); }
         keyed('links', late(safe('db-span-5', linksCard))))));
   }
 
+  // 화면 전체가 그려지지 않을 때 (카드별 오류는 safe() 가 따로 받음)
+  const errCard = (e) => el('section', { class: 'card db-err', role: 'alert' }, errBody(e));
   MV.view('dashboard', {
     title: '대시보드', short: '홈', icon: '🏠', order: 10,
     render(root, params, ctx) {
-      let alive = true;
-      sessionDone = new Map();
-      // 뒤로 가기·새로고침으로 같은 기록에 돌아온 경우: 펼친 주·가로 스크롤·세로 스크롤을 되살림 (날짜가 바뀌었으면 처음부터)
-      const saved = readHS();
-      const restore = saved && saved.today === D.today() ? saved : null;
-      ui.openWeeks = restore && Array.isArray(restore.open) ? new Set(restore.open.map(String)) : null;
-      ui.moreGroups = restore && Array.isArray(restore.more) ? new Set(restore.more.map(String)) : new Set();
-      ui.roadScroll = restore && isNum(restore.left) ? restore.left : 0;
-      const mq = window.matchMedia ? window.matchMedia(ACC_MQ) : null;
-      const isAcc = () => !!(mq && mq.matches);
-
-      /* 화면 상태를 지금 기록(history entry)에 저장 — 링크를 누르는 순간·스크롤이 멈출 때·펼침을 바꿀 때 */
-      const onDashboard = () => alive && MV.parseHash().name === 'dashboard' && root.dataset.view === 'dashboard';
-      const saveNow = () => {
-        if (!onDashboard()) return;
-        const sc = root.querySelector('.db-road-scroll');
-        if (sc && !isAcc()) ui.roadScroll = sc.scrollLeft;
-        writeHS({
-          today: D.today(),
-          y: Math.round(window.scrollY),
-          left: Math.round(ui.roadScroll || 0),
-          open: ui.openWeeks ? Array.from(ui.openWeeks) : null,
-          more: Array.from(ui.moreGroups),
-        });
-      };
-      let saveT = 0;
-      const saveSoon = () => { clearTimeout(saveT); saveT = setTimeout(saveNow, 180); };
-      const flush = () => { clearTimeout(saveT); saveNow(); };
-      window.addEventListener('scroll', saveSoon, { passive: true });
-      document.addEventListener('click', flush, true);          // 링크 이동(해시 변경) 전에 먼저 실행됨
-      root.addEventListener('scroll', (e) => {
-        const t = e.target;
-        if (!t || !t.classList) return;
-        if (t.classList.contains('db-road-scroll')) saveSoon();
-        else if (t.classList.contains('db-wk-body')) fadeSoon(t);
-      }, { capture: true, passive: true });
-      persistUi = saveSoon;
-      ctx.onCleanup(() => {
-        persistUi = () => {};
-        clearTimeout(saveT);
-        window.removeEventListener('scroll', saveSoon);
-        document.removeEventListener('click', flush, true);
-      });
-
-      const draw = () => {
-        if (!alive) return;
-        // 읽기는 바꾸기 전에 한꺼번에 (지금 화면 기준)
-        const y = window.scrollY;
-        const sc = root.querySelector('.db-road-scroll');
-        if (sc) ui.roadScroll = sc.scrollLeft;
-        ui.partCols = measurePartCols(root);
-        const ae = document.activeElement;
-        const focusIn = !!(ae && root.contains(ae));
-        const focusId = focusIn && ae.dataset ? ae.dataset.id : null;
-        const nu = build(isAcc(), ui.partCols);
-        const cur = root.children.length === 1 ? root.firstElementChild : null;
-        if (!(cur && patchNode(cur, nu))) root.replaceChildren(nu);   // 바뀐 카드·주 칸만 바꿔 끼움
-        // 쓰기(가로 스크롤·포커스) → 읽기(세로 스크롤·칸 흐림) 순서로 모아서, 다시 그릴 때 레이아웃 계산이 한 번만 일어나게
-        const nsc = root.querySelector('.db-road-scroll');
-        if (nsc && nsc !== sc && ui.roadScroll) nsc.scrollLeft = ui.roadScroll;      // 가로 스크롤 칸을 새로 만든 경우에만
-        if (focusId && !(ae.isConnected && root.contains(ae))) {
-          const f = root.querySelector('input[data-id="' + (window.CSS && CSS.escape ? CSS.escape(focusId) : focusId) + '"]');
-          if (f) f.focus({ preventScroll: true });
-        }
-        if (Math.abs(window.scrollY - y) > 1) window.scrollTo(0, y);
-        fadeAll(root);
-      };
-      let pending = false;
-      const schedule = (e) => {
-        if (e && e.reset) return;              // 초기화·복원·동기화는 app.js 가 화면 전체를 다시 그림
-        if (pending) return;
-        pending = true;
-        // 체크 표시 같은 바로 보이는 반응이 먼저 화면에 그려지게, 다음 프레임을 그린 뒤에 다시 그림
-        const run = () => { pending = false; draw(); };
-        if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => setTimeout(run, 0));
-        else setTimeout(run, 0);
-      };
-      ctx.subscribe(schedule);
-      // 창 크기가 바뀌면: '파트별 진행' 칸 수가 달라질 때만 다시 그리고, 아니면 칸 흐림만 다시 확인
-      const onResize = MV.debounce(() => {
-        if (!alive) return;
-        if (measurePartCols(root) !== ui.partCols) schedule(); else fadeAll(root);
-      }, 150);
-      window.addEventListener('resize', onResize, { passive: true });
-      ctx.onCleanup(() => window.removeEventListener('resize', onResize));
-      if (mq) {
-        const onMq = () => { ui.roadScroll = 0; schedule(); saveSoon(); };
-        if (mq.addEventListener) mq.addEventListener('change', onMq); else if (mq.addListener) mq.addListener(onMq);
-        ctx.onCleanup(() => { if (mq.removeEventListener) mq.removeEventListener('change', onMq); else if (mq.removeListener) mq.removeListener(onMq); });
-      }
-      ctx.onCleanup(() => { alive = false; });
-      ui.partCols = measurePartCols(root);         // 아직 빈 화면 → 여백으로 어림
-      root.appendChild(build(isAcc(), ui.partCols));   // build 가 비교용 서명(_dbSig)까지 붙여 둠
-      const sc0 = root.querySelector('.db-road-scroll');
-      if (sc0 && ui.roadScroll && !isAcc()) sc0.scrollLeft = ui.roadScroll;
-      // 실제 너비로 칸 수를 다시 확인 (어림이 틀렸을 때만 '파트별 진행'만 바꿔 끼움)
-      const pc = measurePartCols(root);
-      if (pc !== ui.partCols) {
-        ui.partCols = pc;
-        const oldParts = root.querySelector('.db-grid > .db-parts');
-        if (oldParts) oldParts.replaceWith(partsSection(pc));
-      }
-      fadeAll(root);
-      if (restore && isNum(restore.y) && restore.y > 0) {
-        // MV.rerender 가 화면을 바꾸면서 맨 위로 올린 다음에 제자리로
-        const y = restore.y;
-        const put = () => { if (alive && Math.abs(window.scrollY - y) > 1) window.scrollTo(0, y); };
-        Promise.resolve().then(put);
-        requestAnimationFrame(put);
+      try { renderDash(root, params, ctx); } catch (e) {
+        console.error('[dashboard]', e);
+        root.replaceChildren(errCard(e));
       }
     },
   });
+  /** 대시보드 그리기 (오류는 위 render 가 받아 쉬운 말로 알림) */
+  function renderDash(root, params, ctx) {
+    let alive = true;
+    sessionDone = new Map();
+    // 뒤로 가기·새로고침으로 같은 기록에 돌아온 경우: 펼친 주·가로 스크롤·세로 스크롤을 되살림 (날짜가 바뀌었으면 처음부터)
+    const saved = readHS();
+    const restore = saved && saved.today === D.today() ? saved : null;
+    ui.openWeeks = restore && Array.isArray(restore.open) ? new Set(restore.open.map(String)) : null;
+    ui.moreGroups = restore && Array.isArray(restore.more) ? new Set(restore.more.map(String)) : new Set();
+    ui.roadScroll = restore && isNum(restore.left) ? restore.left : 0;
+    const mq = window.matchMedia ? window.matchMedia(ACC_MQ) : null;
+    const isAcc = () => !!(mq && mq.matches);
+
+    /* 화면 상태를 지금 기록(history entry)에 저장 — 링크를 누르는 순간·스크롤이 멈출 때·펼침을 바꿀 때 */
+    const onDashboard = () => alive && MV.parseHash().name === 'dashboard' && root.dataset.view === 'dashboard';
+    const saveNow = () => {
+      if (!onDashboard()) return;
+      const sc = root.querySelector('.db-road-scroll');
+      if (sc && !isAcc()) ui.roadScroll = sc.scrollLeft;
+      writeHS({
+        today: D.today(),
+        y: Math.round(window.scrollY),
+        left: Math.round(ui.roadScroll || 0),
+        open: ui.openWeeks ? Array.from(ui.openWeeks) : null,
+        more: Array.from(ui.moreGroups),
+      });
+    };
+    let saveT = 0;
+    const saveSoon = () => { clearTimeout(saveT); saveT = setTimeout(saveNow, 180); };
+    const flush = () => { clearTimeout(saveT); saveNow(); };
+    window.addEventListener('scroll', saveSoon, { passive: true });
+    document.addEventListener('click', flush, true);          // 링크 이동(해시 변경) 전에 먼저 실행됨
+    root.addEventListener('scroll', (e) => {
+      const t = e.target;
+      if (!t || !t.classList) return;
+      if (t.classList.contains('db-road-scroll')) saveSoon();
+      else if (t.classList.contains('db-wk-body')) fadeSoon(t);
+    }, { capture: true, passive: true });
+    persistUi = saveSoon;
+    ctx.onCleanup(() => {
+      persistUi = () => {};
+      clearTimeout(saveT);
+      window.removeEventListener('scroll', saveSoon);
+      document.removeEventListener('click', flush, true);
+    });
+
+    const draw = () => {
+      if (!alive) return;
+      try { drawNow(); } catch (e) {
+        // 다시 그리다 오류가 나면 앱이 멈추지 않게 쉬운 안내로 바꿔 끼움 (다음 변경 때 다시 시도)
+        console.error('[dashboard]', e);
+        root.replaceChildren(errCard(e));
+      }
+    };
+    const drawNow = () => {
+      // 읽기는 바꾸기 전에 한꺼번에 (지금 화면 기준)
+      const y = window.scrollY;
+      const sc = root.querySelector('.db-road-scroll');
+      if (sc) ui.roadScroll = sc.scrollLeft;
+      ui.partCols = measurePartCols(root);
+      const ae = document.activeElement;
+      const focusIn = !!(ae && root.contains(ae));
+      const focusId = focusIn && ae.dataset ? ae.dataset.id : null;
+      const nu = build(isAcc(), ui.partCols);
+      const cur = root.children.length === 1 ? root.firstElementChild : null;
+      if (!(cur && patchNode(cur, nu))) root.replaceChildren(nu);   // 바뀐 카드·주 칸만 바꿔 끼움
+      // 쓰기(가로 스크롤·포커스) → 읽기(세로 스크롤·칸 흐림) 순서로 모아서, 다시 그릴 때 레이아웃 계산이 한 번만 일어나게
+      const nsc = root.querySelector('.db-road-scroll');
+      if (nsc && nsc !== sc && ui.roadScroll) nsc.scrollLeft = ui.roadScroll;      // 가로 스크롤 칸을 새로 만든 경우에만
+      if (focusId && !(ae.isConnected && root.contains(ae))) {
+        const f = root.querySelector('input[data-id="' + (window.CSS && CSS.escape ? CSS.escape(focusId) : focusId) + '"]');
+        if (f) f.focus({ preventScroll: true });
+      }
+      if (Math.abs(window.scrollY - y) > 1) window.scrollTo(0, y);
+      fadeAll(root);
+    };
+    let pending = false;
+    const schedule = (e) => {
+      if (e && e.reset) return;              // 초기화·복원·동기화는 app.js 가 화면 전체를 다시 그림
+      if (pending) return;
+      pending = true;
+      // 체크 표시 같은 바로 보이는 반응이 먼저 화면에 그려지게, 다음 프레임을 그린 뒤에 다시 그림
+      const run = () => { pending = false; draw(); };
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => setTimeout(run, 0));
+      else setTimeout(run, 0);
+    };
+    ctx.subscribe(schedule);
+    // 창 크기가 바뀌면: '파트별 진행' 칸 수가 달라질 때만 다시 그리고, 아니면 칸 흐림만 다시 확인
+    const onResize = MV.debounce(() => {
+      if (!alive) return;
+      if (measurePartCols(root) !== ui.partCols) schedule(); else fadeAll(root);
+    }, 150);
+    window.addEventListener('resize', onResize, { passive: true });
+    ctx.onCleanup(() => window.removeEventListener('resize', onResize));
+    if (mq) {
+      const onMq = () => { ui.roadScroll = 0; schedule(); saveSoon(); };
+      if (mq.addEventListener) mq.addEventListener('change', onMq); else if (mq.addListener) mq.addListener(onMq);
+      ctx.onCleanup(() => { if (mq.removeEventListener) mq.removeEventListener('change', onMq); else if (mq.removeListener) mq.removeListener(onMq); });
+    }
+    ctx.onCleanup(() => { alive = false; });
+    ui.partCols = measurePartCols(root);         // 아직 빈 화면 → 여백으로 어림
+    root.appendChild(build(isAcc(), ui.partCols));   // build 가 비교용 서명(_dbSig)까지 붙여 둠
+    const sc0 = root.querySelector('.db-road-scroll');
+    if (sc0 && ui.roadScroll && !isAcc()) sc0.scrollLeft = ui.roadScroll;
+    // 실제 너비로 칸 수를 다시 확인 (어림이 틀렸을 때만 '파트별 진행'만 바꿔 끼움)
+    const pc = measurePartCols(root);
+    if (pc !== ui.partCols) {
+      ui.partCols = pc;
+      const oldParts = root.querySelector('.db-grid > .db-parts');
+      if (oldParts) oldParts.replaceWith(partsSection(pc));
+    }
+    fadeAll(root);
+    if (restore && isNum(restore.y) && restore.y > 0) {
+      // MV.rerender 가 화면을 바꾸면서 맨 위로 올린 다음에 제자리로
+      const y = restore.y;
+      const put = () => { if (alive && Math.abs(window.scrollY - y) > 1) window.scrollTo(0, y); };
+      Promise.resolve().then(put);
+      requestAnimationFrame(put);
+    }
+  }
 })();

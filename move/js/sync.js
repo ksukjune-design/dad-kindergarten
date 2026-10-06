@@ -375,15 +375,19 @@
       if (!/^(blob:|data:)/.test(href)) return;
       e.preventDefault();
       e.stopPropagation();
-      const name = a.getAttribute('download') || 'move-file';
+      const name = a.getAttribute('download') || '이사관리-파일.txt';
       fetch(href).then((r) => r.blob()).then((blob) => dl.save({ filename: name, data: blob })).catch((err) => {
         const code = err && err.code;
-        if (code !== 'declined' && MV.ui) MV.ui.toast('파일을 저장할 수 없어요' + (code ? ' (' + code + ')' : '') + '.');
+        if (code === 'declined' || !MV.ui) return;
+        // 코드는 콘솔에만 남기고 화면에는 한국어 안내
+        console.warn('[파일 저장] 실패', code || '', err && err.message);
+        const msg = MV.ui.saveErrorText ? MV.ui.saveErrorText(code) : '파일을 저장할 수 없어요. 잠시 뒤 다시 해 보세요.';
+        if (msg) MV.ui.toast(msg, { ms: 5000 });
       });
     }, true);
     // 2) 인쇄 창은 열리지 않음 → 안내
     try {
-      global.print = function () { if (MV.ui) MV.ui.toast('claude.ai 안에서는 인쇄가 안 돼요. GitHub Pages 주소에서 열어 인쇄하세요.', { ms: 5000 }); };
+      global.print = function () { if (MV.ui) MV.ui.toast('클로드 공유 버전 화면에서는 인쇄가 안 돼요. 깃허브 페이지 버전 주소로 열어서 인쇄해 주세요.', { ms: 5000 }); };
     } catch (e) { /* 무시 */ }
   }
   if (global.claude && typeof global.claude.use === 'function') installViewerShims();

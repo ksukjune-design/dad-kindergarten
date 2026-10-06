@@ -69,11 +69,11 @@
   /* 이 코드가 오면 이 화면에서 기능을 숨김 (다시 묻지 않음) */
   const HIDE_CODES = new Set(['not_granted', 'sampling_disabled', 'not_declared', 'capability_disabled', 'capability_removed']);
   const BLOCK_COPY = {
-    not_granted: ['Claude 사용을 허용하지 않았어요', '이 창에서는 AI 비서를 쓸 수 없어요. 페이지를 새로 열고 다시 물어볼 때 허용하면 쓸 수 있어요. 조직에서 막아 둔 경우에는 관리자에게 문의하세요.'],
-    sampling_disabled: ['이 계정에서는 Claude를 쓸 수 없어요', '계정이나 조직 설정에서 Claude 사용이 꺼져 있어요. 다른 기능(체크리스트·예산·견적)은 그대로 쓸 수 있어요.'],
+    not_granted: ['클로드 사용을 허용하지 않았어요', '이 창에서는 AI 비서를 쓸 수 없어요. 페이지를 새로 열고 다시 물어볼 때 허용하면 쓸 수 있어요. 조직에서 막아 둔 경우에는 관리자에게 문의하세요.'],
+    sampling_disabled: ['이 계정에서는 클로드를 쓸 수 없어요', '계정이나 조직 설정에서 클로드 사용이 꺼져 있어요. 다른 기능(체크리스트·예산·견적)은 그대로 쓸 수 있어요.'],
     not_declared: ['이 공유 버전에는 AI 비서가 켜져 있지 않아요', '공유 버전을 다시 게시해야 해요. 다른 기능은 그대로 쓸 수 있어요.'],
-    capability_disabled: ['이 화면에서는 AI 비서를 쓸 수 없어요', 'Claude 연결이 이 보기에서 꺼져 있어요. claude.ai 에서 공유 버전을 직접 열어 보세요.'],
-    capability_removed: ['이 앱 버전에서는 AI 비서를 쓸 수 없어요', 'Claude 앱을 최신으로 업데이트한 뒤 다시 열어 보세요.'],
+    capability_disabled: ['이 화면에서는 AI 비서를 쓸 수 없어요', '이 화면에서는 클로드 연결이 꺼져 있어요. 받은 공유 링크로 클로드 공유 버전을 직접 열어 보세요.'],
+    capability_removed: ['이 앱 버전에서는 AI 비서를 쓸 수 없어요', '클로드 앱을 최신으로 업데이트한 뒤 다시 열어 보세요.'],
   };
   const SUGGESTIONS = [
     { id: 'week', icon: '🗓', label: '이번 주 할 일 정리', prompt: () => '이번 주 할 일을 담당자별로 정리해 줘. 기한이 지난 일도 같이 알려 줘.' },
@@ -86,13 +86,20 @@
   ];
   const EXAMPLES = [
     '삼성 에어컨 이전설치 견적 45만원 받았어, 예산에 반영해줘',
-    '이사업체 A 견적 210만원, 사다리차 포함 — 견적 비교에 넣어줘',
+    '○○이사업체 견적 210만원, 사다리차 포함 — 견적 비교에 넣어줘',
     '우리은행 질권 확인 끝났어, 체크하고 메모 남겨줘: 질권 없음',
     '다음 주 월요일까지 입주청소 용품 사기 할 일 추가해줘 @아내 !중요',
     '남은 예산 얼마나 부족해?',
   ];
 
   /* ======================= 작은 도우미 ======================= */
+  /** 화면 오류 카드: 쉬운 한국어 안내 + 접힌 '자세히'(오류 원문은 여기와 콘솔에만) */
+  function errorCard(title, e, retry) {
+    if (MV.ui.errorBox) return MV.ui.errorBox(title, e, { retry });
+    return el('div', { class: 'card tint-bad', role: 'alert' }, el('h2', title),
+      el('p', { class: 'small' }, '저장된 기록은 그대로예요. 새로고침하거나 다른 화면에 갔다가 다시 와 보세요.'),
+      retry ? el('button', { type: 'button', class: 'btn', onclick: retry }, '다시 시도') : null);
+  }
   const moveMD = () => { const d = D.parse(D.moveDate()); return d ? (d.getMonth() + 1) + '/' + d.getDate() : '11/3'; };
   const has = (o, k) => !!o && Object.prototype.hasOwnProperty.call(o, k) && o[k] !== undefined;
   const str = (v, max) => String(v == null ? '' : v).trim().slice(0, max || 500);
@@ -1987,6 +1994,8 @@
 
   function handleError(bot, e) {
     const code = (e && typeof e === 'object' && typeof e.code === 'string') ? e.code : 'upstream_error';
+    // 오류 코드·원문은 콘솔에만 (화면에는 한국어 안내)
+    if (code !== 'cancelled') console.warn('[agent] 오류', code, e && e.message);
     const partial = e && typeof e.text === 'string' ? e.text : '';
     bot.code = code;
     bot.status = 'error';
@@ -2010,7 +2019,7 @@
     }
     bot.text = partial || bot.text || '';
     if (code === 'rate_limited') { bot.note = '요청이 많아요. 잠시 뒤 다시 물어봐 주세요.'; bot.actions = ['retry']; return; }
-    if (code === 'session_expired') { bot.note = 'Claude 로그인이 끝났어요. 다시 로그인해 주세요.'; bot.actions = ['retry']; return; }
+    if (code === 'session_expired') { bot.note = '클로드 로그인이 끝났어요. 다시 로그인해 주세요.'; bot.actions = ['retry']; return; }
     if (code === 'prompt_too_large') { bot.note = '대화가 너무 길어요. 대화를 지우고 다시 물어봐 주세요.'; bot.actions = ['clear']; return; }
     if (code === 'tools_unavailable') {
       // 이 보기에서는 도구를 못 씀 → 이 창에서는 다음 질문부터 도구 없이 물음 ('읽기 전용' 표시)
@@ -2021,7 +2030,7 @@
       return;
     }
     if (code === 'empty_completion') { bot.note = '답을 받지 못했어요. 질문을 조금 줄이거나 바꿔서 다시 보내 주세요.'; bot.actions = ['retry']; return; }
-    if (code === 'invalid_request' || code === 'transform_error' || code === 'queue_overflow') { bot.note = '요청을 보내지 못했어요 (앱 문제: ' + code + '). 잠시 뒤 다시 보내 주세요.'; bot.actions = ['retry']; return; }
+    if (code === 'invalid_request' || code === 'transform_error' || code === 'queue_overflow') { bot.note = '요청을 보내지 못했어요. 앱 쪽 문제일 수 있어요. 잠시 뒤 다시 보내 보고, 계속 안 되면 대화를 지우고 다시 물어봐 주세요.'; bot.actions = ['retry']; return; }
     bot.note = bot.text ? '답이 중간에 끊겼어요 (연결 문제).' : '답을 받지 못했어요 (연결 문제).';
     if (bot.changes && bot.changes.length) bot.note += ' 아래 변경은 이미 반영됐어요 — 다시 보내면 그 변경은 빼고 이어서 답해요.';
     bot.actions = ['retry'];
@@ -2478,7 +2487,7 @@
         el('span', '🤖 ' + D.time(m.at)),
         used.length ? el('span', '· 확인: ' + used.join(', ')) : null,
         m.noTools ? el('span', { title: '이 답은 앱 데이터를 직접 읽거나 바꾸지 않았어요' }, '· 요약만 보고 답함') : null,
-        m.tier ? el('span', { title: '⚡ 빠른 답변을 이 요금제에서 쓸 수 없어 다른 모델이 답했어요' }, '· ⚡ 대신 ' + (TIER_LABEL[m.tier] || m.tier) + ' 모델') : null));
+        m.tier ? el('span', { title: '⚡ 빠른 답변을 이 요금제에서 쓸 수 없어 다른 모델이 답했어요' }, '· ⚡ 대신 ' + (TIER_LABEL[m.tier] || '다른') + ' 모델') : null));
     }
     return node;
   }
@@ -2595,31 +2604,32 @@
     const can = [
       ['🗓', '“이번 주 할 일 정리해줘”, “지연된 일 뭐 있어?” — 체크리스트·워크플랜을 보고 정리해요'],
       ['💰', '“삼성 에어컨 이전설치 견적 45만원 받았어, 예산에 반영해줘” — 예산을 고치고 남는 돈을 다시 계산해요'],
-      ['🚚', '“이사업체 A 견적 210만원, 사다리차 포함” — 견적 비교에 넣고 모델과 비교해요'],
+      ['🚚', '“○○이사업체 견적 210만원, 사다리차 포함” — 견적 비교에 넣고 모델과 비교해요'],
       ['✅', '“우리은행 질권 확인 끝났어, 체크하고 메모 남겨줘” — 체크·메모·할 일 추가'],
       ['↺', '바꾼 내용은 기록에 🤖로 남고, 답마다 한 번에 되돌릴 수 있어요'],
     ];
     let head; let body;
     if (mode === 'waiting') {
       head = 'AI 비서를 준비하는 중이에요…';
-      body = el('p', { class: 'mb-0' }, 'Claude 연결을 확인하고 있어요. 잠시만 기다려 주세요.');
+      body = el('p', { class: 'mb-0' }, '클로드 연결을 확인하고 있어요. 잠시만 기다려 주세요.');
     } else if (mode === 'nocap') {
       head = '이 화면에서는 AI 비서를 쓸 수 없어요';
-      body = el('p', { class: 'mb-0' }, 'Claude 연결이 이 보기에서 꺼져 있어요. claude.ai 에서 공유 버전을 직접 열면 쓸 수 있어요.',
+      body = el('p', { class: 'mb-0' }, '이 화면에서는 클로드 연결이 꺼져 있어요. 받은 공유 링크로 클로드 공유 버전을 직접 열면 쓸 수 있어요.',
         url ? [' ', el('a', { href: url, target: '_blank', rel: 'noopener noreferrer' }, '공유 버전 열기 →')] : null);
     } else {
-      head = 'AI 비서는 claude.ai 공유 버전에서 쓸 수 있어요';
+      head = 'AI 비서는 클로드 공유 버전에서만 쓸 수 있어요';
+      const why = '클로드 공유 버전(링크로 여는 화면)에서만 쓸 수 있어요. 지금 화면은 깃허브 페이지 버전이라 기록이 이 기기에만 저장되고, AI 기능은 꺼져 있어요.';
       body = url
-        ? el('p', { class: 'mb-0' }, '이 주소(GitHub Pages)에서는 기록이 이 브라우저에만 저장되고 AI 기능은 꺼져 있어요. ',
+        ? el('p', { class: 'mb-0' }, why + ' ',
           el('a', { class: 'btn btn-primary btn-sm ag-open', href: url, target: '_blank', rel: 'noopener noreferrer' }, '공유 버전 열기 →'))
-        : el('p', { class: 'mb-0' }, '이 주소(GitHub Pages)에서는 기록이 이 브라우저에만 저장되고 AI 기능은 꺼져 있어요. 받은 claude.ai 공유 링크로 열어 주세요.');
+        : el('p', { class: 'mb-0' }, why + ' 받은 공유 링크로 열어 주세요.');
     }
     root.appendChild(el('div', { class: 'ag-off' },
       el('div', { class: 'view-head' }, el('div', null, el('h1', '🤖 AI 비서'), el('div', { class: 'sub' }, '말로 묻고 바로 고치는 이사 관리 비서'))),
       el('section', { class: 'card tint-kid' }, el('h2', head), body),
       el('section', { class: 'card' }, el('h3', '공유 버전에서 할 수 있는 일'),
         el('ul', { class: 'ag-can' }, can.map(([i, t]) => el('li', el('span', { class: 'ag-can-i', 'aria-hidden': 'true' }, i), el('span', t))))),
-      el('p', { class: 'tiny muted' }, '질문할 때마다 그 사람의 Claude 사용량을 써요. 체크리스트·예산·견적 화면은 어디서나 그대로 쓸 수 있어요.')));
+      el('p', { class: 'tiny muted' }, '질문할 때마다 질문한 사람의 클로드 사용량을 써요. 체크리스트·예산·견적 화면은 어디서나 그대로 쓸 수 있어요.')));
   }
 
   /* ---- 화면: 대화 ---- */
@@ -2644,7 +2654,7 @@
     const head = el('div', { class: 'ag-head' },
       el('div', { class: 'ag-title' }, el('h1', '🤖 AI 비서'), el('span', { class: 'ag-sub' }, '진척도·비용·일정을 묻고 바로 고쳐요')),
       el('div', { class: 'ag-tools' }, blocked ? null : quickBtn, v.clear),
-      el('div', { class: 'ag-note' }, el('span', '⚠ 질문할 때마다 이 계정의 Claude 사용량을 써요'), v.ro, v.tier));
+      el('div', { class: 'ag-note' }, el('span', '⚠ 질문할 때마다 이 계정의 클로드 사용량을 써요'), v.ro, v.tier));
     v.log = el('div', { class: 'ag-log', role: 'log', 'aria-label': 'AI 비서 대화', 'aria-live': 'polite', tabindex: '0' });
     const wrap = el('div', { class: 'ag' + (blocked ? ' ag-blocked' : '') }, head, v.log);
     v.root = wrap;
@@ -2697,7 +2707,7 @@
       const composer = el('div', { class: 'ag-composer' }, v.ta, v.send);
       wrap.appendChild(v.chips);
       wrap.appendChild(composer);
-      wrap.appendChild(el('div', { class: 'ag-hint' }, 'Enter 보내기 · Shift+Enter 줄바꿈 · Esc 중지 · 답은 확인하고 쓰세요'));
+      wrap.appendChild(el('div', { class: 'ag-hint' }, '엔터로 보내기 · 시프트+엔터로 줄바꿈 · 이스케이프로 중지 · 답은 확인하고 쓰세요'));
     }
     root.appendChild(wrap);
     R.view = v;
@@ -2754,8 +2764,7 @@
       else offCard(root, mode);
     } catch (e) {
       console.error('[agent]', e);
-      root.replaceChildren(el('div', { class: 'card tint-bad' }, el('h2', 'AI 비서 화면을 여는 중 문제가 생겼어요'), el('p', { class: 'small' }, String((e && e.message) || e)),
-        el('button', { type: 'button', class: 'btn', onclick: () => MV.rerender() }, '다시 시도')));
+      root.replaceChildren(errorCard('AI 비서 화면을 여는 중 문제가 생겼어요', e, () => MV.rerender()));
     }
     updateFab();
   }
