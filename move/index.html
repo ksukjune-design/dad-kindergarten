@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#0e7490">
+<title>우리집 이사 관리</title>
+<link rel="icon" type="image/svg+xml" href="./icon.svg">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="stylesheet" href="./css/app.css">
+</head>
+<body>
+<div class="app" id="app">
+  <header class="topbar">
+    <a class="brand" href="#/dashboard" aria-label="대시보드로">
+      <span class="brand-mark" aria-hidden="true">🏠</span>
+      <span class="brand-text">
+        <strong>우리집 이사</strong>
+        <small id="topbar-sub">등촌우성 → 서광등촌마을</small>
+      </span>
+    </a>
+    <div class="dday" id="topbar-dday" title="이사일까지"></div>
+    <button class="btn btn-ghost btn-icon" id="topbar-menu" aria-label="데이터 메뉴" title="백업·복원·초기화">⋯</button>
+  </header>
+  <nav class="nav" id="nav" aria-label="주요 메뉴"></nav>
+  <main class="view" id="view" tabindex="-1"></main>
+</div>
+<div class="toast-wrap" id="toast-wrap" aria-live="polite"></div>
+<noscript>이 앱은 자바스크립트가 필요합니다.</noscript>
+
+<script src="./js/core.js"></script>
+<script src="./js/data-seed.js"></script>
+<script src="./js/data-plans.js"></script>
+<script src="./js/data-layouts.js"></script>
+<script src="./js/data-guides-a.js"></script>
+<script src="./js/data-guides-b.js"></script>
+<script src="./js/data-guides-c.js"></script>
+<script src="./js/sync.js"></script>
+<script src="./js/view-dashboard.js"></script>
+<script src="./js/view-checklist.js"></script>
+<script src="./js/view-floorplan.js"></script>
+<script src="./js/view-estimate.js"></script>
+<script src="./js/view-finance.js"></script>
+<script src="./js/view-guides.js"></script>
+<script src="./js/view-agent.js"></script>
+<script src="./js/app.js"></script>
+</body>
+</html>

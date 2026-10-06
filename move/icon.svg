@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="우리집 이사">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0e7490"/><stop offset="1" stop-color="#155e75"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#g)"/>
+  <path d="M120 248 256 136l136 112v148a20 20 0 0 1-20 20H140a20 20 0 0 1-20-20z" fill="#fff8f2"/>
+  <rect x="196" y="286" width="120" height="96" rx="10" fill="#c2410c"/>
+  <path d="M196 318h120" stroke="#fff8f2" stroke-width="10"/>
+  <path d="M256 286v32" stroke="#fff8f2" stroke-width="10"/>
+</svg>
