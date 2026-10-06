@@ -1538,7 +1538,11 @@
         if (r.w <= 0 || r.h <= 0) return;
         const w = Math.max(r.w, minS), h = Math.max(r.h, minS);
         const nm = fxShortName(f);
-        ge.appendChild(svg('rect', { class: 'fp-fxeditpad', 'data-fxk': f._fk, x: r1(r.x + r.w / 2 - w / 2), y: r1(r.y + r.h / 2 - h / 2), width: r1(w), height: r1(h), fill: 'transparent' }));
+        // 넓힌 칸은 그 자리가 든 방 안쪽으로만 (옆 방을 누르려다 이 창이 열리지 않게)
+        let pad = { x: r.x + r.w / 2 - w / 2, y: r.y + r.h / 2 - h / 2, w, h };
+        const rm = roomAt(plan, r.x + r.w / 2, r.y + r.h / 2);
+        if (rm && fitsIn(pad, rm)) pad = Object.assign(pad, clampInto(pad, rm));
+        ge.appendChild(svg('rect', { class: 'fp-fxeditpad', 'data-fxk': f._fk, x: r1(pad.x), y: r1(pad.y), width: r1(pad.w), height: r1(pad.h), fill: 'transparent' }));
         ge.appendChild(svg('rect', Object.assign({ class: 'fp-fxedit' + (f._measured ? ' is-measured' : ''), 'data-fxk': f._fk, x: r1(r.x), y: r1(r.y), width: r1(r.w), height: r1(r.h), rx: 3,
           tabindex: '0', role: 'button', 'aria-label': nm + (f._measured ? ' 실측 고치기 (지금 폭 ' + cm1(f._meas.width) + 'cm)' : ' 실측 입력 (폭·깊이·높이)') }, NS),
         svg('title', nm + ' — 눌러서 잰 폭·깊이·높이 넣기')));
@@ -1872,6 +1876,13 @@
 /* 좁은 화면: 한 줄로 — 1fr 대신 minmax(0, 1fr) 이라야 넓은 표가 칸을 밀어내지 않고 표 칸(.table-wrap) 안에서 옆으로 굴러요 */
 @media (max-width: 900px) { .fp-cmp-grid { grid-template-columns: minmax(0, 1fr); } }
 .fp-cmp .table-wrap { max-width: 100%; }
+/* 폰: 표 칸 여백을 줄여 '차이' 칸까지 한 화면에 (그래도 넘치면 표 칸 안에서만 옆으로 굴러감) */
+@media (max-width: 420px) {
+  table.tbl.fp-cmp-tbl th, table.tbl.fp-cmp-tbl td { padding: 7px 5px; }
+  table.tbl.fp-cmp-tbl th:first-child, table.tbl.fp-cmp-tbl td:first-child { padding-left: 2px; }
+  table.tbl.fp-cmp-tbl th:last-child, table.tbl.fp-cmp-tbl td:last-child { padding-right: 2px; }
+  .fp-cmp-tbl td:first-child { min-width: 5.5em; }
+}
 .fp-up { color: var(--good); font-weight: 700; }
 .fp-down { color: var(--bad); font-weight: 700; }
 .fp-bars { display: flex; flex-direction: column; gap: 10px; margin: 10px 0; }
@@ -2294,9 +2305,10 @@
           el('strong', String(f.name || '설비 자리')),
           f._measured ? el('span', { class: 'chip good' }, '실측') : fxGuess(plan, f) ? el('span', { class: 'chip warn' }, '추정') : null,
           el('button', { type: 'button', class: 'btn btn-ghost btn-icon fp-b', 'data-act': 'fxclose', 'aria-label': '설명 닫기', onclick: hideFx }, '✕')),
-        el('div', { class: 'fp-fxtip-b' }, f.note ? MV.linkify(String(f.note)) : '도면에 표시한 자리예요. 사전방문 때 실제 위치를 확인하세요.'),
-        f._measured ? el('div', { class: 'small strong num fp-fxtip-m' }, '📏 ' + measTxt(f._meas))
-          : el('div', { class: 'tiny muted num' }, '도면 표시 ' + Math.round(r.w) + '×' + Math.round(r.h) + 'cm'),
+        // 잰 값이 있으면 자료 메모(추정)보다 먼저
+        f._measured ? el('div', { class: 'small strong num fp-fxtip-m' }, '📏 ' + measTxt(f._meas) + ' (사전방문 때 잰 값)') : null,
+        el('div', { class: 'fp-fxtip-b' }, f.note ? [f._measured ? el('span', { class: 'tiny muted' }, '도면 자료 메모: ') : null, MV.linkify(String(f.note))] : '도면에 표시한 자리예요. 사전방문 때 실제 위치를 확인하세요.'),
+        f._measured ? null : el('div', { class: 'tiny muted num' }, '도면 표시 ' + Math.round(r.w) + '×' + Math.round(r.h) + 'cm'),
         // 냉장고 자리: 사전방문 때 잰 크기를 바로 넣을 수 있게
         fxMeasurable(f) ? el('div', { class: 'fp-fxtip-a' }, el('button', { type: 'button', class: 'btn btn-sm fp-b', 'data-act': 'fxmeasure', onclick: () => openFxMeasure(f._fk) },
           f._measured ? '📏 실측 고치기' : '📏 실측 입력')) : null);
@@ -2364,8 +2376,11 @@
         el('button', { type: 'button', class: 'btn btn-sm fp-b fp-sizebtn', 'data-tool': 'size', onclick: openSizeEditor, title: '도면 전체 가로·세로 (cm)' },
           '📐 ', el('span', { class: 'fp-wl' }, '전체 '), '크기 ' + Math.round(plan.width) + '×' + Math.round(plan.depth)),
         el('span', { class: 'fp-break', 'aria-hidden': 'true' }),
-        el('div', { class: 'fp-edittip', 'aria-live': 'polite' }, TOOL_TIPS[tool]
-          + (tool === 'room' && plan.fixtures.some(fxMeasurable) ? ' 냉장고 자리를 누르면 사전방문 때 잰 폭·높이를 넣어요.' : '') + ' 짐은 잠시 잠겨요.'),
+        // 폰에선 짧은 글로 (도구 줄이 길어져 도면이 밀려나지 않게)
+        el('div', { class: 'fp-edittip', 'aria-live': 'polite' }, tool === 'room' && plan.fixtures.some(fxMeasurable)
+          ? [el('span', { class: 'fp-wl' }, TOOL_TIPS.room + ' 냉장고 자리를 누르면 사전방문 때 잰 폭·높이를 넣어요. 짐은 잠시 잠겨요.'),
+            el('span', { class: 'fp-ws' }, '방을 누르면 치수·이름을 고치거나 지우고, 냉장고 자리를 누르면 잰 폭을 넣어요.')]
+          : TOOL_TIPS[tool] + ' 짐은 잠시 잠겨요.'),
         tool === 'draw' ? el('button', { type: 'button', class: 'btn btn-sm fp-b fp-ebtn', 'data-act': 'typed', onclick: () => openRoomEditor(null, typedRoomRect(), true), title: '끌지 않고 크기·위치를 숫자로 넣어 방 추가' }, '🔢 숫자로 넣기') : null,
         plan.edited ? el('button', { type: 'button', class: 'btn btn-sm btn-danger fp-b fp-ebtn', onclick: resetAllRooms, title: '도면 전체 원래대로' }, el('span', { class: 'fp-wl' }, '도면 전체 '), '원래대로') : null,
         el('button', { type: 'button', class: 'btn btn-sm btn-primary fp-b fp-ebtn fp-done', onclick: finishEdit }, '완료'));
