@@ -2158,7 +2158,7 @@
           redo(), helpBtn(), cancel));
       } else if (wiz.step === 'pts') {
         if (!wiz.lenIn) {
-          wiz.lenIn = el('input', { class: 'input num', type: 'text', inputmode: 'decimal', autocomplete: 'off', placeholder: '예: 330 · 3300mm · 3.3m', 'aria-label': '두 점 사이 실제 길이' });
+          wiz.lenIn = el('input', { class: 'input num', type: 'text', inputmode: 'decimal', autocomplete: 'off', placeholder: mm('(max-width: 600px)') ? '예: 3300 · 330' : '예: 330 · 3300mm · 3.3m', 'aria-label': '두 점 사이 실제 길이' });
           wiz.unitSel = el('select', { class: 'select', 'aria-label': '길이 단위' },
             el('option', { value: 'auto' }, '단위 자동'), el('option', { value: 'cm' }, 'cm'), el('option', { value: 'mm' }, 'mm'), el('option', { value: 'm' }, 'm'));
           wiz.lenIn.addEventListener('input', updLen);
@@ -2201,7 +2201,7 @@
       out.textContent = '';
       if (!String(t).trim()) {
         put(out, el('span', { class: 'fp-wl' }, '숫자만 넣으면 단위를 알아서 짐작해요 (“3,300”처럼 쉼표가 있으면 mm).'),
-          el('span', { class: 'fp-ws' }, '사진에서 잰 길이 약 ' + Math.round(est) + 'cm · 숫자만 넣어도 돼요'));
+          el('span', { class: 'fp-ws' }, '사진에서 약 ' + Math.round(est) + 'cm · 숫자만 넣어도 돼요'));
         return;
       }
       if (!r) { out.className = 'fp-lenout is-bad'; out.textContent = '숫자로 읽을 수 없어요 (예: 330 · 3300mm · 3.3m)'; return; }
