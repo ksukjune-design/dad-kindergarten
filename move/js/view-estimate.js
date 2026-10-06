@@ -170,7 +170,7 @@
     { k: 'ladder_f2', g: 'lift', label: '사다리차 2~5층 (5톤 기준)', unit: '원/회', v: 150000, lo: 100000, hi: 180000, money: true, conf: 'mid', basis: '2025 요금표 2~5층 15만원 (원문 재확인 못 함)', src: ['ladder'] },
     { k: 'ladder_f6', g: 'lift', label: '사다리차 6~9층', unit: '원/회', v: 165000, money: true, conf: 'low', basis: '요금표 5층(15만)과 10층(18만) 사이 보간 (추정)', src: ['ladder'] },
     { k: 'ladder_f10', g: 'lift', label: '사다리차 10~12층', unit: '원/회', v: 180000, money: true, conf: 'mid', basis: '2025 요금표 10~11층 18만원', src: ['ladder'] },
-    { k: 'ladder_f13', g: 'lift', label: '사다리차 13~15층', unit: '원/회', v: 210000, lo: 200000, hi: 300000, money: true, conf: 'mid', basis: '2025 요금표 15층·5톤 21만원. 서광등촌마을 104동 설치 가능 여부는 아직 미확인', src: ['ladder'] },
+    { k: 'ladder_f13', g: 'lift', label: '사다리차 13~15층', unit: '원/회', v: 210000, lo: 200000, hi: 300000, money: true, conf: 'mid', basis: '2025 요금표 15층·5톤 21만원. 새 집 동 앞에 사다리차를 세울 수 있는지는 아직 미확인', src: ['ladder'] },
     { k: 'ladder_f16', g: 'lift', label: '사다리차 16~20층', unit: '원/회', v: 280000, money: true, conf: 'mid', basis: '2025 요금표 20층 28만원', src: ['ladder'] },
     { k: 'ladder_f21', g: 'lift', label: '사다리차 21층 이상', unit: '원/회', v: 400000, money: true, conf: 'mid', basis: '2025 요금표 24층 약 40만원', src: ['ladder'] },
     { k: 'ladder_step', g: 'lift', label: '5톤 넘는 차량 등급마다 추가', unit: '원/등급', v: 30000, money: true, conf: 'mid', basis: '요금표 15층: 5톤 21만 → 6톤 24만 → 7.5톤 27만원', src: ['ladder'] },

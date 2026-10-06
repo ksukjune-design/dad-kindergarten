@@ -1739,6 +1739,7 @@
      편집 화면 (#/plan/new · #/plan/old)
      ============================================================ */
   function renderEditor(root, key, ctx, headRow) {
+    const ui = modalTracker(ctx);   // 이 화면에서 연 창 (화면을 떠나면 함께 닫음)
     let sel = null;           // 선택된 배치 id
     let editMode = false;     // ✏️ 치수 수정
     let drag = null;
@@ -2144,7 +2145,7 @@
       if (bg.calibrated) toast('사진을 돌렸어요 — 도면 왼쪽 위 모서리를 눌러 위치를 다시 맞춰 주세요', { action: { label: '위치 맞추기', onClick: () => startWiz('origin') }, ms: 5000 });
     }
     function deleteBg() {
-      MV.ui.confirm(PLAN_LABEL[key] + ' 평면도 사진을 지울까요? 고친 도면(방·문·크기)은 그대로 남아요.', { danger: true, okLabel: '사진 지우기', title: '사진 지우기' }).then((ok) => {
+      ui.confirm(PLAN_LABEL[key] + ' 평면도 사진을 지울까요? 고친 도면(방·문·크기)은 그대로 남아요.', { danger: true, okLabel: '사진 지우기', title: '사진 지우기' }).then((ok) => {
         if (!ok) return;
         wiz = null;
         MV.store.update((st) => { bgsOf(st)[key] = null; }, { log: '🖼 ' + PLAN_LABEL[key] + ' 평면도 사진 지움' });
@@ -2506,7 +2507,7 @@
           el('div', { class: 'tiny muted num' }, Math.round(num(it.w, 0)) + '×' + Math.round(num(it.d, 0)) + '×' + Math.round(num(it.h, 0)) + 'cm · ' + MV.inv.fate(fateOf(it)).label),
           el('button', { type: 'button', class: 'btn btn-sm btn-ghost fp-b', onclick: () => editSpec(it.id), 'aria-label': label + ' 규격 수정' }, '✎ 규격')]
           : [el('div', { class: 'small muted' }, '짐 목록에 없어요'),
-            el('button', { type: 'button', class: 'btn btn-sm fp-b', onclick: () => MV.inv.editor(null, { defaults: preset }) }, '+ ' + label + ' 추가')]);
+            el('button', { type: 'button', class: 'btn btn-sm fp-b', onclick: () => ui.invEditor(null, { defaults: preset }) }, '+ ' + label + ' 추가')]);
       laundry.appendChild(el('div', { class: 'fp-wd' },
         appliance(washer, '세탁기', { name: '통돌이 세탁기 (구매 예정)', cat: 'appliance', tag: 'washer', fate: 'buy', w: 70, d: 72, h: 105, roomNew: room ? room.name : '다용도실' }),
         appliance(dryer, '건조기', { name: '건조기', cat: 'appliance', tag: 'dryer', fate: 'move', w: 70, d: 76, h: 99, roomNew: room ? room.name : '다용도실' })));
@@ -2670,7 +2671,7 @@
       toast(q(res.it) + jo(res.it.name, '을', '를') + ' ' + (res.room ? res.room.name : '도면 가운데') + '에 놓았어요', narrow ? { action: { label: '보기', onClick: revealSel } } : undefined);
     }
     function addItem() {
-      MV.inv.editor(null, { defaults: { fate: 'move' }, onSave: (saved) => {
+      ui.invEditor(null, { defaults: { fate: 'move' }, onSave: (saved) => {
         if (!saved || !eligible(key, saved)) return;
         setTimeout(() => toast(q(saved) + jo(saved.name, '을', '를') + ' 짐 목록에 넣었어요', { action: { label: '도면에 놓기', onClick: () => placeOne(saved.id) } }), 50);
       } });
@@ -2679,7 +2680,7 @@
       const cnt = placedCount(key);
       const n = MV.inv.list((it) => eligible(key, it)).reduce((s, it) => s + Math.max(0, qtyOf(it) - (cnt[it.id] || 0)), 0);
       if (!n) { toast('놓을 짐이 없어요 — 모두 배치됐어요'); return; }
-      MV.ui.confirm('아직 놓지 않은 짐 ' + n + '개를 “' + (key === 'new' ? '새 집 위치' : '지금 집 위치') + '”에 적힌 방에 맞춰 벽 쪽으로 자동 배치할까요? 문 앞과 트인 통로는 비워 두고, 이미 놓은 짐은 그대로 둬요.', { okLabel: '자동 배치', title: '자동 배치 제안' }).then((ok) => {
+      ui.confirm('아직 놓지 않은 짐 ' + n + '개를 “' + (key === 'new' ? '새 집 위치' : '지금 집 위치') + '”에 적힌 방에 맞춰 벽 쪽으로 자동 배치할까요? 문 앞과 트인 통로는 비워 두고, 이미 놓은 짐은 그대로 둬요.', { okLabel: '자동 배치', title: '자동 배치 제안' }).then((ok) => {
         if (!ok) return;
         const res = runAutoLayout(key);
         if (!res) return;
@@ -2689,7 +2690,7 @@
           return Array.from(m.values()).map((e) => e.it.name + (e.n > 1 ? ' ×' + e.n : '') + (e.room ? ' (' + e.room.name + ')' : ''));
         };
         if (!res.noFit.length && !res.noRoom.length) { toast('짐 ' + res.placed.length + '개를 자동으로 놓았어요 👍'); return; }
-        MV.ui.modal({
+        ui.modal({
           title: '자동 배치 결과',
           body: el('div', { class: 'stack' },
             el('p', { class: 'mb-0' }, '놓은 짐 ' + res.placed.length + '개'),
@@ -2777,7 +2778,7 @@
       const before = cur ? cur.items.filter((o) => o.it.id === invId).map((o) => ({
         pid: o.p.id, r: Object.assign({}, o.r), rot: o.p.rot === 90 ? 90 : 0, room: roomAt(cur.plan, o.r.x + o.r.w / 2, o.r.y + o.r.h / 2),
       })) : [];
-      MV.inv.editor(invId, { onSave: (saved) => {
+      ui.invEditor(invId, { onSave: (saved) => {
         if (!saved || !before.length) return;
         const plan = getPlan(key);
         if (!plan) return;
@@ -2990,7 +2991,7 @@
       } });
       actions.push({ label: '취소', kind: 'ghost' });
       actions.push({ label: isNew ? '추가' : '저장', kind: 'primary', onClick: () => save() });
-      m = MV.ui.modal({
+      m = ui.modal({
         title: isNew ? '＋ 새 방' : (isAdded ? '✏️ ' : '📏 ') + r.name + ' 고치기',
         body: el('div', { class: 'stack' },
           el('p', { class: 'small muted mb-0' }, isNew
@@ -3007,7 +3008,7 @@
     function deleteRoom(r) {
       const placedIn = cur ? cur.items.filter((o) => hasPt(r, o.r.x + o.r.w / 2, o.r.y + o.r.h / 2)).length : 0;
       const ownDoors = cur ? cur.plan.doors.filter((d) => d._added && d.room === r.id).length : 0;
-      return MV.ui.confirm('「' + r.name + '」' + jo(r.name, '을', '를') + ' 도면에서 지울까요?'
+      return ui.confirm('「' + r.name + '」' + jo(r.name, '을', '를') + ' 도면에서 지울까요?'
         + (r.added ? (ownDoors ? ' 이 방에 단 문도 함께 지워져요.' : '') : ' 이 방에만 붙은 문·창·고정물도 함께 숨겨져요.')
         + (placedIn ? ' 이 방에 놓인 짐 ' + placedIn + '개는 그 자리에 그대로 남아요.' : ''), { danger: true, okLabel: '방 지우기', title: '방 삭제' }).then((ok) => {
         if (!ok) return false;
@@ -3106,7 +3107,7 @@
       } });
       actions.push({ label: '취소', kind: 'ghost' });
       actions.push({ label: '저장', kind: 'primary', onClick: () => save() });
-      m = MV.ui.modal({
+      m = ui.modal({
         title: '📐 ' + PLAN_LABEL[key] + ' 전체 크기',
         body: el('div', { class: 'stack' },
           el('p', { class: 'small muted mb-0' }, '집 바깥벽 기준 전체 가로·세로(cm)예요. 외곽선·치수선·화면 맞춤이 이 크기를 따라가요. 방 크기는 따로 고쳐야 해요.'),
@@ -3181,7 +3182,7 @@
       });
     }
     function resetAllRooms() {
-      MV.ui.confirm(PLAN_LABEL[key] + ' 도면에서 고친 것(방 치수·이름·종류, 그린 방, 지운 방, 전체 크기, 문 추가·삭제)을 모두 지우고 원래 도면으로 되돌릴까요? 평면도 사진은 그대로 둬요.', { danger: true, okLabel: '원래대로', title: '도면 전체 원래대로' }).then((ok) => {
+      ui.confirm(PLAN_LABEL[key] + ' 도면에서 고친 것(방 치수·이름·종류, 그린 방, 지운 방, 전체 크기, 문 추가·삭제)을 모두 지우고 원래 도면으로 되돌릴까요? 평면도 사진은 그대로 둬요.', { danger: true, okLabel: '원래대로', title: '도면 전체 원래대로' }).then((ok) => {
         if (!ok) return;
         const plan = getPlan(key);
         // 짐의 '위치' 이름 되돌리기: 이름을 바꾼 원래 방(지운 방 포함) → 원래 이름, 직접 그린 방 → 그 자리의 원래 방 이름
@@ -3647,6 +3648,7 @@
      비교 화면 (#/plan/compare)
      ============================================================ */
   function renderCompare(root, ctx) {
+    const ui = modalTracker(ctx);
     const box = el('div', { class: 'fp-cmp' });
     root.appendChild(box);
     let plansGrid = null;
@@ -3724,7 +3726,7 @@
         sfMsg,
         cc.unplaced.length ? el('p', { class: 'small' }, '짐 목록엔 있지만 새 집 도면에 아직 안 놓은 옷장: ', cc.unplaced.map((it) => it.name + ' ' + Math.round(num(it.w, 0)) + 'cm').join(', '), ' → ', el('a', { href: '#/plan/new' }, '새 집 배치에서 놓기')) : null,
         el('div', { class: 'row mt-8' },
-          el('button', { type: 'button', class: 'btn btn-sm fp-b', onclick: () => MV.inv.editor(null, { defaults: { name: '옷장 (구매 예정)', cat: 'storage', tag: 'wardrobe', fate: 'buy', w: 120, d: 60, h: 216, roomNew: '안방' } }) }, '+ 옷장 추가 (구매 예정)'),
+          el('button', { type: 'button', class: 'btn btn-sm fp-b', onclick: () => ui.invEditor(null, { defaults: { name: '옷장 (구매 예정)', cat: 'storage', tag: 'wardrobe', fate: 'buy', w: 120, d: 60, h: 216, roomNew: '안방' } }) }, '+ 옷장 추가 (구매 예정)'),
           clothesPart && MV.views.checklist ? el('a', { class: 'btn btn-sm btn-ghost fp-b', href: '#/checklist/' + encodeURIComponent(clothesPart.id) }, (clothesPart.emoji || '👕') + ' ' + clothesPart.name + ' 체크리스트') : null,
           buyPart && MV.views.checklist ? el('a', { class: 'btn btn-sm btn-ghost fp-b', href: '#/checklist/' + encodeURIComponent(buyPart.id) }, (buyPart.emoji || '🛒') + ' ' + buyPart.name) : null));
       box.appendChild(el('div', { class: 'fp-cmp-grid' }, areaCard, closetCard));
@@ -3753,7 +3755,7 @@
                 commitPlacement('new', res);
                 toast(q(it) + jo(it.name, '을', '를') + ' 새 집 ' + (res.room ? res.room.name : '가운데') + '에 놓았어요', { action: { label: '새 집 배치 보기', onClick: () => MV.go('#/plan/new') } });
               } }, '+ 새 집에 놓기'),
-              el('button', { type: 'button', class: 'btn btn-sm btn-ghost fp-b', onclick: () => MV.inv.editor(it.id), 'aria-label': it.name + ' 수정 (버리기·판매로 바꾸기)' }, '✎')))),
+              el('button', { type: 'button', class: 'btn btn-sm btn-ghost fp-b', onclick: () => ui.invEditor(it.id), 'aria-label': it.name + ' 수정 (버리기·판매로 바꾸기)' }, '✎')))),
         notAnywhere.length ? el('p', { class: 'tiny muted mt-8 mb-0' }, '“가져감” 짐 중 ' + notAnywhere.length + '개는 아직 어느 도면에도 안 놓였어요: ' + notAnywhere.slice(0, 6).map((it) => it.name).join(', ') + (notAnywhere.length > 6 ? ' …' : '')) : null));
 
       drawMinis();
