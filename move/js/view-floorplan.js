@@ -1630,43 +1630,76 @@
       const plan = getPlan(key);
       const r = plan && plan.rooms.find((x) => x.id === rid);
       if (!r) return;
+      // 말이 되는 범위: 원래 도면 크기를 기준으로 (오타 하나로 도면 전체가 망가지지 않게)
+      const os = validRooms(plan).map((x) => x.orig).filter((x) => x.w > 0 && x.h > 0);
+      const base = MV.plans[key] || {};
+      const ob = { x0: Math.min(0, ...os.map((x) => x.x)), y0: Math.min(0, ...os.map((x) => x.y)),
+        x1: Math.max(num(base.width, 0), ...os.map((x) => x.x + x.w)), y1: Math.max(num(base.depth, 0), ...os.map((x) => x.y + x.h)) };
+      const maxDim = Math.max(1200, Math.round(Math.max(ob.x1 - ob.x0, ob.y1 - ob.y0) * 1.5 / 10) * 10);
+      const PAD = 500;
       const f = {};
       const numIn = (v) => el('input', { class: 'input num', type: 'number', inputmode: 'decimal', min: '0', step: '1', value: String(Math.round(v * 10) / 10) });
       f.name = el('input', { class: 'input', value: r.name, placeholder: '예: 안방' });
       f.w = numIn(r.w); f.h = numIn(r.h); f.x = numIn(r.x); f.y = numIn(r.y);
+      f.w.max = f.h.max = String(maxDim); f.w.min = f.h.min = '30';
       const prev = el('div', { class: 'fp-area-prev', 'aria-live': 'polite' });
       const read = () => ({ name: f.name.value.trim(), w: parseFloat(f.w.value), h: parseFloat(f.h.value), x: parseFloat(f.x.value), y: parseFloat(f.y.value) });
+      /** 막아야 할 오류 → [{input, msg}] */
+      const errorsOf = (v) => {
+        const out = [];
+        if (!(v.w > 0)) out.push([f.w, '가로를 넣어 주세요']); else if (v.w < 30 || v.w > maxDim) out.push([f.w, '가로 ' + Math.round(v.w) + 'cm — 30~' + maxDim + 'cm 사이로 넣어 주세요']);
+        if (!(v.h > 0)) out.push([f.h, '세로를 넣어 주세요']); else if (v.h < 30 || v.h > maxDim) out.push([f.h, '세로 ' + Math.round(v.h) + 'cm — 30~' + maxDim + 'cm 사이로 넣어 주세요']);
+        if (!isFinite(v.x)) out.push([f.x, 'X를 넣어 주세요']); else if (v.x < ob.x0 - PAD || (v.w > 0 && v.x + v.w > ob.x1 + PAD)) out.push([f.x, 'X 위치가 도면에서 너무 멀어요 (' + Math.round(ob.x0 - PAD) + '~' + Math.round(ob.x1 + PAD) + 'cm 안)']);
+        if (!isFinite(v.y)) out.push([f.y, 'Y를 넣어 주세요']); else if (v.y < ob.y0 - PAD || (v.h > 0 && v.y + v.h > ob.y1 + PAD)) out.push([f.y, 'Y 위치가 도면에서 너무 멀어요 (' + Math.round(ob.y0 - PAD) + '~' + Math.round(ob.y1 + PAD) + 'cm 안)']);
+        return out;
+      };
       const upd = () => {
         const v = read();
-        if (!(v.w > 0) || !(v.h > 0)) { prev.textContent = '가로·세로는 0보다 커야 해요'; return; }
-        const a = (v.w * v.h) / 10000, a0 = area(r.orig);
+        const errs = errorsOf(v);
+        [f.w, f.h, f.x, f.y].forEach((i) => { if (errs.some(([j]) => j === i)) i.setAttribute('aria-invalid', 'true'); else i.removeAttribute('aria-invalid'); });
         prev.textContent = '';
+        prev.className = 'fp-area-prev' + (errs.length ? ' is-bad' : '');
+        if (errs.length) { put(prev, errs.map(([, msg]) => el('div', '⛔ ' + msg))); return; }
+        const a = (v.w * v.h) / 10000, a0 = area(r.orig);
         put(prev, el('strong', Math.round(v.w) + '×' + Math.round(v.h) + 'cm = ' + fmtA(a)),
-          el('span', { class: 'muted' }, ' · 원래 도면 ' + Math.round(r.orig.w) + '×' + Math.round(r.orig.h) + ' (' + fmtA(a0) + ', ' + fmtD(a - a0) + ')'));
+          el('span', { class: 'muted' }, ' · 원래 도면 ' + Math.round(r.orig.w) + '×' + Math.round(r.orig.h) + ' (' + fmtA(a0) + ', ' + fmtD(r1(a) - r1(a0)) + ')'));
+        const me = { x: v.x, y: v.y, w: v.w, h: v.h };
+        const ov = validRooms(plan).filter((o) => o.id !== rid).map((o) => ({ o, i: inter(me, o) })).filter((z) => z.i && z.i.w > 2 && z.i.h > 2);
+        const warns = [];
+        if (a0 > 0 && (a / a0 > 2 || a / a0 < 0.5)) warns.push('원래 도면보다 ' + (a > a0 ? '2배 넘게 커졌어요' : '절반 아래로 작아졌어요') + ' — 숫자를 다시 확인하세요');
+        ov.slice(0, 3).forEach(({ o, i }) => warns.push('옆 공간 「' + o.name + '」' + jo(o.name, '과', '와') + ' ' + Math.round(i.w) + '×' + Math.round(i.h) + 'cm 겹쳐요 — 실측이 맞다면 그 방도 고쳐 주세요'));
+        if (warns.length) put(prev, el('div', { class: 'fp-prev-warn' }, warns.map((w) => el('div', '⚠️ ' + w))));
       };
       Object.values(f).forEach((i) => i.addEventListener('input', upd));
       upd();
       const field = (label, input, hint2) => el('label', { class: 'field' }, el('span', label), input, hint2 ? el('small', { class: 'hint' }, hint2) : null);
       const save = () => {
         const v = read();
-        if (!(v.w > 0) || !(v.h > 0) || !isFinite(v.x) || !isFinite(v.y)) { toast('숫자를 확인해 주세요 (가로·세로 > 0)'); return false; }
+        const errs = errorsOf(v);
+        if (errs.length) { upd(); try { errs[0][0].focus(); } catch (e) { /* 무시 */ } return false; }
+        const newName = v.name || r.orig.name;
+        let moved = 0;
         MV.store.update((st) => {
-          editsOf(st)[key].rooms[rid] = { x: r1(v.x), y: r1(v.y), w: r1(v.w), h: r1(v.h), name: v.name || r.orig.name };
-        }, { log: '📏 ' + PLAN_LABEL[key] + ' 실측 반영: ' + (v.name || r.name) + ' ' + Math.round(v.w) + '×' + Math.round(v.h) + 'cm' });
+          editsOf(st)[key].rooms[rid] = { x: r1(v.x), y: r1(v.y), w: r1(v.w), h: r1(v.h), name: newName };
+          moved = renameRoomRefs(st, key, r.name, newName);
+        }, { log: '📏 ' + PLAN_LABEL[key] + ' 실측 반영: ' + newName + ' ' + Math.round(v.w) + '×' + Math.round(v.h) + 'cm' });
+        if (moved) toast('짐 ' + moved + '개의 “' + (key === 'new' ? '새 집 위치' : '지금 집 위치') + '”도 「' + newName + '」' + joRo(newName) + ' 바꿨어요');
         return true;
       };
       let m = null;
-      f.name.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); if (save() && m) m.close(); } });
+      Object.values(f).forEach((i) => i.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); if (save() && m) m.close(); } }));
       const actions = [];
       if (r.edited) actions.push({ label: '원래대로', kind: 'danger', onClick: () => {
-        MV.store.update((st) => { delete editsOf(st)[key].rooms[rid]; }, { log: '📏 ' + PLAN_LABEL[key] + ' 치수 원래대로: ' + r.orig.name });
+        let moved = 0;
+        MV.store.update((st) => { delete editsOf(st)[key].rooms[rid]; moved = renameRoomRefs(st, key, r.name, r.orig.name); }, { log: '📏 ' + PLAN_LABEL[key] + ' 치수 원래대로: ' + r.orig.name });
+        if (moved) toast('짐 ' + moved + '개의 위치 이름도 「' + r.orig.name + '」' + joRo(r.orig.name) + ' 되돌렸어요');
       } });
       actions.push({ label: '취소', kind: 'ghost' });
       actions.push({ label: '저장', kind: 'primary', onClick: () => save() });
       m = MV.ui.modal({
         title: '📏 ' + r.name + ' 치수 수정',
         body: el('div', { class: 'stack' },
-          el('p', { class: 'small muted mb-0' }, '벽 안쪽 기준 실측값(cm)을 넣으세요. X·Y는 도면 왼쪽 위에서부터의 위치예요. 옆 방은 자동으로 바뀌지 않아요.'),
+          el('p', { class: 'small muted mb-0' }, '벽 안쪽 기준 실측값(cm)을 넣으세요. X·Y는 도면 왼쪽 위에서부터의 위치예요. 옆 방은 자동으로 바뀌지 않아요. 이름을 바꾸면 이 방에 둔 짐의 위치 이름도 함께 바뀌어요.'),
           field('방 이름', f.name),
           el('div', { class: 'form-grid' }, field('가로 W (cm)', f.w), field('세로 H (cm)', f.h), field('X (cm)', f.x), field('Y (cm)', f.y)),
           prev),
@@ -1676,7 +1709,11 @@
     function resetAllRooms() {
       MV.ui.confirm(PLAN_LABEL[key] + ' 도면의 실측 수정을 모두 지우고 원래 도면으로 되돌릴까요?', { danger: true, okLabel: '원래대로' }).then((ok) => {
         if (!ok) return;
-        MV.store.update((st) => { editsOf(st)[key].rooms = {}; }, { log: '📏 ' + PLAN_LABEL[key] + ' 도면 전체 원래대로' });
+        const plan = getPlan(key);
+        MV.store.update((st) => {
+          editsOf(st)[key].rooms = {};
+          if (plan) plan.rooms.filter((x) => x.edited && x.name !== x.orig.name).forEach((x) => renameRoomRefs(st, key, x.name, x.orig.name));
+        }, { log: '📏 ' + PLAN_LABEL[key] + ' 도면 전체 원래대로' });
         toast('원래 도면으로 되돌렸어요');
       });
     }
