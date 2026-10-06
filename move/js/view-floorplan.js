@@ -1573,7 +1573,8 @@
 .fp-wizbar .fp-wizd { font-size: .8rem; color: var(--ink-2); line-height: 1.45; }
 .fp-wizrow { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .fp-wizrow .spacer { flex: 1; }
-.fp-lenin { display: flex; gap: 6px; align-items: center; flex: 1 1 260px; min-width: 0; }
+.fp-lenin { display: flex; gap: 6px; align-items: center; flex: 1 1 200px; min-width: 0; }
+.fp-ws { display: none; }
 .fp-lenin .input { flex: 1 1 120px; min-width: 0; text-align: right; }
 .fp-lenin .select { flex: 0 0 auto; width: auto; }
 .fp-lenout { font-size: .8rem; font-weight: 700; color: var(--ink-2); }
@@ -1607,6 +1608,10 @@
   .fp-wizrow > .btn { padding: 0 8px; }
   .fp-wizbar:not(.is-help) .fp-wizhelp { display: none; }
   .fp-wizbar.is-typing { position: static; }
+  /* 폰: 짧은 글자로 바꿔 단추 줄이 한 줄에 들어가게 */
+  .fp-wl { display: none; }
+  .fp-ws { display: inline; }
+  .fp-lenin { flex-basis: 150px; }
 }
 `);
 
@@ -2108,6 +2113,23 @@
       const [a, b] = wiz.pts;
       return Math.hypot(b.x - a.x, b.y - a.y);
     }
+    /** 폰 2단계: 제자리에 있는 안내 띠가 보이게 하되, 찍은 두 점이 아래 메뉴 뒤로 숨으면 띠가 화면 위에 남는 만큼 더 올림 */
+    function revealWizLen() {
+      requestAnimationFrame(() => {
+        if (!wiz || wiz.step !== 'pts' || wiz.pts.length < 2 || wizBar.hidden || !svgEl || !svgEl.isConnected) return;
+        const top = pxv('--topbar-h', 56) + 6, bot = window.innerHeight - pxv('--bottom-h', 0) - 8;
+        const br = wizBar.getBoundingClientRect();
+        const m = svgEl.getScreenCTM();
+        let dy = 0;
+        if (br.top < top) dy = br.top - top;
+        else if (br.bottom > bot) dy = Math.min(br.bottom - bot + 8, br.top - top);
+        if (m && dy >= 0) {
+          const low = Math.max(...wiz.pts.map((p) => p.x * m.b + p.y * m.d + m.f));
+          if (low + 30 > bot) dy = Math.max(dy, Math.min(low + 30 - bot, br.top - top));
+        }
+        if (Math.abs(dy) > 1) window.scrollBy({ top: dy, behavior: 'smooth' });
+      });
+    }
     /** 점을 옮기거나 되돌린 뒤 안내 띠의 '약 ○○cm'·단위 풀이를 지금 점에 맞춤 */
     function syncWizDist() {
       if (!wiz) return;
@@ -2127,11 +2149,13 @@
         'aria-label': wiz.help ? '설명 접기' : '설명 보기', title: wiz.help ? '설명 접기' : '설명 보기',
         onclick: () => { wiz.help = !wiz.help; drawWizBar(); const b2 = wizBar.querySelector('.fp-wizhelpbtn'); if (b2) b2.focus({ preventScroll: true }); } }, '설명 ', el('span', { 'aria-hidden': 'true' }, wiz.help ? '▴' : '▾'));
       const T = (t, d) => [el('div', { class: 'fp-wizt' }, t), d ? el('div', { class: 'fp-wizd fp-wizhelp', id: helpId }, d) : null];
+      // '다시 찍기'는 점을 찍기 전에도 자리를 잡아 둠 (첫 점을 찍을 때 단추가 생기며 줄이 꺾여 사진이 밀려 내려가지 않게)
+      const redo = () => btn('다시 찍기', () => { wiz.pts = []; drawOverlay(); drawWizBar(); }, { disabled: !wiz.pts.length, title: '찍은 점을 지우고 처음부터' });
       if (wiz.step === 'pts' && wiz.pts.length < 2) {
         put(wizBar, T('📏 축척 맞추기 1/3 · 길이를 아는 두 점을 누르세요',
           '사진 속 전체 가로 양 끝이나, “3,300”처럼 치수가 적힌 선의 양 끝을 차례로 누르세요. 두 손가락으로 벌려 확대하면 더 정확하고, 찍은 점은 끌어서 옮길 수 있어요.'),
-        el('div', { class: 'fp-wizrow' }, el('span', { class: 'chip brand', 'aria-live': 'polite' }, '찍은 점 ' + wiz.pts.length + '/2'), el('span', { class: 'spacer' }),
-          wiz.pts.length ? btn('다시 찍기', () => { wiz.pts = []; drawOverlay(); drawWizBar(); }) : null, helpBtn(), cancel));
+        el('div', { class: 'fp-wizrow' }, el('span', { class: 'chip brand fp-wizcnt', 'aria-live': 'polite' }, el('span', { class: 'fp-wl' }, '찍은 '), '점 ' + wiz.pts.length + '/2'), el('span', { class: 'spacer' }),
+          redo(), helpBtn(), cancel));
       } else if (wiz.step === 'pts') {
         if (!wiz.lenIn) {
           wiz.lenIn = el('input', { class: 'input num', type: 'text', inputmode: 'decimal', autocomplete: 'off', placeholder: '예: 330 · 3300mm · 3.3m', 'aria-label': '두 점 사이 실제 길이' });
@@ -2143,20 +2167,21 @@
         }
         wiz.lenOut = el('div', { class: 'fp-lenout', 'aria-live': 'polite' });
         wiz.distEl = el('span', { class: 'num' }, Math.round(wizDist()) + 'cm');
-        put(wizBar, T('📏 축척 맞추기 2/3 · 두 점 사이 실제 길이를 넣으세요'),
+        // 폰: 제목 한 줄 · 길이 칸과 '다음'을 한 줄에 (띠가 낮아야 찍은 두 점이 함께 보임)
+        put(wizBar, el('div', { class: 'fp-wizt' }, el('span', { class: 'fp-wl' }, '📏 축척 맞추기 2/3 · 두 점 사이 실제 길이를 넣으세요'), el('span', { class: 'fp-ws' }, '📏 2/3 · 두 점 사이 실제 길이는?')),
           el('div', { class: 'fp-wizd fp-wizhelp', id: helpId }, '지금 사진 크기로는 약 ', wiz.distEl, '예요. 도면에 적힌 숫자(“3,300”·“1,200”처럼 보통 mm)를 그대로 넣어도 돼요.'),
-          el('div', { class: 'fp-wizrow' }, el('label', { class: 'fp-lenin' }, wiz.lenIn, wiz.unitSel)),
+          el('div', { class: 'fp-wizrow fp-lenrow' }, el('label', { class: 'fp-lenin' }, wiz.lenIn, wiz.unitSel), btn('다음 →', applyScale, { class: 'btn fp-b btn-primary', 'data-act': 'next' })),
           wiz.lenOut,
-          el('div', { class: 'fp-wizrow' }, btn('다음 →', applyScale, { class: 'btn fp-b btn-primary', 'data-act': 'next' }), btn('다시 찍기', () => { wiz.pts = []; drawOverlay(); drawWizBar(); }),
-            el('span', { class: 'spacer' }), helpBtn(), cancel));
+          el('div', { class: 'fp-wizrow' }, redo(), el('span', { class: 'spacer' }), helpBtn(), cancel));
         updLen();
         if (!coarse) setTimeout(() => { if (wiz && wiz.lenIn && wiz.lenIn.isConnected) wiz.lenIn.focus({ preventScroll: true }); }, 30);
-        // 폰에선 이 단계의 띠가 제자리에 있으므로, 화면 밖이면 보이는 곳으로
-        if (mm('(max-width: 600px)')) revealEl(wizBar);
+        // 폰에선 이 단계의 띠가 제자리에 있으므로, 띠와 찍은 두 점이 함께 보이게
+        if (mm('(max-width: 600px)')) revealWizLen();
       } else if (wiz.step === 'origin') {
         put(wizBar, T('📏 축척 맞추기 3/3 · 도면 왼쪽 위 모서리를 누르세요',
           '사진에서 바깥벽 왼쪽 위 모서리를 누르면, 그 점이 도면의 (0,0) — 주황 십자 자리 — 로 옮겨져요. 끌어서 맞춰도 돼요.'),
-        el('div', { class: 'fp-wizrow' }, btn('✋ 끌어서 맞추기', () => setWizStep('move')), btn('건너뛰기', () => finishWiz(), { title: '위치는 지금 그대로 두기' }), el('span', { class: 'spacer' }), helpBtn(), cancel));
+        el('div', { class: 'fp-wizrow' }, btn(['✋ 끌어서', el('span', { class: 'fp-wl' }, ' 맞추기')], () => setWizStep('move'), { title: '사진을 끌어서 위치 맞추기' }),
+          btn('건너뛰기', () => finishWiz(), { title: '위치는 지금 그대로 두기' }), el('span', { class: 'spacer' }), helpBtn(), cancel));
       } else if (wiz.step === 'move') {
         const nb = (label, dx, dy) => btn(label, () => nudgeBg(dx, dy), { class: 'btn fp-b btn-icon', 'aria-label': '사진 ' + ({ '◀': '왼쪽', '▶': '오른쪽', '▲': '위', '▼': '아래' })[label] + '으로 2cm' });
         put(wizBar, T('✋ 사진 위치 옮기기 · 사진을 끌어서 도면 선에 맞추세요',
@@ -2174,7 +2199,11 @@
       const out = wiz.lenOut;
       out.className = 'fp-lenout';
       out.textContent = '';
-      if (!String(t).trim()) { out.textContent = '숫자만 넣으면 단위를 알아서 짐작해요 (“3,300”처럼 쉼표가 있으면 mm).'; return; }
+      if (!String(t).trim()) {
+        put(out, el('span', { class: 'fp-wl' }, '숫자만 넣으면 단위를 알아서 짐작해요 (“3,300”처럼 쉼표가 있으면 mm).'),
+          el('span', { class: 'fp-ws' }, '사진에서 잰 길이 약 ' + Math.round(est) + 'cm · 숫자만 넣어도 돼요'));
+        return;
+      }
       if (!r) { out.className = 'fp-lenout is-bad'; out.textContent = '숫자로 읽을 수 없어요 (예: 330 · 3300mm · 3.3m)'; return; }
       const bad = r.cm < LEN_MIN || r.cm > LEN_MAX;
       out.className = 'fp-lenout' + (bad ? ' is-bad' : '');

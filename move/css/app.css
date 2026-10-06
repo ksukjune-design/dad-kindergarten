@@ -71,6 +71,7 @@
     --plan-wall:#d9d3ca; --plan-floor:#22212a; --plan-wet:#17303a; --plan-balc:#2a2830; --plan-grid:rgba(240,237,232,.06);
     --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
     --shadow-lg:0 2px 4px rgba(0,0,0,.5), 0 24px 48px -20px rgba(0,0,0,.8);
+    color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
@@ -87,6 +88,7 @@
   --plan-wall:#d9d3ca; --plan-floor:#22212a; --plan-wet:#17303a; --plan-balc:#2a2830; --plan-grid:rgba(240,237,232,.06);
   --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
   --shadow-lg:0 2px 4px rgba(0,0,0,.5), 0 24px 48px -20px rgba(0,0,0,.8);
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -123,7 +125,7 @@ code, kbd { font-family: var(--mono); font-size: .9em; background: var(--bg-3); 
 }
 .topbar {
   grid-area: top;
-  position: sticky; top: 0; z-index: 30;
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 30;
   display: flex; align-items: center; gap: 12px;
   padding: 0 16px;
   background: color-mix(in srgb, var(--bg) 88%, transparent);

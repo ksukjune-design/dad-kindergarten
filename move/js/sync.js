@@ -364,6 +364,30 @@
     subscribe();
   }
 
+  /* ---------- claude.ai 화면 안에서의 제약 보완 ---------- */
+  function installViewerShims() {
+    // 1) <a download> 링크는 막혀 있음 → downloads 기능으로 저장
+    document.addEventListener('click', (e) => {
+      const a = e.target && e.target.closest ? e.target.closest('a[download]') : null;
+      const dl = Y.cap.downloads;
+      if (!a || !dl || typeof dl.save !== 'function') return;
+      const href = a.getAttribute('href') || '';
+      if (!/^(blob:|data:)/.test(href)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const name = a.getAttribute('download') || 'move-file';
+      fetch(href).then((r) => r.blob()).then((blob) => dl.save({ filename: name, data: blob })).catch((err) => {
+        const code = err && err.code;
+        if (code !== 'declined' && MV.ui) MV.ui.toast('파일을 저장할 수 없어요' + (code ? ' (' + code + ')' : '') + '.');
+      });
+    }, true);
+    // 2) 인쇄 창은 열리지 않음 → 안내
+    try {
+      global.print = function () { if (MV.ui) MV.ui.toast('claude.ai 안에서는 인쇄가 안 돼요. GitHub Pages 주소에서 열어 인쇄하세요.', { ms: 5000 }); };
+    } catch (e) { /* 무시 */ }
+  }
+  if (global.claude && typeof global.claude.use === 'function') installViewerShims();
+
   S.afterPersist.push(diffAndWrite);
   MV.css('sync', `
     .sync-chip { flex: 0 0 auto; padding: 0 8px; font-size: 1rem; }
