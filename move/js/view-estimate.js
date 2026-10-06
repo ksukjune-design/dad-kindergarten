@@ -2116,19 +2116,34 @@
     const cur = () => coefNow()[d.k];
     let input;
     let ctl;
+    const err = el('small', { class: 'es-coef-err', role: 'alert', hidden: true });
+    const rangeTxt = fmtCoef(d, d.min) + ' ~ ' + fmtCoef(d, d.max);
+    /* 범위 밖 값(예: 박스 부피 0, 하한 배수 1.5)은 저장하지 않고 원래 값으로 되돌림 */
+    const reject = () => {
+      input.value = d.money ? F.num(cur()) : String(cur());
+      if (d.money) { const h = ctl.querySelector('.hint'); if (h) h.textContent = F.krw(cur()); }
+      input.setAttribute('aria-invalid', 'true');
+      err.textContent = rangeTxt + ' 사이로 넣어 주세요. 원래 값으로 되돌렸어요.';
+      err.hidden = false;
+    };
+    const accept = (v) => { input.removeAttribute('aria-invalid'); err.hidden = true; if (Math.abs(v - cur()) > 1e-12) setCoef(d.k, v); };
     if (d.money) {
-      ctl = MV.ui.moneyInput(cur(), (v) => { if (isFinite(v) && v >= 0) setCoef(d.k, v); }, { placeholder: F.num(d.v) });
+      ctl = MV.ui.moneyInput(cur(), (v) => { if (inBounds(d, v)) accept(v); else reject(); }, { placeholder: F.num(d.v) });
       input = ctl.input;
     } else {
-      input = el('input', { class: 'input num', type: 'number', min: '0', step: String(d.step || 1), inputmode: 'decimal', value: String(cur()) });
-      input.addEventListener('change', () => { const v = parseFloat(input.value); if (isFinite(v) && v >= 0) setCoef(d.k, v); else input.value = String(cur()); });
+      input = el('input', { class: 'input num', type: 'number', min: String(d.min), max: String(d.max), step: String(d.step || 1), inputmode: 'decimal', value: String(cur()) });
+      input.addEventListener('change', () => {
+        if (input.value.trim() === '') { input.value = String(cur()); return; }
+        const v = parseFloat(input.value);
+        if (inBounds(d, v)) accept(v); else reject();
+      });
       input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); input.blur(); } });
       ctl = el('span', { class: 'es-coef-num' }, input, d.unit ? el('span', { class: 'es-unit' }, d.unit) : null);
     }
     input.setAttribute('aria-label', d.label);
     input.dataset.fk = 'coef-' + d.k;
     const changed = el('span', { class: 'chip warn' }, '수정됨');
-    const resetBtn = el('button', { type: 'button', class: 'btn btn-sm btn-ghost', 'aria-label': d.label + ' 기준값으로', title: '기준값 ' + fmtCoef(d, d.v) + '(으)로', onclick: () => setCoef(d.k, d.v) }, '↺');
+    const resetBtn = el('button', { type: 'button', class: 'btn btn-sm btn-ghost', 'aria-label': d.label + ' 기준값으로', title: '기준값 ' + josa(fmtCoef(d, d.v), '으로/로'), onclick: () => { err.hidden = true; input.removeAttribute('aria-invalid'); setCoef(d.k, d.v); } }, '↺');
     const range = (isNum(d.lo) && isNum(d.hi)) ? ' · 리서치 범위 ' + fmtCoef(d, d.lo) + ' ~ ' + fmtCoef(d, d.hi) : '';
     const row = el('div', { class: 'es-coef-row' },
       el('div',

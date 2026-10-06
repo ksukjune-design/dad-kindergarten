@@ -131,7 +131,7 @@ code, kbd { font-family: var(--mono); font-size: .9em; background: var(--bg-3); 
   border-bottom: 1px solid var(--line);
 }
 .topbar { min-width: 0; }
-.brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: inherit; min-width: 0; flex: 0 1 auto; overflow: hidden; }
+.topbar .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: inherit; min-width: 0; flex: 0 1 auto; overflow: hidden; }
 .brand-mark { font-size: 1.5rem; }
 .brand-text { display: flex; flex-direction: column; line-height: 1.15; min-width: 0; }
 .brand-text strong { font-size: 1rem; }
@@ -384,6 +384,7 @@ table.tbl tfoot td { font-weight: 800; border-top: 2px solid var(--line-2); }
   position: fixed; left: 50%; transform: translateX(-50%);
   bottom: calc(var(--bottom-h) + 16px + env(safe-area-inset-bottom));
   z-index: 120; display: flex; flex-direction: column; gap: 8px; align-items: center;
+  width: max-content; max-width: calc(100vw - 24px);
   pointer-events: none;
 }
 .toast {
