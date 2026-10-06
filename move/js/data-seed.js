@@ -23,6 +23,11 @@
      상호를 넣지 않습니다. (A = 지금 집 집주인, B = 매수인, C = 새 집 집주인, '중개사', '아이')
    - 근거: 리서치 검증본(자금·이사업체·가전·짐정리·사전방문·도면·취학). 확인 못 한 숫자는
      본문에 '추정'·'확인 필요'로 적었습니다. 전화번호는 공공기관·대표번호만 씁니다.
+   - 가족 결정(2026-10-06) 반영: 옷장은 이사 전에 사지 않음(박스·행거박스로 옮기고 이사 후
+     이케아 등 간이 옷장 약 20만원, 선택·나중에) / 커튼·소품은 지금 것 가져감(0원) / 통돌이
+     약 50만원, 11/4~11/6 배송 / 입주청소 직접(0원) / 예비비 없음 / HUG 보증은 별첨 가이드
+     'hug'에서 가입 여부 결정(money-27). id 는 그대로 두고 내용만 바꿨습니다
+     (inv-hanger-system 은 '커튼·블라인드'로 바꿔 씀).
    ============================================================ */
 (function () {
   'use strict';
@@ -209,7 +214,7 @@
       { id: 'space-05', partId: 'space', title: '가구 크기 재서 짐 목록에 입력', due: '2026-10-11', priority: 'high', owner: '함께', guide: 'space#measure',
         detail: '침대, 소파, 식탁, 책장, 서랍장, 책상, 장난감 수납장, 행거, 화장대를 재세요.\n분해할 수 있는지, 가져갈지·버릴지·팔지도 \'처리\'에 정해 주세요.\n짐 목록의 기본 항목은 예시라서 우리 집에 없는 건 지우고, 빠진 건 더해 주세요.' },
       { id: 'space-06', partId: 'space', title: '실측값으로 새 집 도면 치수 고치기', due: '2026-10-12', priority: 'high', owner: '나', guide: 'space#measure',
-        detail: '사전방문에서 잰 방 크기, 다용도실, 창·문 위치를 새 집 도면에 반영하세요.\n지금 집도 몇 군데 재서 고쳐 두면 두 집 비교가 정확해져요.\n도면이 실제와 맞아야 옷장·통돌이 판정을 믿을 수 있어요.' },
+        detail: '사전방문에서 잰 방 크기, 다용도실, 창·문 위치를 새 집 도면에 반영하세요.\n지금 집도 몇 군데 재서 고쳐 두면 두 집 비교가 정확해져요.\n도면이 실제와 맞아야 통돌이·건조기 배치 판정과 옷장 자리를 믿을 수 있어요.' },
       { id: 'space-07', partId: 'space', title: '다용도실 통돌이+건조기 나란히 놓기 판정', due: '2026-10-13', priority: 'high', owner: '함께', guide: 'space#laundry',
         detail: '기준: 막힘 없는 연속 벽 150cm 이상(여유 있게 160cm), 깊이 85~90cm 이상, 통돌이 위로 바닥에서 약 145cm까지 비어 있을 것.\n문 폭은 72~75cm 이상, 수전·배수구·콘센트가 닿는지도 보세요.\n통돌이 위에 건조기를 쌓는 건 안 돼요(뚜껑이 위로 열리고 천장이 약 230cm).\n도면 화면에서 두 기계를 놓아 보고 결과를 메모하세요.' },
       { id: 'space-08', partId: 'space', title: '냉장고·김치냉장고 자리 확인', due: '2026-10-13', priority: 'mid', owner: '나', guide: 'space#layout',
@@ -549,7 +554,7 @@
       { id: 'inv-washer-old', name: '고장난 세탁기', cat: 'appliance', tag: 'washer', fate: 'discard', qty: 1, w: 60, d: 65, h: 85, room: '다용도실', roomNew: '', assumed: true,
         note: '지금 집에서 폐가전 무상방문수거(1599-0903)로 버려요. 실제 규격·URL로 바꿔 주세요.' },
       { id: 'inv-washer-new', name: '통돌이 세탁기 (구매 예정)', cat: 'appliance', tag: 'washer', fate: 'buy', qty: 1, w: 68.6, d: 72, h: 109, room: '', roomNew: '다용도실', assumed: true,
-        note: '21~25kg급 기준. 뚜껑 열면 약 145cm(추정). 위에 건조기를 쌓을 수 없어 나란히 놓아요. 실제 규격·URL로 바꿔 주세요.' },
+        note: '약 50만원 예산. 이사 뒤 11/4~11/6 배송·설치. 21~25kg급 기준 크기예요. 뚜껑 열면 약 145cm(추정). 위에 건조기를 쌓을 수 없어 나란히 놓아요. 고른 모델의 규격·URL로 바꿔 주세요.' },
       { id: 'inv-ac-stand', name: '스탠드 에어컨 (거실)', cat: 'aircon', tag: 'aircon', ac: 'stand', fate: 'move', qty: 1, w: 50, d: 40, h: 180, room: '거실', roomNew: '거실', lg: true, assumed: true,
         note: 'LG 제품일 때만 LG 이전설치를 쓸 수 있어요. 다른 브랜드면 \'LG 서비스로 옮김\'을 꺼 주세요. LG 요금(2025년 11월 기준 스탠드 약 31.8만원)이 이사업체·설치기사(약 17만원 추정)보다 비싸서, 업체에 맡기기로 하면 이 표시를 꺼 주세요. 벽걸이와 한 세트(2in1)라면 종류를 \'2in1\'로 바꾸고 벽걸이 항목은 지워 주세요. 실제 규격·URL로 바꿔 주세요.' },
       { id: 'inv-ac-wall', name: '벽걸이 에어컨 (안방)', cat: 'aircon', tag: 'aircon', ac: 'wall', fate: 'move', qty: 1, w: 90, d: 25, h: 30, room: '안방', roomNew: '안방', lg: true, assumed: true,
@@ -572,12 +577,12 @@
         note: '새 집에 둘 자리가 있는지 배치해 보고 정하세요. 실제 규격·URL로 바꿔 주세요.' },
       { id: 'inv-mirror', name: '전신거울', cat: 'misc', tag: '', fate: 'move', qty: 1, w: 50, d: 10, h: 160, room: '안방', roomNew: '안방', assumed: true,
         note: '실제 규격·URL로 바꿔 주세요.' },
-      { id: 'inv-wardrobe-new', name: '옷장 120 (구매 예정)', cat: 'storage', tag: 'wardrobe', fate: 'buy', qty: 2, w: 120, d: 60, h: 216, room: '', roomNew: '안방', assumed: true,
-        note: '천장이 약 230cm(추정, 실측 필요)라 높이 216cm 이하만 세워서 조립할 수 있어요. 붙박이장 실측값과 비교해 개수·폭을 정하세요. 실제 규격·URL로 바꿔 주세요.' },
-      { id: 'inv-hanger-system', name: '시스템행거 (선택안)', cat: 'storage', tag: 'wardrobe', fate: 'undecided', qty: 1, w: 120, d: 50, h: 200, room: '', roomNew: '작은방2', assumed: true,
-        note: '옷장만으로 모자랄 때 더하는 안이에요. 필요 없으면 지워 주세요. 실제 규격·URL로 바꿔 주세요.' },
+      { id: 'inv-wardrobe-new', name: '간이 옷장 (이사 후 구매)', cat: 'storage', tag: 'wardrobe', fate: 'buy', qty: 1, w: 100, d: 58, h: 201, room: '', roomNew: '안방', assumed: true,
+        note: '이케아 등, 이사 후 실측. 이사 전에는 사지 않아요(옷은 박스·행거박스로 옮겨요). 예산 약 20만원(추정, 선택·나중에). 크기는 예시라 이사 뒤 벽을 재고 정해요. 키 큰 옷장이면 그때 넘어짐 방지·벽 고정을 확인하세요.' },
+      { id: 'inv-hanger-system', name: '커튼·블라인드 (지금 것 가져감)', cat: 'misc', tag: 'box', fate: 'move', qty: 1, w: 60, d: 40, h: 35, room: '거실', roomNew: '거실', assumed: true,
+        note: '새로 사지 않고 지금 쓰는 커튼을 그대로 가져가요(0원). 상자 1개 정도로 잡았어요. 사전방문 때 새 집 창 폭·높이와 커튼박스·레일 길이를 재서 맞는지 보고, 안 맞으면 이사 뒤 고쳐요. 안방·아이방 커튼은 첫날밤 상자에 넣어요.' },
       { id: 'inv-hanger', name: '이동식 행거', cat: 'storage', tag: '', fate: 'move', qty: 1, w: 120, d: 50, h: 170, room: '작은방2', roomNew: '작은방2', assumed: true,
-        note: '옷장 설치 전까지 임시로 옷을 거는 데도 써요. 실제 규격·URL로 바꿔 주세요.' },
+        note: '이사 날 새 집에서 먼저 조립해요. 행거박스는 보통 그날 업체가 가져가서, 옷을 이 행거로 옮겨 걸어요. 간이 옷장을 산 뒤에도 같이 써요. 실제 규격·URL로 바꿔 주세요.' },
       { id: 'inv-bed-kid', name: '아이 슈퍼싱글 침대', cat: 'bed', tag: 'bed', fate: 'move', qty: 1, w: 110, d: 210, h: 40, room: '작은방1', roomNew: '작은방1', assumed: true,
         note: '실제 규격·URL로 바꿔 주세요.' },
       { id: 'inv-desk-kid', name: '아이 책상 + 의자', cat: 'table', tag: 'desk', fate: 'move', qty: 1, w: 100, d: 60, h: 73, room: '작은방1', roomNew: '작은방1', assumed: true,

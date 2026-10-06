@@ -1663,10 +1663,16 @@
   /* ======================= 그리기 ======================= */
   function isTouch() { try { return window.matchMedia('(hover: none)').matches; } catch (e) { return false; } }
   function nearBottom(box) { return !box || box.scrollHeight - box.scrollTop - box.clientHeight < 90; }
-  function scrollDown(force) {
-    const v = R.view;
-    if (!v || !v.log) return;
-    if (force || v.stick) v.log.scrollTop = v.log.scrollHeight;
+  /* 키가 낮은 화면(가로로 든 폰)에서는 대화가 페이지와 함께 스크롤돼요 (CSS) */
+  function logScrolls(v) { try { return getComputedStyle(v.log).overflowY !== 'visible'; } catch (e) { return true; } }
+  function atBottom(v) {
+    if (logScrolls(v)) return nearBottom(v.log);
+    return document.documentElement.scrollHeight - window.scrollY - window.innerHeight < 160;
+  }
+  function toBottom(v) {
+    if (logScrolls(v)) v.log.scrollTop = v.log.scrollHeight;
+    else window.scrollTo(0, document.documentElement.scrollHeight);
+    v.stick = true;
   }
   function focusComposer() {
     const v = R.view;
@@ -1762,13 +1768,14 @@
     const v = R.view;
     if (!v || !v.log || !v.log.isConnected) return;
     const msgs = R.chat.msgs;
-    const stick = nearBottom(v.log);
+    const stick = atBottom(v);
     const top = v.log.scrollTop;
     v.log.replaceChildren(...(msgs.length ? msgs.map(buildMsg) : [welcome()]));
     v.log.classList.toggle('ag-log-empty', !msgs.length);
     if (v.chips) { v.chips.hidden = !msgs.length; if (v.moreHint) requestAnimationFrame(v.moreHint); }
     if (!msgs.length) v.log.scrollTop = 0;
-    else if (forceScroll || stick) { v.log.scrollTop = v.log.scrollHeight; v.stick = true; } else v.log.scrollTop = top;
+    else if (forceScroll || stick) toBottom(v);
+    else v.log.scrollTop = top;
   }
   function appendMsgs(list) {
     const v = R.view;
@@ -1777,8 +1784,7 @@
     const keep = new Set(R.chat.msgs.map((m) => m.id));
     MV.$$('.ag-msg', v.log).forEach((n) => { if (!keep.has(n.getAttribute('data-id'))) n.remove(); });
     list.forEach((m) => { if (m && findMsg(m.id)) v.log.appendChild(buildMsg(m)); });
-    v.log.scrollTop = v.log.scrollHeight;
-    v.stick = true;
+    toBottom(v);
   }
   function refreshMsgs(ids) {
     const seen = new Set();
@@ -1791,10 +1797,10 @@
     const old = v.log.querySelector('[data-id="' + (window.CSS && window.CSS.escape ? window.CSS.escape(id) : id) + '"]');
     if (!m) { if (old) old.remove(); return; }
     if (!old) { paintAll(); return; }
-    const stick = nearBottom(v.log);
+    const stick = atBottom(v);
     const node = buildMsg(m);
     old.replaceWith(node);
-    if (stick) { v.log.scrollTop = v.log.scrollHeight; }
+    if (stick) toBottom(v);
   }
   function paintStatus(call) {
     const v = R.view;
@@ -1904,7 +1910,6 @@
       el('div', { class: 'ag-tools' }, blocked ? null : quickBtn, v.clear),
       el('div', { class: 'ag-note' }, el('span', '⚠ 질문할 때마다 이 계정의 Claude 사용량을 써요'), v.ro));
     v.log = el('div', { class: 'ag-log', role: 'log', 'aria-label': 'AI 비서 대화', 'aria-live': 'polite', tabindex: '0' });
-    v.log.addEventListener('scroll', () => { v.stick = nearBottom(v.log); }, { passive: true });
     const wrap = el('div', { class: 'ag' + (blocked ? ' ag-blocked' : '') }, head, v.log);
     v.root = wrap;
     if (blocked) {
@@ -2131,6 +2136,11 @@ body:has(.ag-composer) .toast-wrap { bottom: calc(var(--bottom-h) + 104px + env(
   .ag-sugg { padding: 8px 10px; gap: 6px; font-size: .86rem; min-height: 52px; }
   .ag-composer { padding-left: 12px; }
   .ag-send { min-width: 64px; padding: 0 12px; }
+}
+@media (max-height: 560px) and (max-width: 1100px) {
+  .ag { height: auto; min-height: 0; }
+  .ag-log { flex: none; overflow: visible; min-height: 180px; }
+  .ag-sub, .ag-hint { display: none; }
 }
 @media (max-width: 380px) { .ag-quick { padding: 0 6px; } .ag-sugg { font-size: .82rem; padding: 6px 8px; } }
 @media print { .ag-fab, .ag-composer, .ag-chips, .ag-hint { display: none !important; } .ag { height: auto; } .ag-log { overflow: visible; border: 0; } }

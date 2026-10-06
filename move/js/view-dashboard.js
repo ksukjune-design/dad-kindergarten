@@ -27,6 +27,7 @@
     openWeeks: null,          // 아코디언에서 펼친 주 (Set of key)
     roadScroll: 0,            // 가로 스크롤 위치
     moreGroups: new Set(),    // '+n' / 파트 칩으로 펼친 (주|파트)
+    partCols: 1,              // '파트별 진행' 칸 수 (너비로 정함)
   };
   let sessionDone = new Map(); // 이 화면에서 방금 완료한 항목 id → 완료 시각 (최근 KEEP_DONE 개만 자리에 남김)
   let undoBatch = null;        // 연달아 체크할 때 되돌리기 토스트 하나로 묶기 {toast, entries}
@@ -340,8 +341,10 @@ button.db-wk-head:hover { background:var(--bg-3); }
 .db-road.is-acc .db-gap { flex:none; writing-mode:horizontal-tb; padding:6px; letter-spacing:0; }
 
 /* 파트별 진행 */
-.db-pgroups { columns:3 250px; column-gap:14px; }
-.db-pg { break-inside:avoid; page-break-inside:avoid; margin-bottom:14px; display:flow-root; }
+/* 다단(columns) 대신 미리 나눈 칸 — 다단은 다시 그릴 때마다 높이 맞추기 계산이 무거워요 (partsCard 참고) */
+.db-pgroups { display:grid; grid-template-columns:repeat(var(--db-pcols, 1), minmax(0, 1fr)); gap:0 14px; align-items:start; }
+.db-pcol { display:flex; flex-direction:column; gap:14px; min-width:0; }
+.db-pg { min-width:0; }
 .db-pg-title { font-size:.74rem; font-weight:800; color:var(--ink-3); margin:0 0 6px 2px; letter-spacing:.02em; }
 .db-tiles { display:flex; flex-direction:column; gap:6px; }
 .db-tile { display:flex; flex-direction:column; gap:5px; min-width:0; padding:9px 12px; border:1px solid var(--line); border-radius:12px; background:var(--bg); color:var(--ink); text-decoration:none; transition:border-color .12s, background .12s; }
@@ -934,6 +937,7 @@ button.db-wk-head:hover { background:var(--bg-3); }
     const ob = col.querySelector('.db-wk-body');
     const st = ob ? ob.scrollTop : 0;
     const nc = make();
+    seal(nc);
     col.replaceWith(nc);
     const nb = nc.querySelector('.db-wk-body');
     if (nb && st) nb.scrollTop = st;
@@ -992,7 +996,7 @@ button.db-wk-head:hover { background:var(--bg-3); }
       acc && !open && ms.length ? el('div', { class: 'db-wk-msline' }, ms.map((x) => el('span', { class: 'db-mschip' + (x.main ? ' is-main' : '') }, '🚩 ' + D.fmt(x.date) + ' ' + x.label))) : null,
     ];
     const col = el('div', { class: 'db-wk' + (isCur ? ' is-cur' : '') + (isMove ? ' is-move' : '') + (open ? ' is-open' : ' is-closed'), role: 'listitem', dataset: { week: w.key } });
-    const redraw = (gk) => swapCol(col, () => weekCol(w, m, acc, pm), gk ? '[data-gk="' + cssEsc(gk) + '"]' : '.db-wk-head');
+    const redraw = (gk) => swapCol(col, () => freshCol(w.key, acc) || weekCol(w, m, acc, pm), gk ? '[data-gk="' + cssEsc(gk) + '"]' : '.db-wk-head');
     if (acc) {
       const bodyId = 'db-wk-body-' + w.key;
       const btn = el('button', { type: 'button', class: 'db-wk-head', 'aria-expanded': String(open), 'aria-controls': open ? bodyId : null },
@@ -1026,7 +1030,7 @@ button.db-wk-head:hover { background:var(--bg-3); }
   function pastCol(m, acc, pm) {
     const open = !acc || ui.openWeeks.has('past');
     const col = el('div', { class: 'db-wk is-past' + (open ? ' is-open' : ' is-closed'), role: 'listitem', dataset: { week: 'past' } });
-    const redraw = (gk) => swapCol(col, () => pastCol(m, acc, pm), gk ? '[data-gk="' + cssEsc(gk) + '"]' : '.db-wk-head');
+    const redraw = (gk) => swapCol(col, () => freshCol('past', acc) || pastCol(m, acc, pm), gk ? '[data-gk="' + cssEsc(gk) + '"]' : '.db-wk-head');
     const headKids = [
       el('div', { class: 'db-wk-top' },
         el('span', { class: 'db-wk-label' }, '⚠ 지난 주까지'),
@@ -1045,17 +1049,10 @@ button.db-wk-head:hover { background:var(--bg-3); }
     if (open) col.appendChild(el('div', { class: 'db-wk-body' }, groupsEl(m.past, pm, 'past', redraw)));
     return col;
   }
-  function roadCard(acc, pm) {
-    const m = roadModel();
-    if (!ui.openWeeks) {
-      ui.openWeeks = new Set([m.curW]);
-      if (m.past.length) ui.openWeeks.add('past');
-    }
-    const scroller = el('div', { class: 'db-road-scroll', role: 'list', 'aria-label': '주별 일정' });
-    if (m.past.length) scroller.appendChild(pastCol(m, acc, pm));
+  // 화면에 놓을 주 목록 — 폰·태블릿 세로(acc)에선 '이사 다음 주 + 한 주' 뒤의 드문드문한 후속 주(임대차 신고·세액공제 등)를 한 칸으로 묶음
+  function roadWeeks(m, acc) {
     let weeks = m.weeks;
     if (acc) {
-      // 폰·태블릿 세로: '이사 다음 주 + 한 주' 뒤의 드문드문한 후속 주(임대차 신고·세액공제 등)는 한 칸으로 묶어 짧게
       const later = weeks.filter((w) => D.diff(m.endW, w.start) > 0);
       if (later.length >= 2) {
         weeks = weeks.filter((w) => D.diff(m.endW, w.start) <= 0);
@@ -1065,41 +1062,104 @@ button.db-wk-head:hover { background:var(--bg-3); }
         });
       }
     }
+    return weeks;
+  }
+  // 칸 하나를 지금 데이터로 새로 만들기 (펼치기·접기) — 다시 그릴 때 그대로 둔 칸이 옛 데이터로 그려지지 않게
+  function freshCol(key, acc) {
+    const m = roadModel();
+    const pm = partMap();
+    if (key === 'past') return m.past.length ? pastCol(m, acc, pm) : null;
+    const w = roadWeeks(m, acc).find((x) => x.key === key);
+    return w ? weekCol(w, m, acc, pm) : null;
+  }
+  function roadCard(acc, pm) {
+    const m = roadModel();
+    if (!ui.openWeeks) {
+      ui.openWeeks = new Set([m.curW]);
+      if (m.past.length) ui.openWeeks.add('past');
+    }
+    const scroller = el('div', { class: 'db-road-scroll', role: 'list', 'aria-label': '주별 일정', dataset: { dbKey: 'road-scroll', dbDeep: '1' } });
+    if (m.past.length) scroller.appendChild(pastCol(m, acc, pm));
     let prev = null;
-    weeks.forEach((w) => {
+    roadWeeks(m, acc).forEach((w) => {
       if (prev) {
         const gapWeeks = Math.round(D.diff(prev.start, w.start) / 7) - 1;
-        if (gapWeeks > 0) scroller.appendChild(el('div', { class: 'db-gap', role: 'listitem' }, '⋯ ' + gapWeeks + '주 건너뜀'));
+        if (gapWeeks > 0) scroller.appendChild(el('div', { class: 'db-gap', role: 'listitem', dataset: { dbKey: 'gap-' + w.key } }, '⋯ ' + gapWeeks + '주 건너뜀'));
       }
       scroller.appendChild(weekCol(w, m, acc, pm));
       prev = w;
     });
     let ctrl = null;
     if (!acc) {
-      const step = (dir) => () => {
-        const col = scroller.querySelector('.db-wk');
+      // 다시 그릴 때 가로 스크롤 칸만 바뀔 수 있어서, 누를 때마다 지금 화면의 칸을 찾음
+      const scOf = (e) => { const r = e && e.currentTarget && e.currentTarget.closest ? e.currentTarget.closest('.db-road') : null; return r ? r.querySelector('.db-road-scroll') : null; };
+      const step = (dir) => (e) => {
+        const sc = scOf(e);
+        if (!sc) return;
+        const col = sc.querySelector('.db-wk');
         const wpx = col ? col.getBoundingClientRect().width + 12 : 284;
-        scroller.scrollBy({ left: dir * wpx, behavior: 'smooth' });
+        sc.scrollBy({ left: dir * wpx, behavior: 'smooth' });
       };
-      const toCur = () => {
-        const c = scroller.querySelector('.db-wk.is-cur');
-        if (c) scroller.scrollTo({ left: Math.max(0, c.offsetLeft - 2), behavior: 'smooth' });
+      const toCur = (e) => {
+        const sc = scOf(e);
+        const c = sc ? sc.querySelector('.db-wk.is-cur') : null;
+        if (c) sc.scrollTo({ left: Math.max(0, c.offsetLeft - 2), behavior: 'smooth' });
       };
       ctrl = el('div', { class: 'db-road-ctrl' },
         el('button', { type: 'button', class: 'btn btn-sm btn-ghost btn-icon', 'aria-label': '이전 주 보기', onclick: step(-1) }, '◀'),
         el('button', { type: 'button', class: 'btn btn-sm', onclick: toCur }, '이번 주'),
         el('button', { type: 'button', class: 'btn btn-sm btn-ghost btn-icon', 'aria-label': '다음 주 보기', onclick: step(1) }, '▶'));
     }
-    const legend = el('div', { class: 'db-legend' },
+    const legend = el('div', { class: 'db-legend', dataset: { dbKey: 'road-legend' } },
       el('span', '🚩 이정표'), el('span', '⚑ 중요'), el('span', '✓ 완료'), el('span', '! 기한 지남'),
       m.nodate ? el('a', { href: '#/checklist' }, '기한 없는 일 ' + m.nodate + '개 →') : null);
-    return el('section', { class: 'card db-road db-span-12 ' + (acc ? 'is-acc' : 'is-cols'), 'aria-label': '주간 워크플랜' },
-      head('🗓️', '주간 워크플랜', '이번 주 → ' + md(m.weeks[m.weeks.length - 1].end) + ' · 날짜가 정해진 일만', ctrl),
-      scroller, legend);
+    const hd = head('🗓️', '주간 워크플랜', '이번 주 → ' + md(m.weeks[m.weeks.length - 1].end) + ' · 날짜가 정해진 일만', ctrl);
+    hd.dataset.dbKey = 'road-head';
+    return el('section', { class: 'card db-road db-span-12 ' + (acc ? 'is-acc' : 'is-cols'), 'aria-label': '주간 워크플랜', dataset: { dbDeep: '1' } },
+      hd, scroller, legend);
   }
 
   /* ======================= 섹션: 파트별 진행 ======================= */
-  function partsCard() {
+  /* 파트 묶음(group)을 순서대로 N 칸에 나눠 담습니다.
+     예전엔 CSS 다단(columns: 3 250px + break-inside: avoid)이었는데, 다단은 레이아웃 때마다 칸 높이를 맞추느라
+     여러 번 다시 계산해서 화면 전체 레이아웃의 대부분을 차지했어요 (가로 화면에서 체크 한 번에 수백 ms).
+     그래서 칸 수는 다단과 같은 규칙(칸 최소 PCOL_MIN, 최대 PCOL_MAX)으로 너비에서 정하고, 높이가 고르게 되도록 직접 나눕니다. */
+  const PCOL_MIN = 250, PCOL_GAP = 14, PCOL_MAX = 3;
+  const colsForWidth = (w) => Math.max(1, Math.min(PCOL_MAX, Math.floor((w + PCOL_GAP) / (PCOL_MIN + PCOL_GAP))));
+  function measurePartCols(root) {
+    const box = root.querySelector('.db-pgroups');
+    let w = box ? box.clientWidth : 0;
+    if (!w) {
+      // 처음 그릴 때(아직 칸이 없음): 화면 여백·카드 여백을 빼서 어림 — 그린 뒤 실제 너비로 한 번 더 맞춤
+      let pad = 48;
+      try { const cs = getComputedStyle(root); pad = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0); } catch (e) { /* 기본값 */ }
+      w = root.clientWidth - pad - 34;                     // 카드 안쪽 여백 16px + 테두리 1px 씩
+    }
+    return w > 0 ? colsForWidth(w) : 1;
+  }
+  // 순서를 지키며 n 개의 연속 묶음으로 나눠, 가장 긴 칸이 가장 짧게 (묶음이 몇 개 안 돼서 전부 따져 봄)
+  function splitCols(weights, n) {
+    const m = weights.length;
+    n = Math.max(1, Math.min(n, m));
+    const pre = [0];
+    weights.forEach((w, i) => pre.push(pre[i] + w));
+    const best = [], cut = [];
+    for (let k = 0; k <= n; k++) { best.push(new Array(m + 1).fill(Infinity)); cut.push(new Array(m + 1).fill(0)); }
+    best[0][0] = 0;
+    for (let k = 1; k <= n; k++) {
+      for (let i = k; i <= m; i++) {
+        for (let j = k - 1; j < i; j++) {
+          const v = Math.max(best[k - 1][j], pre[i] - pre[j]);
+          if (v <= best[k][i]) { best[k][i] = v; cut[k][i] = j; }   // 같으면 앞 칸을 더 채움 (다단처럼)
+        }
+      }
+    }
+    const out = [];
+    let i = m;
+    for (let k = n; k >= 1; k--) { const j = cut[k][i]; out.unshift([j, i]); i = j; }
+    return out;
+  }
+  function partsCard(cols) {
     const parts = MV.parts.list();
     const groups = [];
     const gmap = new Map();
@@ -1128,11 +1188,19 @@ button.db-wk-head:hover { background:var(--bg-3); }
         el('div', { class: 'db-tile-bar' }, MV.ui.progress(st.pct), el('span', { class: 'db-tile-count2', 'aria-hidden': 'true' }, st.done + '/' + st.total)),
         nextEl);
     };
-    const body = parts.length
-      ? el('div', { class: 'db-pgroups' }, groups.map((g) => el('div', { class: 'db-pg' },
+    let body;
+    if (parts.length) {
+      const n = Math.max(1, Math.min(isNum(cols) ? cols : 1, groups.length));
+      const pg = (g) => el('div', { class: 'db-pg' },
         el('div', { class: 'db-pg-title' }, g),
-        el('div', { class: 'db-tiles' }, gmap.get(g).map(tile)))))
-      : el('div', { class: 'db-empty' }, '파트가 없어요. ', el('a', { href: '#/checklist' }, '체크리스트에서 만들기 →'));
+        el('div', { class: 'db-tiles' }, gmap.get(g).map(tile)));
+      // 높이 어림: 묶음 제목 ≈ 타일 0.6개
+      const ranges = splitCols(groups.map((g) => 0.6 + gmap.get(g).length), n);
+      body = el('div', { class: 'db-pgroups', style: { '--db-pcols': String(ranges.length) } },
+        ranges.map(([a, b]) => el('div', { class: 'db-pcol' }, groups.slice(a, b).map(pg))));
+    } else {
+      body = el('div', { class: 'db-empty' }, '파트가 없어요. ', el('a', { href: '#/checklist' }, '체크리스트에서 만들기 →'));
+    }
     return el('section', { class: 'card db-parts db-span-12', 'aria-label': '파트별 진행' },
       head('🗂️', '파트별 진행', parts.length + '개 파트', moreLink('체크리스트 →', '#/checklist')),
       body);
@@ -1169,19 +1237,49 @@ button.db-wk-head:hover { background:var(--bg-3); }
   }
 
   /* ======================= 조립 ======================= */
-  function build(acc) {
+  /* 다시 그리기는 '바뀐 부분만 바꿔 끼우기'로 합니다.
+     체크 하나에 화면 전체(주간 칸 8개 등 레이아웃 객체 3천여 개)를 새로 만들면, 레이아웃·글자 모양 계산을 처음부터 다시 해서
+     태블릿 가로 화면에서 체크가 굼떴어요. 그래서 새로 만든 화면과 지금 화면을 비교해, 내용이 그대로인 카드·주 칸은
+     기존 노드를 그 자리에 그대로 둡니다 (옮기면 레이아웃을 다시 하므로 옮기지도 않음).
+     - data-db-key: 비교 단위 (주 칸은 data-week). data-db-deep: 안쪽 자식 단위로 내려가서 비교하는 묶음
+     - 비교는 '만들 때의 HTML'(_dbSig)로 — 그린 뒤 바뀌는 표시용 클래스(has-more 등)에 흔들리지 않게
+     - 그대로 둔 노드의 이벤트는 id 로 지금 데이터를 다시 찾거나(체크), 지금 데이터로 칸을 새로 만듦(freshCol) */
+  const keyOf = (n) => (n && n.dataset ? (n.dataset.dbKey || n.dataset.week || null) : null);
+  const isDeep = (n) => !!(n && n.dataset && n.dataset.dbDeep);
+  function seal(n) { if (n && !isDeep(n)) n._dbSig = n.outerHTML; return n; }
+  function sealTree(tree) {
+    if (!tree) return tree;
+    seal(tree);
+    tree.querySelectorAll('[data-db-key], [data-week]').forEach(seal);
+    return tree;
+  }
+  const shallow = (n) => n.cloneNode(false).outerHTML;
+  // o(지금 화면)를 n(새 화면)과 같게 만들기. 같게 만들었으면 true, 통째로 바꿔야 하면 false
+  function patchNode(o, n) {
+    const k = keyOf(n);
+    if (!k || keyOf(o) !== k) return false;
+    if (!isDeep(n)) return !!o._dbSig && o._dbSig === n._dbSig;
+    if (!isDeep(o) || shallow(o) !== shallow(n)) return false;
+    const oK = Array.from(o.children), nK = Array.from(n.children);
+    if (oK.length !== nK.length || oK.some((x, i) => !keyOf(x) || keyOf(x) !== keyOf(nK[i]))) return false;
+    oK.forEach((x, i) => { if (!patchNode(x, nK[i])) x.replaceWith(nK[i]); });
+    return true;
+  }
+  const keyed = (key, n) => { if (n && n.dataset) n.dataset.dbKey = key; return n; };
+  const late = (n) => { n.classList.add('db-late'); return n; };   // 한 줄 레이아웃에서 워크플랜 뒤로
+  const partsSection = (cols) => seal(keyed('parts', late(safe('db-span-12', () => partsCard(cols)))));
+  function build(acc, cols) {
     const pm = partMap();
-    const late = (n) => { n.classList.add('db-late'); return n; };   // 한 줄 레이아웃에서 워크플랜 뒤로
-    return el('div', { class: 'db' },
-      el('h1', { class: 'db-sr' }, '대시보드'),
-      el('div', { class: 'db-grid' },
-        safe('db-span-12', heroCard),
-        safe('db-span-7', () => nowCard(pm)),
-        late(el('div', { class: 'db-side' }, safe('', moneyCard), safe('', estimateCard))),
-        safe('db-span-12', () => roadCard(acc, pm)),
-        late(safe('db-span-12', partsCard)),
-        late(safe('db-span-7', activityCard)),
-        late(safe('db-span-5', linksCard))));
+    return sealTree(el('div', { class: 'db', dataset: { dbKey: 'db', dbDeep: '1' } },
+      el('h1', { class: 'db-sr', dataset: { dbKey: 'title' } }, '대시보드'),
+      el('div', { class: 'db-grid', dataset: { dbKey: 'grid', dbDeep: '1' } },
+        keyed('hero', safe('db-span-12', heroCard)),
+        keyed('now', safe('db-span-7', () => nowCard(pm))),
+        late(el('div', { class: 'db-side', dataset: { dbKey: 'side', dbDeep: '1' } }, keyed('money', safe('', moneyCard)), keyed('est', safe('', estimateCard)))),
+        keyed('road', safe('db-span-12', () => roadCard(acc, pm))),
+        partsSection(cols),
+        keyed('activity', late(safe('db-span-7', activityCard))),
+        keyed('links', late(safe('db-span-5', linksCard))))));
   }
 
   MV.view('dashboard', {
@@ -1223,9 +1321,6 @@ button.db-wk-head:hover { background:var(--bg-3); }
         if (t.classList.contains('db-road-scroll')) saveSoon();
         else if (t.classList.contains('db-wk-body')) fadeSoon(t);
       }, { capture: true, passive: true });
-      const onResize = MV.debounce(() => { if (alive) fadeAll(root); }, 150);
-      window.addEventListener('resize', onResize, { passive: true });
-      ctx.onCleanup(() => window.removeEventListener('resize', onResize));
       persistUi = saveSoon;
       ctx.onCleanup(() => {
         persistUi = () => {};
@@ -1236,16 +1331,21 @@ button.db-wk-head:hover { background:var(--bg-3); }
 
       const draw = () => {
         if (!alive) return;
+        // 읽기는 바꾸기 전에 한꺼번에 (지금 화면 기준)
         const y = window.scrollY;
         const sc = root.querySelector('.db-road-scroll');
         if (sc) ui.roadScroll = sc.scrollLeft;
+        ui.partCols = measurePartCols(root);
         const ae = document.activeElement;
-        const focusId = ae && root.contains(ae) && ae.dataset ? ae.dataset.id : null;
-        root.replaceChildren(build(isAcc()));
+        const focusIn = !!(ae && root.contains(ae));
+        const focusId = focusIn && ae.dataset ? ae.dataset.id : null;
+        const nu = build(isAcc(), ui.partCols);
+        const cur = root.children.length === 1 ? root.firstElementChild : null;
+        if (!(cur && patchNode(cur, nu))) root.replaceChildren(nu);   // 바뀐 카드·주 칸만 바꿔 끼움
         // 쓰기(가로 스크롤·포커스) → 읽기(세로 스크롤·칸 흐림) 순서로 모아서, 다시 그릴 때 레이아웃 계산이 한 번만 일어나게
         const nsc = root.querySelector('.db-road-scroll');
-        if (nsc && ui.roadScroll) nsc.scrollLeft = ui.roadScroll;
-        if (focusId) {
+        if (nsc && nsc !== sc && ui.roadScroll) nsc.scrollLeft = ui.roadScroll;      // 가로 스크롤 칸을 새로 만든 경우에만
+        if (focusId && !(ae.isConnected && root.contains(ae))) {
           const f = root.querySelector('input[data-id="' + (window.CSS && CSS.escape ? CSS.escape(focusId) : focusId) + '"]');
           if (f) f.focus({ preventScroll: true });
         }
@@ -1260,15 +1360,30 @@ button.db-wk-head:hover { background:var(--bg-3); }
         Promise.resolve().then(() => { pending = false; draw(); });
       };
       ctx.subscribe(schedule);
+      // 창 크기가 바뀌면: '파트별 진행' 칸 수가 달라질 때만 다시 그리고, 아니면 칸 흐림만 다시 확인
+      const onResize = MV.debounce(() => {
+        if (!alive) return;
+        if (measurePartCols(root) !== ui.partCols) schedule(); else fadeAll(root);
+      }, 150);
+      window.addEventListener('resize', onResize, { passive: true });
+      ctx.onCleanup(() => window.removeEventListener('resize', onResize));
       if (mq) {
         const onMq = () => { ui.roadScroll = 0; schedule(); saveSoon(); };
         if (mq.addEventListener) mq.addEventListener('change', onMq); else if (mq.addListener) mq.addListener(onMq);
         ctx.onCleanup(() => { if (mq.removeEventListener) mq.removeEventListener('change', onMq); else if (mq.removeListener) mq.removeListener(onMq); });
       }
       ctx.onCleanup(() => { alive = false; });
-      root.appendChild(build(isAcc()));
+      ui.partCols = measurePartCols(root);         // 아직 빈 화면 → 여백으로 어림
+      root.appendChild(build(isAcc(), ui.partCols));   // build 가 비교용 서명(_dbSig)까지 붙여 둠
       const sc0 = root.querySelector('.db-road-scroll');
       if (sc0 && ui.roadScroll && !isAcc()) sc0.scrollLeft = ui.roadScroll;
+      // 실제 너비로 칸 수를 다시 확인 (어림이 틀렸을 때만 '파트별 진행'만 바꿔 끼움)
+      const pc = measurePartCols(root);
+      if (pc !== ui.partCols) {
+        ui.partCols = pc;
+        const oldParts = root.querySelector('.db-grid > .db-parts');
+        if (oldParts) oldParts.replaceWith(partsSection(pc));
+      }
       fadeAll(root);
       if (restore && isNum(restore.y) && restore.y > 0) {
         // MV.rerender 가 화면을 바꾸면서 맨 위로 올린 다음에 제자리로
