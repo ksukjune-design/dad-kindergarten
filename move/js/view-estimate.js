@@ -16,7 +16,8 @@
 
    상태  MV.store.ensure('estimate') → {
            coef:   { 모든 계수 },                 // '기준값으로 되돌리기' 가능
-           inputs: { 이사 조건 },
+           inputs: { 이사 조건 },              // builtinBoxes(기본 20): ‘여름옷·이불 박스 + 행거박스’ 칸 — 키 이름은 호환 때문에 그대로
+                                               //   (붙박이장 옷은 캐비닛장·간이옷장·박스로 나눠 옮김, 행거박스 1개 ≈ 박스 3개, 추정)
            quotes: [{ id, company, amount, vatIncluded, tons, crew, ladder, aircon, arrange, waste,
                       deposit, date, note, licenseChecked, insuranceChecked, visitDone }],
            calib:  { factor, at, median, n, base, sig }, // 방문견적 중앙값 보정 (factor 1 = 보정 없음, sig = 보정에 쓴 견적 서명)
@@ -172,7 +173,7 @@
     { k: 'm3_per_ton', g: 'vol', label: '1톤에 싣는 실제 짐 부피', unit: '㎥/톤', v: 5, lo: 4.5, hi: 6, step: 0.1, conf: 'low', basis: '리서치 추정 (출처 없음). 22.1㎥ ÷ 5 = 4.4톤 → 5톤 계산에 사용', src: ['misoSize'] },
     { k: 'truck_margin', g: 'vol', label: '톤수 여유분', unit: '%', v: 5, conf: 'low', basis: '리서치 견적 모델: 필요 톤수에 5%를 더해 위 등급 차량으로 올림', src: [] },
     { k: 'm3_per_box', g: 'vol', label: '이사 박스 1개 부피', unit: '㎥', v: 0.07, lo: 0.06, hi: 0.085, step: 0.005, conf: 'low', basis: '이사 바구니 약 60×40×35cm, 우체국 5호(0.062㎥) 기준 추정', src: [] },
-    { k: 'boxes_typical', g: 'vol', label: '3인 가족·24평 기준 박스 수', unit: '개', v: 90, lo: 70, hi: 120, conf: 'low', basis: '리서치 추정. 붙박이장 옷이 박스로 바뀌면 +20~30개', src: ['misoSize'] },
+    { k: 'boxes_typical', g: 'vol', label: '3인 가족·24평 기준 박스 수', unit: '개', v: 90, lo: 70, hi: 120, conf: 'low', basis: '리서치 추정. 붙박이장 옷·이불은 따로 더해요 — 이사 조건의 ‘여름옷·이불 박스 + 행거박스’ 칸 (기본 20개, 행거박스 1개 ≈ 박스 3개)', src: ['misoSize'] },
     { k: 'box_person_pct', g: 'vol', label: '가구원 1명당 박스 증감', unit: '%', v: 12, conf: 'low', basis: '리서치에 없음 — 3인 기준에서 1명 늘거나 줄 때의 증감 (추정)', src: [] },
     { k: 'misc_m3', g: 'vol', label: '짐 목록에 없는 잡동사니', unit: '㎥', v: 1.5, step: 0.1, conf: 'low', basis: '리서치 품목표의 "기타 1.5㎥" (청소기·화분·자전거·이불 등)', src: [] },
     { k: 'ac_outdoor_m3', g: 'vol', label: '에어컨 실외기 부피 (대당)', unit: '㎥', v: 0.3, step: 0.05, conf: 'low', basis: '리서치: 스탠드 실내기 0.4㎥ + 실외기 0.3㎥', src: [] },
@@ -2235,7 +2236,7 @@
     const out = [];
     out.push('[이사 짐 목록] ' + D.fmtLong(D.moveDate()));
     out.push('출발: ' + placeName(plans.old, '지금 집') + ' ' + inp.fromFloor + '층 (' + (METHODS[inp.fromMethod] || '') + ') → 도착: ' + placeName(plans.new, '새 집') + ' ' + inp.toFloor + '층 (' + (METHODS[inp.toMethod] || '') + ')');
-    out.push('이사 형태: ' + (PACK_TYPES.find((p) => p.id === inp.packType) || PACK_TYPES[0]).label + ' · 예상 박스 약 ' + est.volumeParts.boxes + '개' + (inp.boxAuto && inp.builtinBoxes ? ' (붙박이장 옷 포함)' : ''));
+    out.push('이사 형태: ' + (PACK_TYPES.find((p) => p.id === inp.packType) || PACK_TYPES[0]).label + ' · 예상 박스 약 ' + est.volumeParts.boxes + '개' + (inp.boxAuto && inp.builtinBoxes ? ' (여름옷·이불 박스와 걸린 옷 행거박스 포함)' : ''));
     if (est.counts.acN) out.push('에어컨 이전 요청: ' + AC_T.filter((t) => est.counts.acUnits[t]).map((t) => AC_LABEL[t] + ' ' + est.counts.acUnits[t] + '대').join(', '));
     const lgList = inv.filter((it) => lgActive(it, inp));
     if (lgList.length) out.push('제조사 서비스로 따로 옮길 가전 (견적 제외): ' + lgList.map((it) => nm(it) + ' (' + MAKERS[makerOf(it)].who + ')').join(', '));
@@ -2589,7 +2590,9 @@
     autoBox.appendChild(el('div', { class: 'es-fgrid' },
       fieldWrap('가구원 수', numInput('persons', { min: 1, max: 12 })),
       fieldWrap('지금 집 평형 (평)', numInput('pyeong', { min: 5, max: 100 })),
-      fieldWrap('붙박이장 옷·이불 박스', numInput('builtinBoxes', { min: 0, max: 200 }), '새 집엔 붙박이장이 없어요 (+20~30개)')));
+      /* 입력 키 builtinBoxes 는 저장 기록 호환 때문에 그대로 — 뜻은 '붙박이장에서 나온 옷·이불 중 박스로 옮기는 몫' */
+      fieldWrap('여름옷·이불 박스 + 행거박스', numInput('builtinBoxes', { min: 0, max: 200, aria: '여름옷·이불 박스와 행거박스 (박스 개수로)' }), '행거박스 1개 ≈ 박스 3개 (추정)')));
+    autoBox.appendChild(el('p', { class: 'es-note es-boxnote' }, '붙박이장 옷은 캐비닛장·간이옷장·박스로 나눠 옮겨요. 이 칸에는 여름옷·이불 박스와 걸린 옷 행거박스(1개 ≈ 박스 3개, 추정)를 박스 개수로 넣어요. 짐 목록에 따로 넣은 리빙박스·캐비닛장·간이옷장은 이미 세니 빼고 넣어요.'));
     autoBox.appendChild(fieldWrap('짐 줄이기 정도 (버리기·정리로 줄일 만큼)', el('div', { class: 'es-rangewrap' }, range, rout), null, 'div'));
     const boxRes = el('div', { class: 'es-boxres' });
     autoBox.appendChild(boxRes);
@@ -2597,14 +2600,14 @@
     card.appendChild(autoBox);
     card.appendChild(manBox);
     card.appendChild(el('div', { class: 'es-fgrid mt-12' },
-      fieldWrap('행거박스 추가 (기본 제공 넘는 개수)', numInput('hangerExtra', { min: 0, max: 50 }), '옷장은 이사 뒤에 사요 — 보통 2~5개는 기본 포함, 더 필요하면 1개 약 1만~2만원 (추정·확인 필요)')));
+      fieldWrap('행거박스 추가 (기본 제공 넘는 개수)', numInput('hangerExtra', { min: 0, max: 50 }), '옷장은 이사 뒤에 사요 — 걸린 옷 1m에 약 2개. 보통 2~5개는 기본 포함, 더 필요하면 1개 약 1만~2만원 (추정·확인 필요)')));
     upd(() => {
       const est = R.est;
       const inp = est.inputs;
       const c = est.coef;
       const b = est.volumeParts.boxes;
       setKids(boxRes,'→ 박스 약 ' + b + '개 (' + m3(b * c.m3_per_box) + ')',
-        el('small', '= 기준 ' + c.boxes_typical + '개 × ' + inp.pyeong + '/24평 × ' + inp.persons + '명 보정 × (1−' + inp.reducePct + '%) + 붙박이장 ' + inp.builtinBoxes + '개' +
+        el('small', '= 기준 ' + c.boxes_typical + '개 × ' + inp.pyeong + '/24평 × ' + inp.persons + '명 보정 × (1−' + inp.reducePct + '%) + 여름옷·이불·행거박스 ' + inp.builtinBoxes + '개' +
           (est.next && est.next.headroom < 3 ? ' · 박스 ' + est.next.boxes + '개 더 늘면 ' + tonsLabel(est.next.tons) : '')));
     });
 
@@ -2633,7 +2636,7 @@
       autoRow('stackCount', '세탁기·건조기 직렬 해체·설치', (e) => e.counts.autoStack, '세트'),
       autoRow('pianoCount', '피아노', (e) => e.counts.autoPiano, '대'),
       el('div', { class: 'es-autorow' }, el('span', { class: 'es-al', 'aria-hidden': 'true' }, '장롱·시스템행거 해체·설치 (식)'), numInput('wardrobeCount', { min: 0, max: 20, aria: '장롱·시스템행거 해체·설치 개수' }),
-        el('div', { class: 'es-ah' }, '붙박이장은 못 가져가요. 시스템행거·조립식 장롱이 있으면 개수를 넣으세요.'))));
+        el('div', { class: 'es-ah' }, '붙박이장은 두고 가요. 캐비닛장·간이옷장이 조립식이라 업체가 분해·재조립해야 하면 개수를 넣으세요 (1식 약 10만원, 추정 — 이사비와 자금 화면의 꼭 드는 비용이 그만큼 늘어요). 방문견적 때 꼭 물어보세요.'))));
 
     // 기타
     card.appendChild(el('h3', { class: 'es-h3' }, '🧺 기타'));
@@ -2842,9 +2845,9 @@
         : '에어컨 철거·이전설치(대수·배관 m·가스·출장비)가 포함인가요? 직접 하나요, 하청 기사인가요?',
       big.length
         ? '대형 가전(' + bigTxt + ')을 세워서 운반하나요? 문짝 분리·재조립, 수평 맞춤이 포함인가요? 따로면 얼마인가요?'
-        : '침대·장롱 분해조립, 대형 냉장고 도어 탈거가 포함인가요?',
-      big.length ? '침대·장롱 분해조립이 포함인가요?' : null,
-      '행거박스는 몇 개 가져오나요? 견적에 포함인가요? 모자라면 1개에 얼마인가요? (옷장 없이 옷을 옮겨요)',
+        : '침대 분해조립, 캐비닛장·간이옷장 분해·재조립, 대형 냉장고 도어 탈거가 포함인가요?',
+      big.length ? '침대 분해조립, 캐비닛장·간이옷장 분해·재조립이 포함인가요? 파손되면 어떻게 보상하나요?' : null,
+      '행거박스는 몇 개 가져오나요(걸린 옷 1m에 약 2개)? 견적에 포함인가요? 모자라면 1개에 얼마인가요? 행거박스 옷을 새 집 캐비닛장·간이옷장에 다시 걸어 주나요?',
       '폐기물 처리는 포함인가요? 따로면 얼마인가요?',
       '부가세 포함 총액인가요? 카드·현금 상관없이 같은 금액인가요? (카드 수수료 전가는 불법)',
       '계약금은 얼마이고, 잔금은 하차·점검이 끝난 뒤 내도 되나요?',

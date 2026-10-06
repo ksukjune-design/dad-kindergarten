@@ -25,6 +25,9 @@
           finance.v 5 (2026-10-06 HUG 보증료 개편 요율): HUG 2025-03-31 개편 요율(아파트·보증금 2억~5억·부채비율 70% 이하
           연 0.107%) → 3.2억 × 0.107% × 2년 = 684,800원. v4 이하 기록은 안 고친 'hug' 줄만 새 기본값으로(V4_LINES),
           보증료율(protect.hugRate)은 예전 선택지(0.115·0.122 → 0.107, 0.128 → 0.126)를 새 요율로 옮김
+          finance.v 6 (2026-10-06 저녁 옷 자리 바꾸기): '이동식 행거·보관용품 (필요하면, 이사 전)' 줄(id 'wardrobe-extra',
+          '새로 사는 살림', 0원 — 지금 간이옷장이 모자랄 때만, 산 만큼 간이 옷장 줄에서 뺌)을 v5 이하 기록에 없을 때만 더함
+          (통돌이 줄 뒤). 안 고친 '간이 옷장' 줄은 메모만 새 기본값(V5_LINES) — 금액 20만원·묶음 그대로, 머리 숫자 변화 없음
    이사 전 결제  LINE_META[].before — 결제일이 비어 있으면 '이사 전에 냄'(에어컨 이전설치), 결제일을 넣으면 그 날짜로 판단.
           묶음은 그대로(꼭 드는 비용)이고, 11/3 돈이 들어오기 전에 지금 통장에서 먼저 나간다고 따로 보여 줌
    계산   MV.calc.financeSummary(state) → { inflow, outflow, leftover, expensesTotal(아직 낼 이사비 전부),
@@ -281,7 +284,12 @@
     /* 줄 id 'lg' 는 저장 기록 호환 때문에 그대로 — 내용은 삼성 2in1 에어컨 이전설치 (이사 전에 새 집에 설치) */
     lg: { auto: 'lg', before: true, low: 450000, high: 700000, conf: 'mid', links: [LINK.ssAc], check: '1588-3366 예약 때 견적을 문자로 받아 확인',
       basis: '삼성전자서비스(1588-3366) 이전설치. 2in1(거실 스탠드 + 안방 벽걸이, 실외기 1대) 공식 기본 약 40.4만원(2026-05 단가표) + 배관 연장(1m당 약 1.9만~2.7만원)·실외기 앵글(외벽에 달 때 약 11만~13만원)·냉매 보충·타공 등 추가 → 예산 약 50만원(45만~70만원, 추정). 운반이 포함되는지는 자료마다 달라 예약 때 꼭 확인. 설치가 이사 전이라 11/3 돈이 들어오기 전에 지금 통장에서 나가요. 냉장고·건조기는 이삿짐센터 견적에 들어 있어요' },
-    wardrobe: { low: 100000, high: 300000, conf: 'low', basis: '간이 옷장·행거 약 10만~30만원 (이케아 등, 추정). 이사 전에는 사지 않아요 — 옷은 박스·행거박스로 옮기고, 이사 후 방을 실측해서 사요. 키 큰 옷장을 고르면 그때 벽 고정이 필요한지 확인. 11/3 현금에는 넣지 않아요' },
+    wardrobe: { low: 100000, high: 300000, conf: 'low', check: '살 때 가격·배송비·조립비 확인',
+      basis: '이사 후 2주쯤 살아 보고 실측해서 사요. 이케아 클렙스타드 2도어 139,000원(79×55×176), 3도어 169,000원(117×55×176, 조립 서비스 39,600원), 브림네스 2도어 199,000원(2026-10 확인, 배송비 별도). 문 있는 옷장은 옷봉이 약 75cm뿐이라, 같은 20만원이면 행거(리가 29,900원)·시스템행거(800 2단 약 5만원)에 훨씬 많이 걸려요(추정). 이사 전에는 캐비닛장·간이옷장과 여름옷 박스로 지내요. 키 큰 옷장을 고르면 그때 벽 고정이 필요한지 확인. 11/3 현금에는 넣지 않아요' },
+    /* 이사 전에 꼭 살 건 없음 — 지금 간이옷장이 모자랄 때만 (0원으로 잡음, 산 만큼 '간이 옷장 (이사 후)' 줄에서 뺌).
+       결제일을 넣지 않으면 '이사 전에 냄'으로 보지 않아요 (before 표시 없음) */
+    'wardrobe-extra': { low: 0, high: 80000, conf: 'low', check: '살 때만 금액 넣기',
+      basis: "이사 전에 꼭 살 건 없어요. 지금 간이옷장이 모자랄 때만 바퀴 달린 이동식 행거 1개(이케아 물리그 15,000원·리가 29,900원, 2단 행거 약 3만~5만원)를 사요. 보관용품은 제습제(8개 약 1만원)·방충제(약 2천~5천원)·압축팩(약 5천~1만원)으로 약 2만~3만원이에요(추정). 박스는 집에 있는 리빙박스와 택배 상자를 써서 0원으로 잡았어요. 이 돈은 이사 뒤 간이 옷장 20만원 안에서 쓰는 셈이라, 산 만큼 '간이 옷장 (이사 후)' 줄을 줄여요. 꼭 드는 이사 비용이 아니라 머리 숫자(11/3 전후 꼭 필요한 현금)에는 들어가지 않아요" },
     washer: { low: 400000, high: 600000, conf: 'mid', check: '주문 전에 가격·배송비·설치비 포함인지 확인',
       basis: '통돌이 16~17kg급 약 46만~50만원(예: LG 17kg, 온라인 할인가), 18~19kg급은 약 58만~66만원 → 예산 약 50만원(40만~60만원). 이사 후 11/4~11/6 새 집 배송으로 주문. 고장 세탁기는 지금 집에서 폐가전 무상방문수거(1599-0903)' },
     waste: { auto: 'waste', low: 0, high: 100000, conf: 'low', links: [LINK.gangseoWaste], check: '"빼기"에서 신고할 때 금액 확정',
@@ -299,15 +307,15 @@
   const GROUPS = [
     { id: 'essential', icon: '🚚', label: '꼭 드는 이사 비용', short: '꼭 드는 비용', what: '이사 날 전후로 반드시 나가는 돈 — 11/3 남는 돈으로 낼 수 있어야 해요. 에어컨 이전설치는 이사 전에 내요',
       desc: '이사 날 전후로 반드시 나가는 돈이에요 (이사업체 — 냉장고·건조기 포함, 삼성 에어컨 이전설치 — 이사 전에 냄, 엘리베이터 사용료, 대형폐기물, 인터넷 이전). 11/3에 남는 돈으로 이걸 낼 수 있는지가 가장 중요해요.' },
-    { id: 'purchase', icon: '🛒', label: '새로 사는 살림', short: '살림 구입', what: '새로 사는 물건 — 고장 난 세탁기 대신 통돌이(약 50만원, 이사 후 배송). 커튼·소품은 지금 것을 가져가요',
-      desc: '이사비가 아니라 새로 사는 물건이에요. 고장 난 세탁기 대신 통돌이 세탁기(약 50만원)를 이사 후 11/4~11/6에 배송받아요. 커튼·소품은 지금 것을 가져가서 0원이에요. 카드 할부로 나눠 낼 수도 있어요.' },
+    { id: 'purchase', icon: '🛒', label: '새로 사는 살림', short: '살림 구입', what: '새로 사는 물건 — 고장 난 세탁기 대신 통돌이(약 50만원, 이사 후 배송), (필요하면) 이동식 행거·보관용품. 커튼·소품은 지금 것을 가져가요',
+      desc: '이사비가 아니라 새로 사는 물건이에요. 고장 난 세탁기 대신 통돌이 세탁기(약 50만원)를 이사 후 11/4~11/6에 배송받아요. (필요하면) 이동식 행거·보관용품은 지금 간이옷장이 모자랄 때만 사요(0원으로 잡음). 커튼·소품은 지금 것을 가져가서 0원이에요. 카드 할부로 나눠 낼 수도 있어요.' },
     { id: 'optional', icon: '🗂', label: '선택·나중에', short: '선택·나중에', what: '이사 뒤에 정하거나 내는 돈 — 간이 옷장(이사 후 실측하고 구매), HUG 보증료(전입 후 11월 중 가입할 때)',
       desc: '이사 뒤에 정해도 되는 돈이에요. 간이 옷장(약 20만원, 추정)은 이사 후 실측하고 이케아 등에서 사고, HUG 보증료는 전입·확정일자 뒤 11월 중 가입할 때 내요. 11/3 현금에는 넣지 않아요.' },
   ];
   const GROUP_BY_ID = {};
   GROUPS.forEach((g) => { GROUP_BY_ID[g.id] = g; });
   /* clean·deco·reserve 는 예전 기본 줄 — 사용자가 고친 줄만 남아 있을 수 있어 묶음만 기억 */
-  const GROUP_OF = { mover: 'essential', lg: 'essential', elevator: 'essential', waste: 'essential', internet: 'essential', washer: 'purchase', wardrobe: 'optional', hug: 'optional', deco: 'purchase', clean: 'optional', reserve: 'optional' };
+  const GROUP_OF = { mover: 'essential', lg: 'essential', elevator: 'essential', waste: 'essential', internet: 'essential', washer: 'purchase', 'wardrobe-extra': 'purchase', wardrobe: 'optional', hug: 'optional', deco: 'purchase', clean: 'optional', reserve: 'optional' };
   const groupOf = (l) => (l && GROUP_BY_ID[l.group] ? l.group : (l && GROUP_OF[l.id]) || 'purchase');
   const REFUND_META = {
     jangsu: { conf: 'mid', basis: '공동주택관리법 시행령 제31조 — 세입자가 낸 장기수선충당금은 소유자에게 돌려받을 수 있어요(약 20만~50만원 추정). 관리사무소 납부확인서로 금액 확정' },
@@ -326,7 +334,7 @@
     o.label = String(o.label == null ? '' : o.label);
     return o;
   }
-  /* 기본 줄 (v4, 2026-10-06 가족 결정 반영 — 'lg' 줄은 삼성 에어컨 이전설치) */
+  /* 기본 줄 (v6, 2026-10-06 가족 결정 반영 — 'lg' 줄은 삼성 에어컨 이전설치, 'wardrobe-extra' 는 필요할 때만 사는 이동식 행거·보관용품) */
   const DEFAULT_LINES = [
     { id: 'mover', label: '이사업체 (포장이사 · 부가세 포함)', amount: 2167000, group: 'essential' },
     { id: 'lg', label: '삼성 에어컨 이전설치 (이사 전)', amount: AC_MOVE_FALLBACK, group: 'essential' },
@@ -334,7 +342,8 @@
     { id: 'elevator', label: '엘리베이터 사용료 (두 단지)', amount: 200000, group: 'essential' },
     { id: 'internet', label: '인터넷 이전설치', amount: 36000, group: 'essential' },
     { id: 'washer', label: '통돌이 세탁기 (이사 후 배송)', amount: 500000, group: 'purchase', memo: '11/4~11/6 배송으로 주문' },
-    { id: 'wardrobe', label: '간이 옷장 (이사 후, 이케아 등)', amount: 200000, group: 'optional', memo: '이사 후 실측하고 구매' },
+    { id: 'wardrobe-extra', label: '이동식 행거·보관용품 (필요하면, 이사 전)', amount: 0, group: 'purchase', memo: "살 때만 금액을 넣어요. 그만큼 '간이 옷장 (이사 후)' 줄에서 빼요" },
+    { id: 'wardrobe', label: '간이 옷장 (이사 후, 이케아 등)', amount: 200000, group: 'optional', memo: '이사 후 실측하고 구매. 이사 전에 이동식 행거·보관용품을 샀다면 그만큼 빼요' },
     { id: 'hug', label: '전세보증금반환보증 보증료 (HUG 2년)', amount: 684800, group: 'optional' },
   ];
   function defaultLines() { return DEFAULT_LINES.map((l) => normLine(MV.clone(l))); }
@@ -353,13 +362,16 @@
     reserve: { label: '예비비', amount: 300000, group: 'optional', drop: true },
   };
   /* 한 번도 안 고친 줄인지 (저장된 그대로의 줄로 판단): edited 표시가 없고,
-     이름·금액(직접 줄)·자동 여부·묶음·결제일·메모·냄·켜짐이 예전 기본값 그대로 */
+     이름·금액(직접 줄)·자동 여부·묶음·결제일·메모·냄·켜짐이 예전 기본값 그대로.
+     메모: 예전 기본값에 메모가 있었으면(old.memo) 그 글과 같아야, 없었으면 비어 있어야 안 고친 줄 */
   function pristineLine(l, old) {
     if (!l || !old || l.edited) return false;
     if (String(l.label || '') !== old.label) return false;
     if (old.amount != null ? num(l.amount) !== old.amount : l.auto === false) return false;
     if (l.group != null && l.group !== old.group) return false;
-    if (l.paid || l.on === false || (l.date && String(l.date).trim()) || (l.memo && String(l.memo).trim())) return false;
+    if (l.paid || l.on === false || (l.date && String(l.date).trim())) return false;
+    const memo = l.memo == null ? '' : String(l.memo).trim();
+    if (memo !== (old.memo || '')) return false;
     return true;
   }
   /* v3 기본 줄 중 v4 에서 바뀐 것 — 안 고친 줄만 새 기본값으로 */
@@ -372,6 +384,28 @@
   const V4_LINES = {
     hug: { label: '전세보증금반환보증 보증료 (HUG 2년)', amount: 780800, group: 'optional' },
   };
+  /* v5 기본 줄 중 v6 에서 바뀐 것 — 간이 옷장 줄은 금액(20만원)·묶음 그대로, 메모만 새 기본값으로 (안 고친 줄만) */
+  const V5_LINES = {
+    wardrobe: { label: '간이 옷장 (이사 후, 이케아 등)', amount: 200000, group: 'optional', memo: '이사 후 실측하고 구매' },
+  };
+  /* v6 에서 새로 생긴 기본 줄 — 저장된 기록에 그 id 가 없을 때만 더함 (있으면 고쳤든 안 고쳤든 그대로).
+     after: 이 id 줄 바로 뒤에, 없으면 before 줄 바로 앞에, 둘 다 없으면 맨 뒤에 */
+  const V6_NEW_LINES = [{ id: 'wardrobe-extra', after: 'washer', before: 'wardrobe' }];
+  function addMissingLines(lines, list) {
+    const out = lines.slice();
+    list.forEach((n) => {
+      if (out.some((l) => l && l.id === n.id)) return;
+      const def = DEFAULT_LINES.find((d) => d.id === n.id);
+      if (!def) return;
+      const line = MV.clone(def);
+      let at = out.findIndex((l) => l && l.id === n.after);
+      if (at >= 0) at += 1;
+      else at = out.findIndex((l) => l && l.id === n.before);
+      if (at < 0) at = out.length;
+      out.splice(at, 0, line);
+    });
+    return out;
+  }
   /* 줄 id 별로, 사용자가 안 고친 줄만 새 기본값으로 (고친 줄은 그대로 둠). table = 그 버전의 기본 줄.
      lines 는 저장된 줄의 얕은 복사본 (normLine 전 — 묶음이 새 GROUP_OF 로 채워지기 전에 비교) */
   function migrateLines(lines, table) {
@@ -393,8 +427,9 @@
     ].map(normRefund);
   }
   /* 2: 임대차 신고 상태 ↔ 체크리스트 맞춤, 3: 예산 기본 줄 가족 결정 반영, 4: 삼성 에어컨 줄·인터넷 3.6만,
-     5: HUG 보증료 2025-03-31 개편 요율 (0.107%, 684,800원) */
-  const FIN_V = 5;
+     5: HUG 보증료 2025-03-31 개편 요율 (0.107%, 684,800원),
+     6: 옷 자리 바꾸기(10/6 저녁) — '이동식 행거·보관용품 (필요하면, 이사 전)' 0원 줄 추가, 간이 옷장 메모 */
+  const FIN_V = 6;
   function defaults() {
     return {
       v: FIN_V,
@@ -442,6 +477,11 @@
         const r = num(f.protect.hugRate);
         if (Object.prototype.hasOwnProperty.call(HUG_OLD_RATE, String(r))) f.protect = Object.assign({}, f.protect, { hugRate: HUG_OLD_RATE[String(r)] });
       }
+    }
+    if (rawV < 6) {
+      /* v6: 안 고친 간이 옷장 줄은 새 메모로, '이동식 행거·보관용품 (필요하면, 이사 전)' 줄은 없을 때만 더함 (0원 — 머리 숫자 그대로) */
+      raw = migrateLines(raw, V5_LINES);
+      raw = addMissingLines(raw, V6_NEW_LINES);
     }
     f.budget.lines = raw.map(normLine);
     f.v = Math.max(rawV, FIN_V);
@@ -2634,7 +2674,7 @@ div.fn-alert { cursor: default; }
           '"새로 사는 살림" ' + krw(pur) + '은 이사비가 아니라 물건 값(통돌이 세탁기 등)이라 카드 할부로 나눠 낼 수 있고, ' +
           '"선택·나중에" ' + krw(opt) + '은 이사 뒤에 정하거나 내는 돈(간이 옷장, HUG 보증료)이에요. ',
           el('a', { class: 'fn-hug-link', href: HUG_GUIDE }, 'HUG 별첨 보기 →')),
-        el('p', { class: 'mb-0 mt-8 small' }, el('b', '가족이 정한 것: '), '냉장고·건조기는 이삿짐센터가 옮김(이사업체 견적에 포함) · 에어컨은 삼성전자서비스가 이사 전에 새 집에 설치 · 통돌이 약 50만원은 이사 후 배송 · 옷장은 이사 후 실측하고 간이 옷장으로 · 커튼·소품은 지금 것 가져감(0원) · 입주청소는 직접(0원) · 예비비는 따로 잡지 않음.')),
+        el('p', { class: 'mb-0 mt-8 small' }, el('b', '가족이 정한 것: '), '냉장고·건조기는 이삿짐센터가 옮김(이사업체 견적에 포함) · 에어컨은 삼성전자서비스가 이사 전에 새 집에 설치 · 통돌이 약 50만원은 이사 후 배송 · 옷은 붙박이장을 비워 캐비닛장·간이옷장·여름옷 박스로 옮기고, 옷장은 이사 후 실측하고 간이 옷장으로 (이동식 행거는 모자랄 때만) · 커튼·소품은 지금 것 가져감(0원) · 입주청소는 직접(0원) · 예비비는 따로 잡지 않음.')),
       el('div', { class: 'fn-cmp', role: 'img', 'aria-label': '같은 눈금 비교 — 그날 남는 돈 ' + krw(fl.leftover) + ', 앞으로 낼 돈 ' + krw(b.unpaid) + ' (꼭 드는 비용 ' + krw(ess) + ', 살림 구입 ' + krw(pur) + ', 선택·나중에 ' + krw(opt) + ')' },
         el('div', { class: 'fn-cmp-row' }, el('span', '그날 남는 돈'), el('div', { class: 'fn-cmp-track' }, el('i', { class: 'is-left', style: { width: w(Math.max(0, fl.leftover)) } })), el('b', krw(fl.leftover))),
         el('div', { class: 'fn-cmp-row' }, el('span', '앞으로 낼 돈'),
@@ -2784,15 +2824,16 @@ div.fn-alert { cursor: default; }
         li('이사업체 단가 협상', ' — 11/3(화)은 평일이고 손없는날도 아니지만, 월초라 업체에 따라 약 5% 할증이 붙을 수 있어요. 방문견적 3곳을 "부가세 포함 총액"으로 비교하고, 할증이 들어 있는지 물어보세요 (카드 수수료 전가는 금지). 냉장고·건조기도 이 견적에 넣어요.'),
         li('에어컨 이전설치는 이사 전에 내요', ' — 삼성전자서비스(1588-3366)에 되도록 빨리 예약하고, 운반 포함 여부와 배관 연장·앵글·타공 추가비를 견적 문자로 받으세요. 설치 날 내는 돈이라 ' + D.fmt(c.move) + ' 돈이 들어오기 전에 지금 통장에서 나가요.'),
         li('엘리베이터 사용료·인터넷 이전비 확인', ' — 새 집 관리사무소에 사용료·보양·예약을 물어보세요(서울 평균 약 10만원, 사다리차를 써도 받는 단지가 많아요). 인터넷 이전은 평일 낮(약 3.6만원)으로 잡으면 주말·저녁 할증(약 25%)을 피해요.'),
-        li('행거박스 개수 묻기', ' — 옷장을 이사 전에 사지 않으니 옷은 박스·행거박스로 옮겨요. 업체가 행거박스를 몇 개 가져오는지 물어 견적에 넣어 달라고 하세요.'),
+        li('행거박스 개수 묻기', ' — 옷장을 이사 전에 사지 않아요. 캐비닛장·간이옷장은 비워서 옮기고, 걸린 옷은 행거박스로 옮겨 새 집에서 다시 걸어요. 업체가 행거박스를 몇 개 가져오는지 물어 견적에 넣어 달라고 하고, 캐비닛장이 조립식이면 분해·재조립 비용도 물어보세요.'),
       ]),
       sec(GROUP_BY_ID.purchase, [
         li('통돌이 세탁기 약 50만원', ' — 16~17kg급이 약 46만~50만원이에요. 이사 후 11/4~11/6 새 집 배송으로 주문하고, 배송·설치비가 포함인지 확인하세요. 고장 난 세탁기는 지금 집에서 폐가전 무상방문수거(1599-0903). 카드 무이자 할부로 나누면 ' + D.fmt(c.move) + ' 현금이 줄지 않아요.'),
+        li('(필요하면) 이동식 행거·보관용품 — 0원으로 잡음', " — 이사 전에 꼭 살 건 없어요. 지금 간이옷장이 모자랄 때만 바퀴 달린 이동식 행거(약 1.5만~5만원)와 제습제·방충제·압축팩(약 2만~3만원, 추정)을 사요. 사면 금액을 넣고, 그만큼 '간이 옷장 (이사 후)' 줄에서 빼요."),
         li('커튼·소품은 지금 것 가져가기 (0원)', ' — 새로 사지 않아요. 사전방문 때 창 치수만 재서 지금 커튼이 맞는지 보고, 안 맞으면 이사 후에 조정해요.'),
         li('안 쓰는 물건 중고 판매', ' — 붙박이장에서 나온 물건·책·장난감.'),
       ]),
       sec(GROUP_BY_ID.optional, [
-        li('간이 옷장은 이사 후 (약 20만원, 추정)', ' — 이사 전에는 사지 않아요. 이사 후 방을 실측하고 이케아 등에서 간이 옷장이나 행거를 사요. 키 큰 옷장을 고르면 그때 벽 고정이 필요한지 확인. ' + D.fmt(c.move) + ' 현금에는 넣지 않아요.'),
+        li('간이 옷장은 이사 후 (약 20만원, 추정)', ' — 이사 전에는 사지 않아요. 이사 후 2주쯤 살아 보고 실측해서 이케아 등에서 간이 옷장이나 행거를 사요. 같은 돈이면 문 있는 옷장보다 행거·시스템행거에 훨씬 많이 걸려요(추정). 이사 전에 이동식 행거·보관용품을 샀다면 그만큼 빼요. 키 큰 옷장을 고르면 그때 벽 고정이 필요한지 확인. ' + D.fmt(c.move) + ' 현금에는 넣지 않아요.'),
         el('li', el('b', 'HUG 보증료 약 ' + krw(hugPremium(c.f).value)), ' — 2025-03-31 개편 요율(연 ' + pctTxt(hugPremium(c.f).rate, 4) + ') 기준 추정이에요. 전입·확정일자 뒤 11월 중 가입할 때 내고, 6·12개월 무이자 분납도 돼요. ' + D.fmt(c.move) + ' 당일 현금이 아니에요. ', hugLink),
       ]),
       el('h4', { class: 'fn-adv-h' }, '🧹 돈 안 드는 것 (가족이 정함)'),
