@@ -467,7 +467,9 @@
   function autoAmount(kind, f, state, est) {
     if (kind === 'mover') {
       if (est && isNum(est.typical) && est.typical > 0) {
-        return { value: Math.round(est.typical / 1000) * 1000, src: 'est', note: '짐·견적 화면 계산값' + (isNum(est.low) && isNum(est.high) ? ' (범위 ' + krw(est.low) + '~' + krw(est.high) + ')' : '') };
+        // 예산은 실제로 낼 돈 — 이삿짐센터 부가세 포함값(pay)을 우선 사용
+        const p = (est.pay && isNum(est.pay.typical) && est.pay.typical > 0) ? est.pay : est;
+        return { value: Math.round(p.typical / 1000) * 1000, src: 'est', note: '짐·견적 화면 계산값 · 부가세 포함' + (isNum(p.low) && isNum(p.high) ? ' (범위 ' + krw(p.low) + '~' + krw(p.high) + ')' : '') };
       }
       return { value: 1970000, src: 'research', note: '리서치 모델 기준가 (에어컨 제외) — 짐·견적 계산이 생기면 자동으로 바뀌어요' };
     }
