@@ -1,13 +1,18 @@
 /* ============================================================
    우리집 이사 관리 — 짐·견적
-   짐 목록(MV.inv, 도면 배치 화면과 같은 데이터) + 자동 이사 견적 + 업체 견적 비교 + LG·이삿짐센터 비교
+   짐 목록(MV.inv, 도면 배치 화면과 같은 데이터) + 자동 이사 견적 + 업체 견적 비교 + 가전 이전 비교
 
    라우트
      #/stuff              → #/stuff/inventory 로 바꿔 보여 줌
-     #/stuff/inventory    짐 목록 (요약·필터·표/카드·붙여넣기·업체용 목록)
+     #/stuff/inventory    짐 목록 (요약·필터·표/카드·제조사·옮기는 곳·붙여넣기·업체용 목록)
      #/stuff/estimate     이사 견적 (입력 → 부피 → 톤수·인원 → 금액 범위, 계산 기준 수정)
      #/stuff/quotes       업체 견적 비교 + '견적으로 보정'
-     #/stuff/lg           LG·이삿짐센터 비교 (LG 서비스와 이삿짐센터 중 누가 옮길지)
+     #/stuff/lg           가전 이전 비교 (가전마다 제조사 서비스(LG 또는 삼성) vs 이삿짐센터, 우리 집 계획)
+
+   제조사 서비스: 짐의 lg = true 는 ‘제조사 서비스로 옮김’ (이름은 호환 때문에 그대로).
+     제조사 = it.brand('LG'|'삼성'|'기타') → 없으면 이름·링크로 짐작 (brandOf).
+     LG → LG 베스트케어 이전설치 / 삼성 → 삼성전자서비스(에어컨·건조기만 요금 조사됨) /
+     기타·창문형 에어컨·요금 미조사 삼성 가전 → 이삿짐센터 짐으로 계산 (lgBlocked).
 
    상태  MV.store.ensure('estimate') → {
            coef:   { 모든 계수 },                 // '기준값으로 되돌리기' 가능
@@ -17,16 +22,21 @@
            calib:  { factor, at, median, n, base, sig }, // 방문견적 중앙값 보정 (factor 1 = 보정 없음, sig = 보정에 쓴 견적 서명)
            lgChecks: { schedule, landlord, brand } }
    계산  MV.calc.moveEstimate(state) → { tons, crew, volume, low, typical, high,
-           lines:[{key,label,low,typical,high,detail}], lgCost:{low,typical,high,rows,vatIncluded:true}|null, notes:[],
+           lines:[{key,label,low,typical,high,detail}], notes:[],
+           lgCost: 제조사 서비스(LG + 삼성) 전체 {low,typical,high,count,rows,discount,transport,label,makers,
+                   byBrand:{ LG:{low,typical,high,count}, '삼성':{low,typical,high,count} }, vatIncluded:true} | null
+                   (이름은 호환 때문에 lgCost — 자금·대시보드·AI 비서가 lgCost.typical/low/high/count 를 읽음)
+           makerCost,                     // lgCost 와 같은 객체 (새 이름)
            vatIncl,                       // low/typical/high 가 부가세 포함인지 (‘부가세 포함으로 보기’, 기본 꺼짐 = 리서치 시세 그대로 부가세 별도)
            ex:{low,typical,high},         // 이삿짐센터 부가세 별도 금액 (언제나 별도 — 화면의 보조 숫자)
-           lgBlocked:[{id,name,reason}],  // LG 표시가 켜져 있지만 LG 불가(다른 브랜드·창문형)라 이삿짐센터 짐으로 계산한 가전
+           lgBlocked:[{id,name,reason}],  // 제조사 서비스 표시가 켜져 있지만 맡길 수 없어(reason 'brand'|'window'|'unpriced') 이삿짐센터 짐으로 계산한 가전
            pay:{low,typical,high},        // 이삿짐센터 ‘실제로 낼 돈’ (언제나 부가세 포함)
-           totalPay:{low,typical,high},   // pay + LG 요금(소비자가, 부가세 포함) — 이삿짐센터와 LG를 더할 땐 이 값
+           totalPay:{low,typical,high},   // pay + 제조사 서비스 요금(소비자가, 부가세 포함) — 둘을 더할 땐 이 값
            ... }
          순수 함수 — state.inventory + state.estimate 만 읽고, estimate 가 없으면 기본값으로 계산.
 
-   계수 기본값·근거·신뢰도: 리서치 검증본 (movers_verified.json · appliances_verified.json, 2026-10-06).
+   계수 기본값·근거·신뢰도: 리서치 검증본 (movers_verified.json · appliances2_verified.json, 2026-10-06)
+             + Gemini(구글 검색) 교차 확인 (gemini_moving-costs.json · gemini_appliances.json).
    견적 모델: V = Σ짐 부피 + 박스×0.07 → T = V÷5 +5% → 차량 등급 {1,2.5,3.5,5,6,7.5,8.5,10}
              → 인원표 → 본비 = 톤×8만 + 인원×21만 → 할증(본비에만) + 부대비 → 기준가, 하한×0.85, 상한×1.25
    CSS 접두사: es-
@@ -122,6 +132,17 @@
     lxSvc: { label: '판토스(LG 물류 협력사) LG 가전 설치 안내', url: 'https://www.lxpantos.com/kr/lg-electronics-installation.do' },
     lgAc: { label: 'LG 에어컨 이전설치 요금 (2025-11 기준 정리)', url: 'https://tilnote.io/pages/6a43ec7788a337ba183160e3' },
     ewaste: { label: '폐가전 무상방문수거 1599-0903', url: 'https://www.15990903.or.kr' },
+    ssAc: { label: '삼성케어플러스 에어컨 이전설치', url: 'https://www.samsung.com/sec/samsung-care-plus/move-out-ac/AC-TCMACMUU/' },
+    ssDryer: { label: '삼성케어플러스 건조기 이전설치', url: 'https://www.samsung.com/sec/samsung-care-plus/move-out-dv/DV-TCMDYSTU/' },
+    ssSvc: { label: '삼성전자서비스 이전설치 안내', url: 'https://www.samsungsvc.co.kr/solution/131652' },
+    ssPrice: { label: '삼성 에어컨 단가표 정리 (2026-05)', url: 'https://tilnote.io/pages/6a373074478fbed2736ab47c' },
+    ssSoomgo: { label: '삼성 에어컨 이전설치 비용 항목 (숨고)', url: 'https://soomgo.com/blog/install-repair/삼성전자에어컨이전설치/' },
+    ac2026: { label: '2026 에어컨 이전설치 비용 (숨고)', url: 'https://soomgo.com/blog/install-repair/2026-최신-버전-에어컨-이전-설치-비용의-모든-것/' },
+    miso24: { label: '24평 이사비용 (미소)', url: 'https://miso.kr/blog/24평-이사비용' },
+    misoDay: { label: '이사비용 저렴한 날 (미소)', url: 'https://miso.kr/blog/이사비용-저렴한날' },
+    jpt: { label: '2026 이사비용 정리', url: 'https://www.jptcalc.kr/blog/posts/moving-cost-guide.html' },
+    seoulElev: { label: '아파트 승강기 사용료 공개 (서울시)', url: 'https://mediahub.seoul.go.kr/archives/1215461' },
+    openapt: { label: '서울시 공동주택 통합정보마당', url: 'https://openapt.seoul.go.kr' },
   };
 
   /* ======================= 계수 (리서치 근거) =======================
