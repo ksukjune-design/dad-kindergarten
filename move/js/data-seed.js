@@ -23,6 +23,7 @@
       { id: 'sort-utility', name: '다용도실정리', emoji: '🧺', group: '짐정리', desc: '세제·공구·계절용품 정리', guide: 'sort#utility' },
       { id: 'discard', name: '버리기', emoji: '🗑️', group: '버리고 사기', desc: '고장난 세탁기, 대형폐기물, 헌옷·책 처분', guide: 'discard' },
       { id: 'buy', name: '가구구매', emoji: '🛒', group: '버리고 사기', desc: '옷장 추가, 통돌이 세탁기 등 새로 살 것', guide: 'buy' },
+      { id: 'kid', name: '아이·취학', emoji: '🎒', group: '아이', desc: '2027년 3월 백석초 입학 — 취학통지서·예비소집·늘봄, 유치원 주소 변경', guide: 'kid' },
       { id: 'moveday', name: '이사당일', emoji: '📅', group: 'D-day', desc: '11/2 가전 선이동 · 11/3 시간표', guide: 'moveday' },
     ],
     items: [
@@ -36,6 +37,7 @@
       { id: 'previsit-01', partId: 'previsit', title: '새 집 사전방문 일정 잡기 (중개사 통해)', detail: '', due: '2026-10-10', priority: 'high', owner: '나' },
       { id: 'moveday-01', partId: 'moveday', title: '11/3 오전 보증금 수령 확인', detail: '', due: '2026-11-03', priority: 'high', owner: '나' },
       { id: 'admin-01', partId: 'admin', title: '전입신고 + 확정일자 (11/3 당일)', detail: '', due: '2026-11-03', priority: 'high', owner: '나' },
+      { id: 'kid-01', partId: 'kid', title: '새 집 주소가 백석초 통학구역인지 확인', detail: '학구도 안내서비스로 확인', due: '2026-10-10', priority: 'high', owner: '아내' },
       { id: 'space-01', partId: 'space', title: '두 집 도면 비교 확인', detail: '', due: '2026-10-12', priority: 'mid', owner: '함께' },
     ],
     inventory: [
