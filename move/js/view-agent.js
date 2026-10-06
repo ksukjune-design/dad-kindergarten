@@ -235,7 +235,7 @@
     R.capsSeen = true;
     if (syncAvailability()) MV.store.emit('caps', MV.sync && MV.sync.cap);
   });
-  MV.store.on('route', () => updateFab());
+  MV.store.on('route', () => { updateFab(); if (fab && !fab.hidden) { requestAnimationFrame(placeFab); placeSoon(350); } });
 
   /* ======================= 떠 있는 🤖 버튼 ======================= */
   let fab = null;
@@ -251,6 +251,7 @@
       }, el('span', { class: 'ag-fab-ico', 'aria-hidden': 'true' }, '🤖'), el('span', { class: 'ag-fab-dot', 'aria-hidden': 'true' }));
       MV.css('ag', STYLE);
       document.body.appendChild(fab);
+      watchView();
       try {
         fabObserver = new MutationObserver(() => updateFab());
         fabObserver.observe(document.body, { childList: true });
@@ -259,6 +260,68 @@
     if (fab.hidden !== !show) fab.hidden = !show;
     fab.classList.toggle('ag-busy', !!R.active);
     fab.title = R.active ? 'AI 비서가 답하는 중 — 눌러서 보기' : 'AI 비서에게 묻기';
+    if (show) placeSoon();
+  }
+  /* 버튼 아래에 화면에 고정된 입력칸·버튼(예: 체크리스트 아래 입력줄)이 있으면 그 위로 올림.
+     페이지·목록을 스크롤해서 비킬 수 있는 내용은 그대로 둠 */
+  function scrollable(n) {
+    const cs = getComputedStyle(n);
+    return /(auto|scroll)/.test(cs.overflowY) && n.scrollHeight > n.clientHeight + 2;
+  }
+  function pinned(ctl) {
+    for (let n = ctl; n && n !== document.body && n !== document.documentElement; n = n.parentElement) {
+      const pos = getComputedStyle(n).position;
+      if (pos === 'fixed' || pos === 'sticky') return true;
+      if (n !== ctl && scrollable(n)) return false;
+    }
+    return document.documentElement.scrollHeight <= window.innerHeight + 2;
+  }
+  function probeFab() {
+    const r = fab.getBoundingClientRect();
+    const pts = [[r.left + r.width / 2, r.top + r.height / 2], [r.left + 5, r.top + 5], [r.right - 5, r.top + 5], [r.left + 5, r.bottom - 5], [r.right - 5, r.bottom - 5]];
+    let top = null;
+    fab.style.pointerEvents = 'none';
+    try {
+      pts.forEach(([x, y]) => {
+        if (x < 0 || y < 0 || x >= window.innerWidth || y >= window.innerHeight) return;
+        const e = document.elementFromPoint(x, y);
+        if (!e || e === fab || fab.contains(e) || e.closest('#nav, .toast-wrap, .modal-back')) return;
+        const ctl = e.closest('button, a[href], input, textarea, select, [role="button"], [contenteditable="true"]');
+        if (!ctl || !pinned(ctl)) return;
+        const t = ctl.getBoundingClientRect().top;
+        if (top === null || t < top) top = t;
+      });
+    } finally { fab.style.pointerEvents = ''; }
+    return top;
+  }
+  function placeFab() {
+    placeTimer = null;
+    if (!fab || fab.hidden || !fab.isConnected) return;
+    fab.style.removeProperty('bottom');
+    for (let k = 0; k < 3; k++) {
+      const top = probeFab();
+      if (top === null) break;
+      const b = Math.round(window.innerHeight - top + 10);
+      if (b > window.innerHeight * 0.6) { fab.style.removeProperty('bottom'); break; }
+      fab.style.bottom = b + 'px';
+    }
+  }
+  let placeTimer = null;
+  function placeSoon(ms) {
+    if (placeTimer) clearTimeout(placeTimer);
+    placeTimer = setTimeout(() => requestAnimationFrame(placeFab), ms == null ? 120 : ms);
+  }
+  let viewObserver = null;
+  function watchView() {
+    if (viewObserver) return;
+    const v = document.getElementById('view');
+    if (!v) return;
+    try {
+      viewObserver = new MutationObserver(() => { if (fab && !fab.hidden) placeSoon(160); });
+      viewObserver.observe(v, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden'] });
+    } catch (e) { /* 무시 */ }
+    window.addEventListener('resize', () => placeSoon(120), { passive: true });
+    window.addEventListener('scroll', () => { if (fab && !fab.hidden) placeSoon(60); }, { passive: true });
   }
 
   /* ======================= 앱 데이터 요약 ======================= */
@@ -1934,8 +1997,9 @@
 .ag-quote { margin: 0 0 .6em; padding: 2px 0 2px 12px; border-left: 3px solid var(--line-2); color: var(--ink-2); }
 .ag-hr { border: 0; border-top: 1px solid var(--line); margin: .8em 0; }
 .ag-table { margin: 0 0 .6em; border: 1px solid var(--line); border-radius: 10px; background: var(--bg-2); }
-.ag-table table.tbl { font-size: .84rem; }
-.ag-table table.tbl th, .ag-table table.tbl td { padding: 6px 9px; }
+.ag-table table.tbl { font-size: .84rem; width: auto; min-width: 100%; }
+.ag-table table.tbl th, .ag-table table.tbl td { padding: 6px 9px; overflow-wrap: normal; word-break: keep-all; }
+.ag-table table.tbl td:first-child { min-width: 4.5em; }
 .ag-thinking { display: inline-flex; align-items: center; gap: 8px; color: var(--ink-3); font-size: .92rem; }
 .ag-dots { display: inline-flex; gap: 3px; }
 .ag-dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--ink-3); animation: ag-blink 1.2s infinite ease-in-out both; }
@@ -1988,7 +2052,7 @@
 .ag-can { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .ag-can li { display: flex; gap: 10px; align-items: flex-start; }
 .ag-can-i { flex: none; width: 1.6em; text-align: center; }
-.ag-fab { position: fixed; right: 22px; bottom: calc(var(--bottom-h) + 22px + env(safe-area-inset-bottom)); z-index: 45; width: 56px; height: 56px; border-radius: 50%; border: 0; padding: 0; display: grid; place-items: center; background: var(--brand); color: var(--on-brand); font-size: 1.6rem; line-height: 1; box-shadow: var(--shadow-lg); cursor: pointer; transition: transform .12s, background .12s; -webkit-tap-highlight-color: transparent; }
+.ag-fab { position: fixed; right: 22px; bottom: calc(var(--bottom-h) + 22px + env(safe-area-inset-bottom)); z-index: 45; width: 56px; height: 56px; border-radius: 50%; border: 0; padding: 0; display: grid; place-items: center; background: var(--brand); color: var(--on-brand); font-size: 1.6rem; line-height: 1; box-shadow: var(--shadow-lg); cursor: pointer; transition: transform .12s, background .12s, bottom .18s ease-out; -webkit-tap-highlight-color: transparent; }
 .ag-fab:hover { background: var(--brand-2); transform: translateY(-1px); }
 .ag-fab:focus-visible { outline: 3px solid color-mix(in srgb, var(--brand) 55%, transparent); outline-offset: 3px; }
 .ag-fab-dot { position: absolute; top: 3px; right: 3px; width: 13px; height: 13px; border-radius: 50%; background: var(--good); border: 2px solid var(--bg-2); display: none; }
