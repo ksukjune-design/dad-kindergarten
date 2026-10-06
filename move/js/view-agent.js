@@ -303,6 +303,8 @@
   /* ======================= 떠 있는 🤖 버튼 ======================= */
   let fab = null;
   let fabObserver = null;
+  /** 이 화면에 🤖 버튼이 있어야 하는지 (모달 때문에 잠깐 숨긴 것은 빼고 — 아래 여백은 그대로 둬서 화면이 튀지 않게) */
+  const fabRoute = () => available() && !!MV.route && MV.route.name !== 'agent';
   function updateFab() {
     if (!document.body) return;
     const show = available() && MV.route && MV.route.name !== 'agent' && !document.querySelector('.modal-back');
@@ -321,7 +323,7 @@
       } catch (e) { /* 무시 */ }
     }
     if (fab.hidden !== !show) fab.hidden = !show;
-    padFab(show);
+    padFab(fabRoute());
     fab.classList.toggle('ag-busy', !!R.active);
     fab.title = R.active ? 'AI 비서가 답하는 중 — 눌러서 보기' : 'AI 비서에게 묻기';
     if (show) placeSoon();
@@ -378,7 +380,7 @@
     if (want !== on) b.classList.toggle('ag-fab-pad', want);
   }
   function placeFab() {
-    padFab(!!fab && !fab.hidden && fab.isConnected);
+    padFab(!!fab && fab.isConnected && fabRoute());
     if (!fab || fab.hidden || !fab.isConnected) return;
     // 움직이는 중(transition)에는 위치를 잴 수 없으니 잠깐 끄고 재요
     const from = fab.style.bottom;
