@@ -1401,7 +1401,7 @@
         .forEach(({ f, i, r }) => {
           const w = Math.max(r.w, minS), h = Math.max(r.h, minS);
           gf.appendChild(svg('rect', { class: 'fp-fxhit', 'data-fx': String(i), x: r1(r.x + r.w / 2 - w / 2), y: r1(r.y + r.h / 2 - h / 2), width: r1(w), height: r1(h), rx: 3, fill: 'transparent' },
-            svg('title', String(f.name || '설비 자리') + (f.note ? ' — ' + String(f.note) : '') + ' (누르면 설명)')));
+            svg('title', String(f.name || '설비 자리') + (f.note ? ' — ' + String(f.note) : ''))));
         });
       root.appendChild(gf);
     }

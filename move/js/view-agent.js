@@ -494,9 +494,30 @@
     if (want) want = document.documentElement.scrollHeight - (on ? FAB_PAD : 0) > window.innerHeight + 2;
     if (want !== on) b.classList.toggle('ag-fab-pad', want);
   }
+  /* 페이지가 아니라 화면 안의 목록이 따로 스크롤되면(예: 태블릿·데스크톱 체크리스트) 그 목록 끝에도 빈 자리를 둬서
+     마지막 줄이 🤖 아래에 갇히지 않게. 목록에 이미 ::after 가 있으면 건드리지 않음 */
+  function padInner() {
+    const view = document.getElementById('view');
+    let target = null;
+    if (fab && !fab.hidden && fab.isConnected && view) {
+      const r = fab.getBoundingClientRect();
+      let e = null;
+      fab.style.pointerEvents = 'none';
+      try { e = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); } catch (x) { e = null; } finally { fab.style.pointerEvents = ''; }
+      for (let n = e; n && n !== view && view.contains(n); n = n.parentElement) {
+        const tagged = n.classList.contains('ag-fab-padin');
+        if (!tagged && !scrollable(n)) continue;
+        const t = n.getBoundingClientRect();
+        if (r.top < t.bottom && r.bottom > t.bottom - 140 && (tagged || getComputedStyle(n, '::after').content === 'none')) target = n;
+        break;
+      }
+    }
+    MV.$$('.ag-fab-padin').forEach((n) => { if (n !== target) n.classList.remove('ag-fab-padin'); });
+    if (target && !target.classList.contains('ag-fab-padin')) target.classList.add('ag-fab-padin');
+  }
   function placeFab() {
     padFab(!!fab && fab.isConnected && fabRoute());
-    if (!fab || fab.hidden || !fab.isConnected) return;
+    if (!fab || fab.hidden || !fab.isConnected) { padInner(); return; }
     // 움직이는 중(transition)에는 위치를 잴 수 없으니 잠깐 끄고 재요
     const from = fab.style.bottom;
     fab.style.transition = 'none';
@@ -509,6 +530,7 @@
       fab.style.bottom = b + 'px';
     }
     const to = fab.style.bottom;
+    padInner();
     if (from !== to) { fab.style.bottom = from; void fab.offsetWidth; }
     fab.style.transition = '';
     if (from !== to) fab.style.bottom = to;
@@ -2649,6 +2671,7 @@ body:has(.ag-composer) .toast-wrap { bottom: calc(var(--bottom-h) + 104px + env(
 .ag-can-i { flex: none; width: 1.6em; text-align: center; }
 .ag-fab { position: fixed; right: 22px; bottom: calc(var(--bottom-h) + 22px + env(safe-area-inset-bottom)); z-index: 45; width: 56px; height: 56px; border-radius: 50%; border: 0; padding: 0; display: grid; place-items: center; background: var(--brand); color: var(--on-brand); font-size: 1.6rem; line-height: 1; box-shadow: var(--shadow-lg); cursor: pointer; transition: transform .12s, background .12s, bottom .18s ease-out; -webkit-tap-highlight-color: transparent; }
 body.ag-fab-pad #view::after { content: ''; display: block; height: 76px; }
+.ag-fab-padin::after { content: ''; display: block; height: 68px; pointer-events: none; }
 .ag-fab:hover { background: var(--brand-2); transform: translateY(-1px); }
 .ag-fab:focus-visible { outline: 3px solid color-mix(in srgb, var(--brand) 55%, transparent); outline-offset: 3px; }
 .ag-fab-dot { position: absolute; top: 3px; right: 3px; width: 13px; height: 13px; border-radius: 50%; background: var(--good); border: 2px solid var(--bg-2); display: none; }
