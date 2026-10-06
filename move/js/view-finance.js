@@ -2296,7 +2296,7 @@ div.fn-alert { cursor: default; }
     }
     return el('div', { class: 'callout warn fn-before fn-anchor', id: 'fn-before' },
       el('p', { class: 'mb-0' }, el('b', '⏰ 이사 전에 먼저 나가는 돈 ' + krw(B.unpaid)), ' — ' + what + '.'),
-      el('p', { class: 'mb-0 mt-8 small' }, (B.ids.indexOf('lg') >= 0 ? '에어컨은 이사 전에 새 집에 설치해서, ' : '') + D.fmt(c.move) + '에 A의 돈이 들어오기 전에 지금 통장에서 나가요. 결제하는 날까지 통장에 ' + krw(B.unpaid) + ' 이상 남겨 두세요. ' +
+      el('p', { class: 'mb-0 mt-8 small' }, (B.ids.indexOf('lg') >= 0 ? '에어컨은 이사 전에 새 집에 설치해서, ' : '') + D.fmt(c.move) + '에 A의 돈이 들어오기 전에 지금 통장에서 나가요. 결제하는 날까지 통장에 ' + krw(B.unpaid) + ' 이상 남겨 두세요. 이사업체 계약금(보통 총액의 약 10%)과 대형폐기물 스티커도 이사 전에 지금 통장에서 나가니 함께 챙겨 두세요(그 돈은 꼭 드는 이사 비용 안에 들어 있어요). ' +
         '위 "꼭 드는 이사 비용"에 이미 들어 있어서 따로 더하지 않아요. 결제일을 넣으면 그 날짜로 다시 판단해요 (이사 뒤로 미루면 이 안내에서 빠져요).'));
   }
 

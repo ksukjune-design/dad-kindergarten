@@ -818,7 +818,7 @@
     const fridges = cnt(inp.fridgeCount, autoFridges);
     const maxFw = Math.max(0, ...bigFridges.map((it) => num(it.w, 0)));
     if (fridges > 0) add('fridge', '대형 냉장고 ' + fridges + '대', fridges * c.fridge_large, '폭 ' + c.fridge_large_w + 'cm 이상 · ' + fridges + '대 × ' + won(c.fridge_large) +
-      ' · 현관문·엘리베이터 문이 ' + (maxFw ? r1(maxFw) + 'cm(냉장고 폭)' : '냉장고') + '보다 좁으면 문짝 분리 (시세 ' + won(COEF_MAP.fridge_large.lo) + '~' + won(COEF_MAP.fridge_large.hi) + ', 넓으면 0원)', 'special');
+      ' · 현관문·엘리베이터 문 유효 폭이 ' + (maxFw ? '약 ' + Math.ceil(maxFw + 0.6) + 'cm(냉장고 폭 ' + r1(maxFw) + 'cm + 여유, 넉넉히 95cm)' : '냉장고 폭보다') + '보다 좁으면 문짝 분리 (시세 ' + won(COEF_MAP.fridge_large.lo) + '~' + won(COEF_MAP.fridge_large.hi) + ', 넓으면 0원)', 'special');
     const autoStack = (mover.some(isWasher) && mover.some(isDryer)) ? 1 : 0;
     const stack = cnt(inp.stackCount, autoStack);
     if (stack > 0) add('stack', '세탁기·건조기 직렬 해체·설치', stack * c.stack, stack + '세트 × ' + won(c.stack), 'special');
@@ -3227,7 +3227,7 @@
     if (m === '삼성' && isAcKind(kind)) return '이사 전(' + mdTxt + ' 전)에 새 집에 설치 · 지금 예약 (1588-3366) · 운반 포함 여부 확인 · 새 집 집주인·현 거주자 동의 필요';
     if (m === '삼성') return '삼성케어플러스(1588-4190)가 철거·설치 · 요금·운반 포함 여부 확인';
     if (m === 'LG') return 'LG 베스트케어(1544-7777)가 철거·운송·설치' + (isAcKind(kind) ? ' · 배관 연장·앵글은 따로' : '');
-    if (kind === 'fridge') return mdTxt + ' 이삿짐센터가 세워서 운반' + (w >= 85 ? ' · 폭 ' + r1(w) + 'cm — 현관문·엘리베이터 문이 이보다 좁으면 문짝 분리' : '') + ' · 세워 옮겼으면 약 5분 뒤 전원 (눕혔으면 2시간)';
+    if (kind === 'fridge') return mdTxt + ' 이삿짐센터가 세워서 운반' + (w >= 85 ? ' · 폭 ' + r1(w) + 'cm — 현관문·엘리베이터 문 유효 폭이 약 ' + Math.ceil(w + 0.6) + 'cm(넉넉히 95cm)보다 좁으면 문짝 분리' : '') + ' · 세워 옮겼으면 약 5분 뒤 전원 (눕혔으면 2시간)';
     if (kind === 'dryer') return mdTxt + ' 이삿짐센터가 세워서 운반 (눕히지 않기) · 물통·배수호스 물 빼기';
     if (kind === 'washer') return mdTxt + ' 이삿짐센터가 운반 · 호스 물 빼기 (드럼이면 운송볼트)';
     if (kind === 'ac_window') return '직접 떼서 ' + mdTxt + ' 이삿짐센터가 운반';
