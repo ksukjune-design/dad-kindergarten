@@ -550,7 +550,7 @@
     f.name = el('input', { class: 'input', value: draft.name, placeholder: '예: 양문형 냉장고' });
     f.cat = el('select', { class: 'select' }, V.CATS.map((c) => el('option', { value: c.id, selected: c.id === draft.cat }, c.icon + ' ' + c.label)));
     f.fate = el('select', { class: 'select' }, V.FATES.map((c) => el('option', { value: c.id, selected: c.id === draft.fate }, c.label)));
-    f.qty = el('input', { class: 'input num', type: 'number', min: '0', step: '1', value: draft.qty });
+    f.qty = el('input', { class: 'input num', type: 'number', min: '0', max: '999', step: '1', value: draft.qty });
     f.w = el('input', { class: 'input num', type: 'number', min: '0', step: '1', value: draft.w });
     f.d = el('input', { class: 'input num', type: 'number', min: '0', step: '1', value: draft.d });
     f.h = el('input', { class: 'input num', type: 'number', min: '0', step: '1', value: draft.h });
@@ -588,7 +588,7 @@
     const read = () => ({
       name: f.name.value.trim() || '이름 없는 짐',
       cat: f.cat.value, fate: f.fate.value,
-      qty: Math.max(0, parseInt(f.qty.value, 10) || 0),
+      qty: MV.clamp(parseInt(f.qty.value, 10) || 0, 0, 999),
       w: Math.max(0, +f.w.value || 0), d: Math.max(0, +f.d.value || 0), h: Math.max(0, +f.h.value || 0),
       room: f.room.value.trim(), roomNew: f.roomNew.value.trim(), url: f.url.value.trim(),
       lg: f.lg.checked, ac: f.cat.value === 'aircon' ? (f.ac.value || null) : null,
