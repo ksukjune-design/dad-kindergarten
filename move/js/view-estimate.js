@@ -61,7 +61,7 @@
       if (m && m[1].length >= Math.floor(n / 2)) cut = m[1];
       else cut = cut.replace(/[A-Za-z0-9.]+$/, '') || cut;
     }
-    return cut.replace(/[\s·,;:\/(\[\-–—]+$/, '') + '…';
+    return cut.replace(/[\s·,;:\/(\[\-–—.]+$/, '') + '…';
   };
   const normDate = (s) => (D.valid(s) ? D.str(D.parse(s)) : null);
   const median = (arr) => {
@@ -668,7 +668,7 @@
 
     /* 부가세 기준: 리서치 모델의 기준가는 ‘부가세 별도’ 시세예요 (별도 견적이면 ×1.1).
        보정(방문견적 중앙값)은 언제나 부가세 별도 금액에 곱하고, 부가세는 그 위에 붙여요.
-       그래서 ‘부가세 더하기’를 켜고 꺼도 보정 비율은 그대로이고, 업체 견적도 같은 기준으로 바꿔 비교해요. */
+       그래서 ‘부가세 포함으로 보기’를 켜고 꺼도 보정 비율은 그대로이고, 업체 견적도 같은 기준으로 바꿔 비교해요. */
     const subtotal = sum(lines, (l) => l.typical);
     const vatRate = c.vat_pct / 100;
     const vatMul = inp.vat ? 1 + vatRate : 1;
@@ -692,7 +692,7 @@
     const typical = Math.round(total);
     const low = Math.round(total * c.range_low);
     const high = Math.round(total * c.range_high);
-    /* 실제로 낼 돈(부가세 포함) — ‘부가세 더하기’가 꺼져 있어도 여기엔 부가세를 더해요.
+    /* 실제로 낼 돈(부가세 포함) — ‘부가세 포함으로 보기’가 꺼져 있어도 여기엔 부가세를 더해요 (머리말·히어로·자금은 이 값).
        LG 요금은 소비자가(부가세 포함)라, 이삿짐센터와 LG를 더하거나 비교할 땐 이 값끼리 써요 */
     const payMul = inp.vat ? 1 : 1 + vatRate;
     const pay = { low: Math.round(total * c.range_low * payMul), typical: Math.round(total * payMul), high: Math.round(total * c.range_high * payMul) };
@@ -761,7 +761,7 @@
   }
 
   /* 업체 견적 → 모델과 같은 조건·같은 부가세 기준으로 환산 (빠진 항목은 모델 금액을 더함)
-     ex: 부가세 별도 기준 / inc: 부가세 포함 기준 / amount: 지금 모델 기준(‘부가세 더하기’ 켜면 inc, 끄면 ex) */
+     ex: 부가세 별도 기준 / inc: 부가세 포함 기준 / amount: 지금 모델 기준(‘부가세 포함으로 보기’ 켜면 inc, 끄면 ex) */
   function normQuote(q, raw) {
     const amt = num(q && q.amount, 0);
     if (!(amt > 0)) return null;
@@ -1129,6 +1129,24 @@
 .es-caveats ul { margin: 0; padding-left: 1.2em; font-size: .88rem; }
 .es-caveats li + li { margin-top: 5px; }
 .es-err { font-size: .85rem; }
+/* 부가세 표시 · LG 불가 경고 · 에어컨 대당 비교 */
+.es-vat { display: inline-flex; align-items: center; padding: 0 7px; border-radius: 999px; background: var(--bg-3); color: var(--ink-2); font-size: .72rem; font-weight: 750; line-height: 1.7; white-space: nowrap; vertical-align: middle; letter-spacing: 0; }
+.es-exline { font-size: .82rem; color: var(--ink-3); margin-top: 2px; line-height: 1.45; }
+.es-lgfix { border: 0; font: inherit; font-size: .76rem; font-weight: 750; cursor: pointer; min-height: 36px; padding: 2px 10px; white-space: normal; text-align: left; line-height: 1.3; max-width: 100%; }
+.es-lgfix:hover { text-decoration: underline; text-underline-offset: 2px; }
+.es-fchip.es-badchip { background: var(--bad-bg); color: var(--bad); border-color: color-mix(in srgb, var(--bad) 35%, var(--line)); }
+.es-fchip.es-badchip b { color: var(--bad); }
+.es-lgblocked { font-size: .86rem; line-height: 1.5; }
+.es-lines tr.es-l-pay td { background: var(--brand-bg); font-weight: 800; }
+.es-lines tfoot td .es-vat { margin-left: 2px; }
+.es-acmp { margin-top: 12px; padding: 10px 12px; border-radius: 12px; background: var(--bg-2); border: 1px solid var(--line); }
+.es-acmp-h { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; font-size: .9rem; }
+.es-acmp-list { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-direction: column; }
+.es-acmp-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; font-size: .86rem; padding: 7px 0; border-top: 1px dashed var(--line); }
+.es-acmp-list li:first-child { border-top: 0; }
+.es-acmp-n { font-weight: 800; display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; min-width: 0; }
+.es-acmp-v { font-variant-numeric: tabular-nums; color: var(--ink-2); white-space: nowrap; }
+@media (max-width: 400px) { .es-tabs { gap: 2px; } .es-tabs button { padding: 6px 7px; } }
 /* 토스트 (core .toast 에 이 모듈이 붙이는 보조 클래스) — 가운데 기준으로 내용 폭만큼, 버튼은 한 줄 */
 .toast.es-toast { width: max-content; max-width: calc(100vw - 32px); box-sizing: border-box; }
 .toast.es-toast > span { min-width: 0; }
@@ -1379,7 +1397,7 @@
     const bar = el('div', { class: 'tabs es-tabs', role: 'tablist', 'aria-label': '짐·견적 화면' },
       TABS.map((t) => el('button', {
         type: 'button', role: 'tab', class: t.id === cur ? 'active' : '', 'aria-selected': String(t.id === cur),
-        'data-tab': t.id,
+        'data-tab': t.id, title: t.label,
         onclick: () => { if (t.id !== cur) goTab(t.id); },
       }, el('span', { class: 'es-ti', 'aria-hidden': 'true' }, t.icon), el('span', { class: 'es-tl' }, t.label), el('span', { class: 'es-ts' }, t.short),
       counts[t.id] ? el('span', { class: 'es-tn' }, String(counts[t.id])) : null)));
@@ -2054,7 +2072,7 @@
     const raw = rawEst();
     return quotesOf(estSt()).map((q) => normQuote(q, raw)).filter(Boolean).map((n) => (basis === 'inc' ? n.inc : n.amount));
   }
-  /* 보정 비율은 부가세 별도 금액끼리 나눠요 (견적 중앙값 ÷ 모델 기준가) — ‘부가세 더하기’를 켜고 꺼도 같은 값 */
+  /* 보정 비율은 부가세 별도 금액끼리 나눠요 (견적 중앙값 ÷ 모델 기준가) — ‘부가세 포함으로 보기’를 켜고 꺼도 같은 값 */
   function calibTarget(raw, est) {
     const nq = quotesOf(est).map((q) => normQuote(q, raw)).filter(Boolean);
     const medEx = median(nq.map((n) => n.ex));
@@ -2891,6 +2909,8 @@
       el('div', { class: 'es-scen-r' }, '범위 ' + won(tot(e, 'low')) + ' ~ ' + won(tot(e, 'high')) + ' · ' + tonsLabel(e.tons) + ' · ' + e.crewLabel),
       sub ? el('div', { class: 'es-scen-r' }, sub) : null);
   }
+  /* LG 표시가 실제로 쓰이는지 (LG 표시 + LG 이전설치 가능) — 견적 계산(viaLg)과 같은 규칙 */
+  const lgOn = (it) => !!it.lg && lgEligible(it);
   function lgTotalsCard() {
     const items = lgCandidates();
     if (!items.length) {
@@ -2901,18 +2921,18 @@
     }
     const s = lgScenarios();
     const cur = s.cur;
-    const nLg = items.filter((it) => it.lg).length;
+    const nLg = items.filter(lgOn).length;
     const isAllMover = nLg === 0;
-    const isAllLg = items.every((it) => it.lg || !lgEligible(it));
+    const isAllLg = items.every((it) => lgOn(it) || !lgEligible(it));
     const diff = tot(cur, 'typical') - tot(s.allMover, 'typical');
     const saveMover = payK(s.allMover, 'typical') - payK(cur, 'typical');
-    const nOther = items.filter((it) => brandOf(it) === 'other').length;
+    const nBlock = items.filter((it) => !lgEligible(it)).length;
     return el('section', { class: 'card', 'aria-label': '세 가지 방법 합계' },
       sectionHead('⚖️', '세 가지 방법 비교', '이삿짐센터 + LG 합계 (기준가 · 부가세 포함)'),
       el('div', { class: 'es-scen' },
         scenCard('🚚 전부 이삿짐센터', s.allMover, isAllMover, '가전도 이삿짐센터가 옮김 (에어컨은 협력 기사)'),
         isAllMover || isAllLg ? scenCard('🔀 지금 선택 (혼합)', cur, false, '아래에서 품목마다 고르면 바뀌어요') : scenCard('🔀 지금 선택 (혼합)', cur, true, 'LG ' + nLg + '개 · 이삿짐센터 ' + (items.length - nLg) + '개'),
-        scenCard('🔌 LG 가능한 가전 전부 LG', s.allLg, isAllLg && !isAllMover, nOther ? '다른 브랜드 ' + nOther + '개와 가구·박스는 이삿짐센터' : '이삿짐센터는 가구·박스만')),
+        scenCard('🔌 LG 가능한 가전 전부 LG', s.allLg, isAllLg && !isAllMover, nBlock ? 'LG 불가 가전 ' + nBlock + '개와 가구·박스는 이삿짐센터' : '이삿짐센터는 가구·박스만')),
       el('p', { class: 'small es-muted mt-8 mb-0' }, '🧾 모두 부가세 포함(실제로 낼 돈) 기준이에요. ' + (cur.vatIncl ? '' : '이삿짐센터 시세는 부가세 별도라 ' + r1(cur.coef.vat_pct) + '%를 더했고, ') + 'LG 요금은 소비자가(부가세 포함)예요.'),
       el('p', { class: 'small mt-12 mb-0' }, nLg
         ? '지금 선택하면 이삿짐센터 비용이 약 ' + won(Math.max(0, saveMover)) + ' 줄고 LG에 약 ' + josa(won(cur.lgCost ? cur.lgCost.typical : 0), '이/가') + ' 들어, 전부 이삿짐센터보다 합계가 ' + (diff >= 0 ? '약 ' + won(diff) + ' 더 들어요.' : '약 ' + won(-diff) + ' 덜 들어요.')
@@ -2927,14 +2947,16 @@
     const inp = R.est.inputs;
     const rows = items.map((it) => {
       const kind = lgKind(it);
-      const flip = (v) => inv.map((x) => (x.id === it.id ? Object.assign({}, x, { lg: v }) : x));
-      const a = compute(st, { inventory: flip(false) });
-      const b = compute(st, { inventory: flip(true) });
+      /* 이삿짐센터가 이 가전을 옮길 때 더 드는 돈 = (이 가전을 이삿짐센터가 옮김) − (이 가전이 없음).
+         LG가 옮기면 이삿짐센터 짐에서 빠지는 것과 같아서, LG 불가 가전도 같은 식으로 실제 몫을 보여 줘요 */
+      const a = compute(st, { inventory: inv.map((x) => (x.id === it.id ? Object.assign({}, x, { lg: false }) : x)) });
+      const b = compute(st, { inventory: inv.filter((x) => x.id !== it.id) });
       const moverDelta = Math.max(0, payK(a, 'typical') - payK(b, 'typical')); // 부가세 포함 (LG 소비자가와 같은 기준)
       const lgc = lgItemCost(it, c, inp);
       const brand = brandOf(it);
       const isWin = kind === 'ac_window';
       const blockLg = !lgEligible(it);
+      const onLg = lgOn(it);
       const furn = FURN_WITH.test(nm(it)) ? (nm(it).match(FURN_WITH) || [])[1] : null;
       const parts = [];
       if (a.counts.acN !== b.counts.acN) parts.push('에어컨 이전설치');
@@ -2942,15 +2964,16 @@
       if (a.tons !== b.tons) parts.push('차량 ' + tonsLabel(b.tons) + '→' + tonsLabel(a.tons));
       if (!parts.length) parts.push('짐량 안에 포함 (차량 등급 변화 없음)');
       const segBtn = (v, label) => el('button', {
-        type: 'button', class: 'es-seg-b' + (!!it.lg === v ? ' is-on' : ''), 'aria-pressed': String(!!it.lg === v), 'data-fk': 'lg-' + it.id + '-' + (v ? 'lg' : 'mv'),
-        disabled: v && blockLg && !it.lg ? true : null,
+        type: 'button', class: 'es-seg-b' + (onLg === v ? ' is-on' : ''), 'aria-pressed': String(onLg === v), 'data-fk': 'lg-' + it.id + '-' + (v ? 'lg' : 'mv'),
+        disabled: v && blockLg ? true : null,
         title: v && blockLg ? (isWin ? '창문형 에어컨은 직접 떼고 다는 제품이라 LG 이전설치가 필요 없어요' : '다른 브랜드로 보여요 — LG 베스트케어 이전설치는 LG 제품만 돼요. LG 제품이면 이름을 고치세요') : null,
         onclick: () => {
           if (v && blockLg) { toast(isWin ? '창문형 에어컨은 LG 이전설치가 필요 없어요.' : '다른 브랜드 제품은 LG 이전설치를 맡길 수 없어요. LG 제품이면 이름을 고쳐 주세요.'); return; }
+          // LG 불가인데 남아 있던 LG 표시도 ‘이삿짐센터’를 누르면 꺼요
           if (!!it.lg !== v) MV.inv.update(it.id, { lg: v }, (v ? 'LG 서비스로 옮김: ' : '이삿짐센터로 옮김: ') + nm(it));
         },
       }, label);
-      return el('div', { class: 'es-lgi' + (it.lg ? ' is-lg' : '') },
+      return el('div', { class: 'es-lgi' + (onLg ? ' is-lg' : '') },
         el('div', { class: 'es-ico', 'aria-hidden': 'true' }, MV.inv.cat(it.cat).icon),
         el('div',
           el('div', { class: 'es-lgi-name' }, el('button', { type: 'button', class: 'es-namebtn es-lgi-nb', 'data-fk': 'lgname-' + it.id, title: '눌러서 이름·브랜드 고치기', onclick: () => MV.inv.editor(it.id) }, nm(it) || '이름 없는 가전'),
@@ -2958,17 +2981,18 @@
             brand === 'lg' ? el('span', { class: 'chip good' }, 'LG 제품') : brand === 'other' ? el('span', { class: 'chip bad', title: 'LG 이전설치는 LG 제품만 가능' }, '다른 브랜드 — LG 불가') : el('span', { class: 'chip warn', title: '이름에 브랜드(예: LG 디오스)를 적거나 제품 링크를 넣어 두세요' }, '브랜드 확인 필요'),
             it.assumed ? el('span', { class: 'chip warn' }, '규격 추정') : null,
             it.fate !== 'move' ? el('span', { class: 'chip', title: '처리가 ‘미정’이지만 ‘미정 짐도 가져가는 것으로 계산’이 켜져 있어 견적에 넣었어요' }, '처리 미정') : null,
-            furn ? el('span', { class: 'chip warn', title: 'LG는 가구를 옮기지 않아요. 짐 목록에서 ‘' + furn + '’을 따로 나눠 적으면 이삿짐센터 짐량에 들어가요' }, '가구(' + furn + ') 포함 — 따로 나누세요') : null),
+            furn ? el('span', { class: 'chip warn', title: 'LG는 가구를 옮기지 않아요. 짐 목록에서 ‘' + furn + '’을 따로 나눠 적으면 이삿짐센터 짐량에 들어가요' }, '가구(' + furn + ') 포함 — 따로 나누세요') : null,
+            it.lg && blockLg ? lgFixChip(it) : null),
           el('div', { class: 'es-lgi-meta' }, LG_KIND[kind].label + ' · ' + dimTxt(it) + 'cm · ' + roomTxt(it))),
         el('div', { class: 'es-seg', role: 'group', 'aria-label': nm(it) + ' 누가 옮길지' }, segBtn(true, '🔌 LG 서비스'), segBtn(false, '🚚 이삿짐센터')),
         el('div', { class: 'es-lgi-costs' },
-          el('div', { class: 'es-lgi-cost' + (it.lg ? ' is-on' : '') }, el('small', 'LG 서비스'),
-            el('b', isWin ? '0원' : '약 ' + won(lgc.typical)),
-            el('small', isWin ? '직접 떼고 달기' : won(lgc.low) + ' ~ ' + won(lgc.high) + (lgc.pipe ? ' · 배관 ' + r1(inp.acPipeM) + 'm 포함' : '') + ' · 운송비 ' + josa(won(c.lg_transport), '은/는') + ' 1건당 합계에 한 번')),
-          el('div', { class: 'es-lgi-cost' + (!it.lg ? ' is-on' : '') }, el('small', '이삿짐센터 (부가세 포함)'),
+          el('div', { class: 'es-lgi-cost' + (onLg ? ' is-on' : '') }, el('small', 'LG 서비스'),
+            isWin ? el('b', '0원') : blockLg ? el('b', 'LG 불가') : el('b', '약 ' + won(lgc.typical)),
+            el('small', isWin ? '직접 떼고 달기' : blockLg ? 'LG 제품만 맡길 수 있어요' : won(lgc.low) + ' ~ ' + won(lgc.high) + (lgc.pipe ? ' · 배관 ' + r1(inp.acPipeM) + 'm 포함' : '') + ' · 운송비 ' + josa(won(c.lg_transport), '은/는') + ' 1건당 합계에 한 번')),
+          el('div', { class: 'es-lgi-cost' + (!onLg ? ' is-on' : '') }, el('small', '이삿짐센터 (부가세 포함)'),
             el('b', moverDelta ? '+' + won(moverDelta) : '추가 0원'),
             el('small', parts.join(' · ')))),
-        brand === 'other' && !isWin ? el('div', { class: 'es-lgi-does es-lgi-bad' }, '⛔ 이름이나 링크에 다른 브랜드가 있어 LG 서비스를 고를 수 없어요. LG 제품이라면 이름을 눌러 고치세요.') : null,
+        brand === 'other' && !isWin ? el('div', { class: 'es-lgi-does es-lgi-bad' }, '⛔ 이름이나 링크에 다른 브랜드가 있어 LG 서비스를 고를 수 없어요' + (it.lg ? ' — 견적은 이삿짐센터가 옮기는 것으로 계산했어요' : '') + '. LG 제품이라면 이름을 눌러 고치세요.') : null,
         el('div', { class: 'es-lgi-does' }, '🔧 ' + LG_DOES[kind]));
     });
     return el('section', { class: 'card', 'aria-label': '가전별 선택' },
@@ -2976,22 +3000,55 @@
       el('div', { class: 'es-lgitems' }, rows),
       R.est.lgCost && R.est.lgCost.discount.typical > 0 ? el('p', { class: 'small es-muted mt-8 mb-0' }, '🔖 LG 2개 이상 할인 ' + R.est.lgCost.discount.pct + '% (에어컨 제외): 약 −' + won(R.est.lgCost.discount.typical) + ' 합계에 반영') : null);
   }
+
+  /* LG 판단 기준 — 가전 가이드·체크리스트와 같아요: LG ‘냉장고 + 건조기’ 견적(운송비 포함)이 약 30만원 이하 + 일정 + 집주인 동의 → LG.
+     에어컨·TV는 이 기준에 넣지 않고, 에어컨은 대당 LG 요금과 이삿짐센터(협력 기사) 요금을 따로 비교해요 */
+  const LG_RULE_MAX = 300000;
+  const LG_CORE = ['fridge', 'dryer', 'washer'];
+  function lgCoreCost(lgc) {
+    if (!lgc || !Array.isArray(lgc.rows)) return null;
+    const rows = lgc.rows.filter((r) => LG_CORE.includes(r.kind));
+    if (!rows.length) return null;
+    const dp = ((lgc.discount && lgc.discount.pct) || 0) / 100; // 2개 이상 할인은 에어컨을 뺀 가전에만 붙어요
+    const t = (k) => Math.round(sum(rows, (r) => r[k]) * (1 - dp) + ((lgc.transport && lgc.transport[k]) || 0));
+    return { low: t('low'), typical: t('typical'), high: t('high'), kinds: Array.from(new Set(rows.map((r) => r.kind))) };
+  }
+  const coreLabel = (kinds) => {
+    const k = kinds || [];
+    const parts = ['fridge', 'dryer', 'washer'].filter((x) => k.includes(x)).map((x) => LG_KIND[x].label);
+    return parts.length >= 2 ? parts.join(' + ') : '냉장고 + 건조기';
+  };
+  /* 에어컨 대당 비교 (부가세 포함, 배관 같은 길이): LG 이전설치+배관 · 이삿짐센터 협력 기사 설치+가스+배관 (출장비는 방문 1회 따로) */
+  function acCompare(items, est) {
+    const c = est.coef;
+    const inp = est.inputs;
+    const pipeM = Math.max(0, num(inp.acPipeM, 0));
+    return items.filter((it) => isAircon(it) && lgEligible(it)).map((it) => {
+      const kind = lgKind(it);
+      const t = kind === 'ac_wall' ? 'wall' : kind === 'ac_2in1' ? '2in1' : 'stand';
+      const lgU = c['lg_ac_' + t] + pipeM * c.lg_ac_pipe_per_m;
+      const mvU = (c['ac_' + t] + (inp.acGas ? c['ac_gas_' + t] : 0) + pipeM * c.ac_pipe_per_m) * est.vatMul;
+      return { it, t, q: qtyOf(it), lgU: Math.round(lgU), mvU: Math.round(mvU), on: lgOn(it) };
+    });
+  }
   function lgRecoCard() {
     const items = lgCandidates();
     if (!items.length) return null;
     const est = R.est;
     const lgc = est.lgCost;
     const checks = Object.assign({ schedule: false, landlord: false, brand: false }, estSt().lgChecks || {});
-    const nLg = items.filter((it) => it.lg).length;
-    const total = lgc ? lgc.typical : 0;
-    const under = total > 0 && total <= 300000;
-    const otherBrand = items.filter((it) => it.lg && brandOf(it) === 'other');
+    const nLg = items.filter(lgOn).length;
+    const core = nLg ? lgCoreCost(lgc) : null;
+    const coreUnder = !!core && core.typical <= LG_RULE_MAX;
+    const cl = coreLabel(core && core.kinds);
+    const nonCore = lgc ? Math.max(0, lgc.typical - (core ? core.typical : 0)) : 0;
+    const blocked = items.filter((it) => it.lg && !lgEligible(it));
     const cbx = (key, label) => {
       const x = el('input', { type: 'checkbox', checked: !!checks[key], 'data-fk': 'lgchk-' + key });
       x.addEventListener('change', () => MV.store.update((st) => { const e = ensureEst(st); e.lgChecks = Object.assign({}, e.lgChecks, { [key]: x.checked }); }));
       return el('label', { class: 'check' }, x, el('span', label));
     };
-    const condsOk = under && checks.schedule && checks.landlord && checks.brand && !otherBrand.length;
+    const condsOk = nLg > 0 && (!core || coreUnder) && checks.schedule && checks.landlord && checks.brand && !blocked.length;
     let savingTxt = '리서치: 에어컨을 뺀 가전만 LG로 먼저 옮기면 차량 등급이 잘 안 바뀌어 이사비는 0~20만원 정도만 줄어요. ';
     if (nLg) {
       const st = stGet();
@@ -3004,30 +3061,42 @@
         '리서치는 에어컨을 뺀 가전만 따지면 0~20만원 정도라고 봤어요. ';
     }
     let verdict;
-    if (!nLg) verdict = el('p', '지금은 모두 이삿짐센터로 계산 중이에요. 냉장고·건조기·에어컨처럼 파손이 걱정되는 가전부터 LG 견적(1544-7777)을 받아 보세요.');
-    else if (otherBrand.length) {
+    if (blocked.length) {
+      const last = nm(blocked[blocked.length - 1]);
       verdict = el('div',
-        el('p', { style: { color: 'var(--bad)' } }, el('b', '⚠ ' + otherBrand.map(nm).join(', ')), josa(nm(otherBrand[otherBrand.length - 1]), '은/는').slice(nm(otherBrand[otherBrand.length - 1]).length) + ' 다른 브랜드로 보여요. LG 이전설치는 LG 제품만 돼요 — 이삿짐센터로 바꾸세요.'),
-        el('div', { class: 'row es-reco-fix' }, el('button', { type: 'button', class: 'btn btn-sm btn-primary', onclick: () => {
-          const ids = new Set(otherBrand.map((it) => it.id));
-          MV.store.update((st) => { (st.inventory || []).forEach((x) => { if (x && ids.has(x.id)) x.lg = false; }); }, { log: '다른 브랜드 가전을 이삿짐센터로: ' + otherBrand.map(nm).join(', ') });
-          toast(otherBrand.length + '개를 이삿짐센터로 바꿨어요.');
-        } }, '🚚 ' + otherBrand.length + '개 이삿짐센터로 바꾸기')));
-    }
+        el('p', { style: { color: 'var(--bad)' } }, el('b', '⚠ ' + blocked.map(nm).join(', ')), josa(last, '은/는').slice(last.length) + ' ' + (blocked.every((it) => lgKind(it) === 'ac_window') ? '창문형 에어컨이라 LG 이전설치가 필요 없어요' : blocked.some((it) => lgKind(it) === 'ac_window') ? '다른 브랜드이거나 창문형이라 LG 이전설치를 맡길 수 없어요' : '다른 브랜드로 보여 LG 이전설치를 맡길 수 없어요') + '. 지금은 이삿짐센터가 옮기는 것으로 계산했어요 — 짐 목록의 LG 표시도 이삿짐센터로 바꾸세요.'),
+        el('div', { class: 'row es-reco-fix' }, el('button', { type: 'button', class: 'btn btn-sm btn-primary', 'data-fk': 'lgfix-reco', onclick: () => switchToMover(blocked.map((it) => it.id)) }, '🚚 ' + blocked.length + '개 이삿짐센터로 바꾸기')));
+    } else if (!nLg) verdict = el('p', '지금은 모두 이삿짐센터로 계산 중이에요. 냉장고·건조기부터 LG 견적(1544-7777)을 받아 30만원 기준과 비교해 보세요. 에어컨은 아래에서 대당 요금을 따로 비교해요.');
     else if (condsOk) verdict = el('p', el('b', '✅ LG 이용을 권해요.'), ' 조건을 모두 채웠어요. 이삿짐센터 계약서에 ‘LG가 옮기는 가전(목록)은 제외’ 특약을 넣으세요.');
-    else if (!under) verdict = el('p', el('b', 'LG 합계가 약 ' + josa(won(total), '으로/로') + ' 30만원을 넘어요.'), ' 이삿짐센터 일괄도 같이 비교해 보세요 — 에어컨만 LG처럼 섞는 것도 방법이에요.');
+    else if (core && !coreUnder) verdict = el('p', el('b', 'LG ' + cl + ' 견적이 약 ' + josa(won(core.typical), '으로/로') + ' 30만원을 넘어요.'), ' 이삿짐센터 일괄(가전 특약)도 같이 비교해 보세요. 에어컨은 아래에서 따로 정해요.');
     else verdict = el('p', el('b', '조건 확인 중이에요.'), ' 아래 항목을 모두 확인하면 LG를 쓰고, 하나라도 안 되면 이삿짐센터에 일괄로 맡기세요.');
+    const acs = acCompare(items, est);
+    const acBlock = acs.length ? el('div', { class: 'es-acmp' },
+      el('div', { class: 'es-acmp-h' }, el('b', '❄️ 에어컨은 따로 비교해요'), el('span', { class: 'small es-muted' }, ' 30만원 기준에 넣지 않아요 · 대당 요금, 부가세 포함, 배관 ' + r1(Math.max(0, num(est.inputs.acPipeM, 0))) + 'm 포함')),
+      el('ul', { class: 'es-acmp-list' }, acs.map((r) => {
+        const d = r.lgU - r.mvU;
+        return el('li',
+          el('span', { class: 'es-acmp-n' }, nm(r.it) + (r.q > 1 ? ' (' + r.q + '대)' : ''), r.on ? el('span', { class: 'chip kid' }, '지금 LG') : el('span', { class: 'chip' }, '지금 이삿짐센터')),
+          el('span', { class: 'es-acmp-v' }, '🔌 LG 약 ' + won(r.lgU)),
+          el('span', { class: 'es-acmp-v' }, '🚚 이삿짐센터 약 ' + won(r.mvU)),
+          el('span', { class: 'chip ' + (Math.abs(d) < 10000 ? '' : 'good') }, Math.abs(d) < 10000 ? '비슷해요' : (d > 0 ? '이삿짐센터가 대당 약 ' + won(d) + ' 저렴' : 'LG가 대당 약 ' + won(-d) + ' 저렴')));
+      })),
+      el('p', { class: 'small es-muted mb-0' }, '이삿짐센터 쪽은 협력 기사 공시가(설치' + (est.inputs.acGas ? '+가스' : '') + '+배관)이고, 출장비(방문 1회) ' + josa(won(est.coef.ac_trip), '이/가') + ' 따로 붙어요. LG는 냉매 회수부터 재설치까지 책임이 한 곳이에요. 어느 쪽이든 에어컨은 한 곳으로 책임을 모으고, 늦어도 10/20(화)까지 정하세요.')) : null;
     return el('section', { class: 'card es-reco tint-kid', 'aria-label': '추천' },
       sectionHead('🧭', '어떻게 할까요?'),
       verdict,
       el('p', { class: 'small' }, savingTxt, 'LG 사전 이전은 ‘비용 절감’보다 ‘가전 파손 위험 분리’ 목적으로 보세요 (지난번 세탁기 고장 경험). 정수기형 냉장고·히트펌프 건조기·에어컨·벽걸이 TV는 전문기사에게 맡길 가치가 커요.'),
       el('ul', { class: 'es-conds' },
-        el('li', { class: !nLg ? 'is-no' : under ? 'is-ok' : 'is-bad' }, el('span', { class: 'es-cmark', 'aria-hidden': 'true' }, !nLg ? '·' : under ? '✓' : '✕'),
-          el('span', 'LG 총견적 약 30만원 이하 — 지금 ' + (nLg && lgc ? '약 ' + won(total) + ' (' + won(lgc.low) + '~' + won(lgc.high) + ')' : 'LG 선택 없음'))),
+        el('li', { class: !core ? 'is-no' : coreUnder ? 'is-ok' : 'is-bad' }, el('span', { class: 'es-cmark', 'aria-hidden': 'true' }, !core ? '·' : coreUnder ? '✓' : '✕'),
+          el('span', 'LG ' + cl + ' 견적 약 30만원 이하 (운송비 포함) — 지금 ' + (core ? '약 ' + won(core.typical) + ' (' + won(core.low) + '~' + won(core.high) + ')' : 'LG로 고른 냉장고·건조기 없음'))),
+        nonCore > 0 ? el('li', { class: 'is-no' }, el('span', { class: 'es-cmark', 'aria-hidden': 'true' }, '·'),
+          el('span', '에어컨·TV는 이 기준에 넣지 않아요 — LG로 고른 에어컨·TV 약 ' + won(nonCore) + ' (아래에서 따로 비교)')) : null,
         el('li', { class: 'es-cond-cb' }, cbx('schedule', '11/2 또는 11/3에 LG 일정이 된다 (11/4 설치 대안 포함)')),
         el('li', { class: 'es-cond-cb' }, cbx('landlord', '집주인(C) 동의를 문자로 받았다 (11/2 선반입 시)')),
-        el('li', { class: 'es-cond-cb' + (otherBrand.length ? ' is-bad' : '') }, cbx('brand', '옮길 가전이 모두 LG 제품인지 명판으로 확인했다'))),
-      el('p', { class: 'small es-muted mt-8 mb-0' }, '판단 기준은 리서치 권고 그대로예요: LG 총견적 ≈ 30만원 이하 + 일정 가능 + 집주인 동의 → LG, 아니면 이삿짐센터 일괄.'));
+        el('li', { class: 'es-cond-cb' + (blocked.length ? ' is-bad' : '') }, cbx('brand', '옮길 가전이 모두 LG 제품인지 명판으로 확인했다'))),
+      acBlock,
+      el('p', { class: 'small es-muted mt-8 mb-0' }, '판단 기준은 가전 가이드와 같아요: LG 냉장고 + 건조기 견적(운송비 포함) 약 30만원 이하 + 11/2(또는 11/3 오후) 일정 + 집주인(C) 동의 → LG, 하나라도 안 되면 이삿짐센터 일괄(가전 특약). 에어컨은 대당 요금과 책임을 따로 따져 한 곳에 맡겨요. ',
+        el('a', { href: '#/guide/appliance/lg' }, '가전이사 가이드 →')));
   }
   function lgCaveatsCard() {
     return el('section', { class: 'card tint-warn es-caveats', 'aria-label': '11월 2일 선이동 주의' },
