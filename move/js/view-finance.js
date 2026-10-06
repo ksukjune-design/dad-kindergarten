@@ -1340,6 +1340,69 @@ div.fn-alert { cursor: default; }
 .fn-memo-total { max-width: 240px; margin: 0; }
 .fn-memo-row { align-items: flex-end; }
 
+/* --- 예산 묶음 (꼭 드는 이사 비용 / 새로 사는 살림 / 선택·나중에) --- */
+.fn-sw-essential { background: var(--brand); }
+.fn-sw-purchase { background: var(--kid); }
+.fn-sw-optional { background: var(--think); }
+.fn-sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; flex: none; }
+.fn-mark-key { width: 3px !important; height: 14px !important; border-radius: 1px !important; background: var(--ink); }
+.fn-hl { margin-top: 4px; padding: 12px 14px; border-radius: var(--radius-sm); border: 1px solid var(--line); }
+.fn-hl.is-good { background: var(--good-bg); border-color: color-mix(in srgb, var(--good) 35%, var(--line)); }
+.fn-hl.is-bad { background: var(--bad-bg); border-color: color-mix(in srgb, var(--bad) 35%, var(--line)); }
+.fn-hl-k { font-weight: 800; font-size: 1rem; margin-bottom: 8px; }
+.fn-hl-eq { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1.1fr); gap: 6px 10px; align-items: end; }
+.fn-hl-op { font-weight: 800; color: var(--ink-3); font-size: 1.05rem; padding-bottom: 4px; text-align: center; }
+.fn-hl-cell { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.fn-hl-cell small { font-size: .76rem; color: var(--ink-2); font-weight: 700; line-height: 1.35; }
+.fn-hl-cell b { font-size: 1.3rem; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; line-height: 1.25; }
+.fn-hl-res b { font-size: 1.6rem; }
+.fn-hl.is-good .fn-hl-res b, .fn-hl.is-good .fn-hl-res small { color: var(--good); }
+.fn-hl.is-bad .fn-hl-res b, .fn-hl.is-bad .fn-hl-res small { color: var(--bad); }
+.fn-hl-more { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line-2); }
+@media (max-width: 520px) {
+  .fn-hl-eq { grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 4px 10px; }
+  .fn-hl-op { display: none; }
+  .fn-hl-cell { display: contents; }
+  .fn-hl-cell small { font-size: .82rem; }
+  .fn-hl-cell b { text-align: right; font-size: 1.15rem; }
+  .fn-hl-res small, .fn-hl-res b { padding-top: 6px; border-top: 1px solid var(--line-2); }
+  .fn-hl-res b { font-size: 1.45rem; }
+}
+.fn-rent-tip a, .fn-hug-link { white-space: normal; }
+.fn-why-big p + p { margin-top: 6px; }
+.fn-cmp-stack { position: relative; display: flex; }
+.fn-cmp-stack > i { flex: none; border-radius: 0; }
+.fn-cmp-stack > i + i { box-shadow: -2px 0 0 var(--bg-2); }
+.fn-cmp-mark { position: absolute; top: 0; bottom: 0; width: 3px; margin-left: -1px; background: var(--ink); box-shadow: 0 0 0 1px var(--bg-2); }
+.fn-cmp + .fn-legend { margin-top: 8px; font-size: .8rem; color: var(--ink-2); }
+.fn-gcards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+@media (max-width: 860px) { .fn-gcards { grid-template-columns: 1fr; } }
+.fn-gcard { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 10px 12px; border: 1px solid var(--line); border-top: 4px solid var(--line-2); border-radius: var(--radius-sm); background: var(--bg-2); }
+.fn-gcard-essential { border-top-color: var(--brand); }
+.fn-gcard-purchase { border-top-color: var(--kid); }
+.fn-gcard-optional { border-top-color: var(--think); }
+.fn-gcard-h { display: flex; align-items: center; gap: 6px; font-weight: 750; font-size: .9rem; }
+.fn-gcard-v { font-size: 1.3rem; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+.fn-gcard-d { font-size: .8rem; color: var(--ink-2); line-height: 1.5; }
+.fn-gcard-items { font-size: .76rem; color: var(--ink-3); line-height: 1.45; }
+.fn-gcard-go { align-self: flex-start; font-size: .82rem; font-weight: 700; min-height: 36px; display: inline-flex; align-items: center; margin-top: auto; }
+.fn-bgroup { margin-top: 14px; min-width: 0; }
+.fn-bgroup-h { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; padding: 8px 12px; border-radius: var(--radius-sm); background: var(--bg-3); border-left: 4px solid var(--line-2); }
+.fn-bgroup-essential .fn-bgroup-h { border-left-color: var(--brand); }
+.fn-bgroup-purchase .fn-bgroup-h { border-left-color: var(--kid); }
+.fn-bgroup-optional .fn-bgroup-h { border-left-color: var(--think); }
+.fn-bgroup-t { margin: 0; font-size: 1rem; display: flex; align-items: center; gap: 8px; }
+.fn-bgroup-t .fn-sw { display: none; }
+.fn-bgroup-sum { font-size: .86rem; color: var(--ink-2); }
+.fn-bgroup-sum b { font-size: 1.05rem; color: var(--ink); font-variant-numeric: tabular-nums; }
+.fn-bgroup-d { margin: 6px 2px 0; line-height: 1.5; }
+.fn-bgroup-empty { margin: 0; padding: 10px 2px; }
+.fn-bl-grp { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: .78rem; color: var(--ink-3); font-weight: 700; min-width: 0; }
+.fn-bl-grp > span { white-space: nowrap; }
+.fn-bl-grp .select { flex: 0 1 auto; min-width: 0; max-width: 100%; min-height: 36px; padding-top: 4px; padding-bottom: 4px; font-size: .84rem; }
+.fn-adv-h { display: flex; align-items: center; gap: 6px; margin: 14px 0 4px; font-size: .92rem; }
+.fn-adv-h:first-of-type { margin-top: 6px; }
+
 /* --- 계산기 공통 --- */
 .fn-calc-out { margin-top: 12px; padding: 12px 14px; border-radius: var(--radius-sm); background: var(--bg-3); }
 .fn-calc-out > * + * { margin-top: 8px; }
@@ -2401,7 +2464,7 @@ div.fn-alert { cursor: default; }
     const seg = (id, v) => (v > 0 ? el('i', { class: 'fn-sw-' + id, style: { width: w(v) }, title: GROUP_BY_ID[id].label + ' ' + won(v) }) : null);
     const cardOf = (g) => {
       const s = G[g.id];
-      return el('div', { class: 'fn-gcard' },
+      return el('div', { class: 'fn-gcard fn-gcard-' + g.id },
         el('div', { class: 'fn-gcard-h' }, el('i', { class: 'fn-sw fn-sw-' + g.id, 'aria-hidden': 'true' }), el('span', g.icon + ' ' + g.label)),
         el('b', { class: 'fn-gcard-v', title: won(s.unpaid) }, krw(s.unpaid)),
         el('span', { class: 'fn-gcard-d' }, g.desc),
@@ -2413,9 +2476,12 @@ div.fn-alert { cursor: default; }
       /* 머리 숫자: 11/3 전후 꼭 필요한 현금 = 꼭 드는 이사 비용(아직 낼 돈) ↔ 그날 남는 돈 */
       el('div', { class: 'fn-hl ' + (neg ? 'is-bad' : 'is-good') },
         el('div', { class: 'fn-hl-k' }, D.fmt(c.move) + ' 전후 꼭 필요한 현금'),
+        /* 그날 남는 돈 − 꼭 드는 이사 비용 = 여유/부족 (좁은 화면에선 세 줄) */
         el('div', { class: 'fn-hl-eq' },
-          el('div', { class: 'fn-hl-cell' }, el('small', '꼭 드는 이사 비용 (아직 낼 돈)'), el('b', { title: won(ess) }, krw(ess))),
           el('div', { class: 'fn-hl-cell' }, el('small', D.fmt(c.move) + ' 그날 남는 돈'), el('b', { title: won(fl.leftover) }, krw(fl.leftover))),
+          el('span', { class: 'fn-hl-op', 'aria-hidden': 'true' }, '−'),
+          el('div', { class: 'fn-hl-cell' }, el('small', '꼭 드는 이사 비용 (아직 낼 돈)'), el('b', { title: won(ess) }, krw(ess))),
+          el('span', { class: 'fn-hl-op', 'aria-hidden': 'true' }, '='),
           el('div', { class: 'fn-hl-cell fn-hl-res' }, el('small', neg ? '⚠ 부족' : '✓ 여유'), el('b', { title: won(c.netEssential) }, krw(Math.abs(c.netEssential))))),
         el('div', { class: 'fn-kv fn-hl-more' },
           el('span', { class: 'k' }, '살림 구입까지 포함하면 (+' + krw(pur) + ')'), el('span', { class: vCls(c.netWithPurchases) }, verdictTxt(c.netWithPurchases)),

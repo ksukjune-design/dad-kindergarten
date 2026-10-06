@@ -1719,7 +1719,7 @@
     v.send.textContent = busy ? '■ 중지' : '보내기';
     v.send.setAttribute('aria-label', busy ? '답 멈추기' : '보내기');
     v.send.disabled = !busy && !v.ta.value.trim();
-    v.ta.placeholder = busy ? '답을 기다리는 중이에요 — 다음 질문을 미리 써 둘 수 있어요' : '무엇이든 물어보세요 (예: 이번 주 할 일 정리해줘)';
+    v.ta.placeholder = busy ? '답을 기다리는 중 — 다음 질문을 써 둘 수 있어요' : '무엇이든 물어보세요';
     if (v.chips) MV.$$('button', v.chips).forEach((b) => { b.disabled = busy; });
     MV.$$('.ag-sugg', v.log).forEach((b) => { b.disabled = busy; });
     if (v.clear) v.clear.disabled = !R.chat.msgs.length;
@@ -1906,7 +1906,6 @@
 .ag-log { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
   display: flex; flex-direction: column; gap: 14px; padding: 16px; background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius); }
 .ag-log:focus-visible { outline-offset: -3px; }
-.ag-log-empty { justify-content: center; }
 .ag-msg { display: flex; flex-direction: column; gap: 4px; max-width: min(780px, 92%); min-width: 0; }
 .ag-user { align-self: flex-end; align-items: flex-end; }
 .ag-bot { align-self: flex-start; align-items: stretch; }
@@ -2015,7 +2014,7 @@
   .ag-composer { padding-left: 12px; }
   .ag-send { min-width: 64px; padding: 0 12px; }
 }
-@media (max-width: 380px) { .ag-grid { grid-template-columns: 1fr; } .ag-quick { padding: 0 6px; } }
+@media (max-width: 380px) { .ag-quick { padding: 0 6px; } .ag-sugg { font-size: .82rem; padding: 6px 8px; } }
 @media print { .ag-fab, .ag-composer, .ag-chips, .ag-hint { display: none !important; } .ag { height: auto; } .ag-log { overflow: visible; border: 0; } }
 `;
 
