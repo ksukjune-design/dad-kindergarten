@@ -242,10 +242,11 @@ button.db-wk-head:hover { background:var(--bg-3); }
 .db-road.is-acc .db-gap { flex:none; writing-mode:horizontal-tb; padding:6px; letter-spacing:0; }
 
 /* 파트별 진행 */
-.db-pgroups { display:flex; flex-direction:column; gap:14px; }
+.db-pgroups { columns:3 250px; column-gap:14px; }
+.db-pg { break-inside:avoid; page-break-inside:avoid; margin-bottom:14px; display:flow-root; }
 .db-pg-title { font-size:.74rem; font-weight:800; color:var(--ink-3); margin:0 0 6px 2px; letter-spacing:.02em; }
-.db-tiles { display:grid; gap:8px; grid-template-columns:repeat(auto-fill, minmax(min(100%, 230px), 1fr)); }
-.db-tile { display:flex; flex-direction:column; gap:6px; min-width:0; padding:10px 12px; border:1px solid var(--line); border-radius:12px; background:var(--bg); color:var(--ink); text-decoration:none; transition:border-color .12s, background .12s; }
+.db-tiles { display:flex; flex-direction:column; gap:6px; }
+.db-tile { display:flex; flex-direction:column; gap:5px; min-width:0; padding:9px 12px; border:1px solid var(--line); border-radius:12px; background:var(--bg); color:var(--ink); text-decoration:none; transition:border-color .12s, background .12s; }
 .db-tile:hover { border-color:var(--brand); background:var(--bg-2); }
 .db-tile-top { display:flex; align-items:center; gap:8px; min-width:0; }
 .db-tile-emo { font-size:1.2rem; flex:none; }
@@ -268,7 +269,12 @@ button.db-wk-head:hover { background:var(--bg-3); }
 .db-qlink-ico { font-size:1.3rem; flex:none; }
 .db-qlink b { display:block; font-size:.9rem; }
 .db-qlink small { display:block; font-size:.74rem; color:var(--ink-3); line-height:1.3; }
-@media (max-width: 380px) { .db-qlinks { grid-template-columns:1fr; } }
+@media (max-width: 520px) {
+  .db-qlinks { grid-template-columns:repeat(3, minmax(0, 1fr)); gap:6px; }
+  .db-qlink { flex-direction:column; justify-content:center; gap:4px; min-height:76px; padding:8px 4px; text-align:center; }
+  .db-qlink b { font-size:.8rem; line-height:1.3; }
+  .db-qlink small { display:none; }
+}
 `);
 
   /* ======================= 섹션: 히어로 ======================= */
@@ -307,7 +313,7 @@ button.db-wk-head:hover { background:var(--bg-3); }
         el('div', { class: 'db-hero-left' },
           el('div', { class: 'db-eyebrow' }, eyebrow),
           big,
-          el('div', { class: 'db-when' }, D.fmtLong(move) + (dd.n > 0 ? ' · ' + dd.label : '')),
+          el('div', { class: 'db-when' }, D.fmtLong(move), dd.n > 0 ? el('span', { class: 'nowrap' }, ' · ' + dd.label) : null),
           el('div', { class: 'db-route' },
             el('span', '등촌우성 2층'), el('span', { class: 'db-route-arrow', 'aria-hidden': 'true' }, '→'), el('span', '서광등촌마을 14층'),
             aOld && aNew ? el('span', { class: 'db-route-area' }, '전용 ' + aOld + ' → ' + aNew) : null)),
@@ -322,7 +328,7 @@ button.db-wk-head:hover { background:var(--bg-3); }
             counter('오늘', nToday, 'warn', '#/checklist/~focus'),
             counter('7일 이내', n7, 'brand', '#/checklist/~week')),
           next ? el('div', { class: 'db-next' }, '🚩 다음 이정표 · ',
-            el('b', D.fmt(next.date) + ' ' + next.label), ' · ' + D.dday(next.date).label) : null)));
+            el('b', D.fmt(next.date) + ' ' + next.label), el('span', { class: 'nowrap' }, ' · ' + D.dday(next.date).label)) : null)));
   }
 
   /* ======================= 섹션: 지금 할 일 ======================= */

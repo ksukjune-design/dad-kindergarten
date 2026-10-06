@@ -521,8 +521,10 @@
       partsBox.hidden = !fresh.length;
       relatedBox.replaceChildren(...fresh.map((pt) => {
         const s = MV.parts.stats(pt.id);
-        return el('a', { class: 'btn' + (fresh.length === 1 ? ' btn-primary' : ''), href: '#/checklist/' + encodeURIComponent(pt.id) },
-          fresh.length === 1 ? '이 가이드 관련 체크리스트로 →' : (pt.emoji || '📌') + ' ' + pt.name + ' · ' + s.done + '/' + s.total + ' →');
+        return el('a', { class: 'btn' + (fresh.length === 1 ? ' btn-primary' : ''), href: '#/checklist/' + encodeURIComponent(pt.id), 'aria-label': pt.name + ' 체크리스트로 이동 · ' + s.total + '개 중 ' + s.done + '개 완료' },
+          fresh.length === 1
+            ? '이 가이드 관련 체크리스트로 → ' + (pt.emoji || '📌') + ' ' + s.done + '/' + s.total
+            : (pt.emoji || '📌') + ' ' + pt.name + ' ' + s.done + '/' + s.total + ' →');
       }));
     };
     fillParts();
@@ -658,7 +660,8 @@
             ? [el('a', { href: s.url, target: '_blank', rel: 'noopener noreferrer' }, String(s.label || s.url)), host(s.url) && s.label ? el('span', { class: 'gd-src-host' }, host(s.url)) : null]
             : String(s.label || s.url))))) : null,
       rel.length ? el('section', { class: 'card flat tint-brand', 'aria-label': '관련 체크리스트' },
-        el('h2', '✅ 이 가이드 관련 체크리스트로 →'),
+        el('h2', '✅ 관련 체크리스트'),
+        el('p', { class: 'small muted', style: { margin: '-2px 0 10px' } }, '읽은 내용을 바로 체크리스트에 옮겨 두세요. 메모·마감일도 거기서 관리해요.'),
         relatedBox) : null,
       prev || next ? el('nav', { class: 'gd-pager', 'aria-label': '다른 가이드' },
         prev ? el('a', { href: guideHash(prev.id) }, el('small', '← 이전 가이드'), el('b', (prev.icon || '📄') + ' ' + (prev.title || prev.id))) : null,
