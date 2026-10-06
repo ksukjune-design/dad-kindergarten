@@ -1933,7 +1933,7 @@
       if (!sel || editMode) return;
       // 단축키는 도면(또는 선택한 짐)에 초점이 있거나, 초점 없이 마우스가 도면 위에 있을 때만.
       // 다른 곳을 보고 있을 때 방향키는 평소처럼 화면을 굴리고, Backspace 로 짐이 지워지지 않게.
-      const inStage = !!ae && stage.contains(ae);
+      const inStage = !!ae && (planCard.contains(ae) || tb.contains(ae));
       const bodyish = !ae || ae === document.body || ae === document.documentElement;
       if (e.key === 'Escape') {
         if (inStage || bodyish) { sel = null; refresh(); e.preventDefault(); }
