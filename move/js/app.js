@@ -53,7 +53,7 @@
           const peek = JSON.parse(text);
           if (peek && peek.meta) info = (peek._exportedAt ? ' (' + MV.date.time(peek._exportedAt) + ' 에 저장한 파일, 할 일 ' + ((peek.items || []).length) + '개)' : '');
         } catch (e) { /* importJSON 이 한국어로 알려줌 */ }
-        MV.ui.confirm('지금 기록을 모두 이 백업 파일 내용으로 바꿀까요?' + info + (MV.sync && MV.sync.mode === 'shared' ? ' 공유 중이라 배우자 화면도 함께 바뀌어요.' : ''), { okLabel: '복원하기', danger: true }).then((ok) => {
+        MV.ui.confirm('지금 기록을 모두 이 백업 파일 내용으로 바꿀까요?' + info + (MV.sync && MV.sync.mode === 'shared' && !MV.sync.readOnly ? ' 공유 중이라 배우자 화면도 함께 바뀌어요.' : ''), { okLabel: '복원하기', danger: true }).then((ok) => {
           fileInput.value = '';
           if (!ok) return;
           try {
@@ -75,7 +75,7 @@
     const pad = (n) => String(n).padStart(2, '0');
     const fname = 'move-backup-' + stamp.getFullYear() + pad(stamp.getMonth() + 1) + pad(stamp.getDate()) + '-' + pad(stamp.getHours()) + pad(stamp.getMinutes()) + '.json';
     const Y = MV.sync || { mode: 'local', status: 'local' };
-    const shared = Y.mode === 'shared';
+    const shared = Y.mode === 'shared' && !Y.readOnly;
     const SYNC_TEXT = {
       synced: '🔗 공유 중이에요. 부부가 같은 기록을 보고, 바꾼 내용이 바로 서로에게 보여요.',
       saving: '⏳ 공유 저장소에 저장하는 중이에요.',
@@ -84,9 +84,10 @@
       offline: '⚠ 공유 저장소와 잠시 연결이 끊겼어요. 자동으로 다시 시도해요.',
       connecting: '⏳ 공유 저장소에 연결하는 중이에요.',
     };
-    const syncCard = (Y.mode !== 'local' || Y.status === 'offline') ? el('div', { class: 'card flat tint-kid' },
+    const extraText = (typeof Y.statusText === 'function') ? Y.statusText() : '';
+    const syncCard = (Y.mode !== 'local' || Y.status === 'offline' || (!SYNC_TEXT[Y.status] && extraText)) ? el('div', { class: 'card flat tint-kid' },
       el('h3', '함께 쓰기'),
-      el('p', { class: 'small' }, SYNC_TEXT[Y.status] || '이 기기에만 저장돼요.'),
+      el('p', { class: 'small' }, SYNC_TEXT[Y.status] || extraText || '이 기기에만 저장돼요.'),
       Y.empty && !Y.readOnly ? el('button', { class: 'btn btn-kid', type: 'button', onclick: () => {
         MV.ui.confirm('지금 이 기기의 체크·메모·짐 목록으로 공유를 시작할까요?', { okLabel: '공유 시작' }).then((ok) => {
           if (ok && Y.initFromLocal()) { m.close(); MV.ui.toast('공유를 시작했어요.'); }
