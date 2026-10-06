@@ -235,7 +235,7 @@
     R.capsSeen = true;
     if (syncAvailability()) MV.store.emit('caps', MV.sync && MV.sync.cap);
   });
-  MV.store.on('route', () => { updateFab(); if (fab && !fab.hidden) { requestAnimationFrame(placeFab); placeSoon(350); } });
+  MV.store.on('route', () => { updateFab(); if (fab && !fab.hidden) { requestAnimationFrame(placeFab); setTimeout(placeFab, 400); } });
 
   /* ======================= 떠 있는 🤖 버튼 ======================= */
   let fab = null;
@@ -295,8 +295,10 @@
     return top;
   }
   function placeFab() {
-    placeTimer = null;
     if (!fab || fab.hidden || !fab.isConnected) return;
+    // 움직이는 중(transition)에는 위치를 잴 수 없으니 잠깐 끄고 재요
+    const from = fab.style.bottom;
+    fab.style.transition = 'none';
     fab.style.removeProperty('bottom');
     for (let k = 0; k < 3; k++) {
       const top = probeFab();
@@ -305,11 +307,16 @@
       if (b > window.innerHeight * 0.6) { fab.style.removeProperty('bottom'); break; }
       fab.style.bottom = b + 'px';
     }
+    const to = fab.style.bottom;
+    if (from !== to) { fab.style.bottom = from; void fab.offsetWidth; }
+    fab.style.transition = '';
+    if (from !== to) fab.style.bottom = to;
   }
   let placeTimer = null;
+  /* 묶어서 한 번 (계속 바뀌는 화면에서도 늦어도 ms 뒤에는 실행) */
   function placeSoon(ms) {
-    if (placeTimer) clearTimeout(placeTimer);
-    placeTimer = setTimeout(() => requestAnimationFrame(placeFab), ms == null ? 120 : ms);
+    if (placeTimer) return;
+    placeTimer = setTimeout(() => { placeTimer = null; requestAnimationFrame(placeFab); }, ms == null ? 120 : ms);
   }
   let viewObserver = null;
   function watchView() {
@@ -847,7 +854,7 @@
         const owner = has(a, 'owner') ? parseOwner(a.owner) : '';
         const priority = has(a, 'priority') ? parsePri(a.priority) : 'mid';
         const detail = has(a, 'detail') ? String(a.detail == null ? '' : a.detail).slice(0, 5000) : '';
-        const dup = MV.items.list((x) => x.partId === p.id && !x.done && x.title.replace(/\s+/g, '') === title.replace(/\s+/g, ''))[0];
+        const dup = MV.items.list((x) => x.partId === p.id && !x.done && String(x.title || '').replace(/\s+/g, '') === title.replace(/\s+/g, ''))[0];
         if (dup) throw new Error('같은 제목의 할 일이 이미 있어요 (id ' + dup.id + ', 기한 ' + fmtDue(dup.due) + '). 고치려면 update_item 을 쓰세요.');
         const it = MV.store.normItem({ partId: p.id, title, due, owner, priority, detail, order: Date.now() });
         mutate(ctx, () => MV.store.update((st) => { st.items.push(it); }, { log: '🤖 할 일 추가: ' + title }));
@@ -1747,8 +1754,9 @@
     const top = v.log.scrollTop;
     v.log.replaceChildren(...(msgs.length ? msgs.map(buildMsg) : [welcome()]));
     v.log.classList.toggle('ag-log-empty', !msgs.length);
-    if (v.chips) v.chips.hidden = !msgs.length;
-    if (forceScroll || stick) { v.log.scrollTop = v.log.scrollHeight; v.stick = true; } else v.log.scrollTop = top;
+    if (v.chips) { v.chips.hidden = !msgs.length; if (v.moreHint) requestAnimationFrame(v.moreHint); }
+    if (!msgs.length) v.log.scrollTop = 0;
+    else if (forceScroll || stick) { v.log.scrollTop = v.log.scrollHeight; v.stick = true; } else v.log.scrollTop = top;
   }
   function paintMsg(id) {
     const v = R.view;
@@ -1849,7 +1857,7 @@
   }
 
   /* ---- 화면: 대화 ---- */
-  function chatView(root, mode) {
+  function chatView(root, mode, ctx) {
     const blocked = mode === 'blocked';
     const v = { root: null, mode, log: null, ta: null, send: null, chips: null, clear: null, ro: null, stick: true };
     const quickBtn = el('button', {
@@ -1880,6 +1888,21 @@
       v.chips = el('div', { class: 'ag-chips', role: 'toolbar', 'aria-label': '추천 질문' }, SUGGESTIONS.map((s) => el('button', {
         type: 'button', class: 'ag-chip', onclick: () => submit(s.prompt()),
       }, s.icon + ' ' + (typeof s.label === 'function' ? s.label() : s.label))));
+      const chips = v.chips;
+      const moreHint = () => {
+        const max = chips.scrollWidth - chips.clientWidth;
+        chips.classList.toggle('ag-more-r', max > 4 && chips.scrollLeft < max - 4);
+        chips.classList.toggle('ag-more-l', max > 4 && chips.scrollLeft > 4);
+      };
+      v.moreHint = moreHint;
+      chips.addEventListener('scroll', moreHint, { passive: true });
+      chips.addEventListener('wheel', (e) => {
+        if (Math.abs(e.deltaY) <= Math.abs(e.deltaX) || chips.scrollWidth <= chips.clientWidth) return;
+        chips.scrollLeft += e.deltaY;
+        e.preventDefault();
+      }, { passive: false });
+      window.addEventListener('resize', moreHint, { passive: true });
+      ctx.onCleanup(() => window.removeEventListener('resize', moreHint));
       v.ta = el('textarea', {
         class: 'ag-input', rows: '1', maxlength: String(MAX_TEXT), 'aria-label': 'AI 비서에게 보낼 메시지',
         enterkeyhint: 'send', autocomplete: 'off',
@@ -1943,7 +1966,7 @@
       else if (R.view && R.view.root && root.contains(R.view.root)) R.view = null;
     });
     try {
-      if (mode === 'chat' || mode === 'blocked') chatView(root, mode);
+      if (mode === 'chat' || mode === 'blocked') chatView(root, mode, ctx);
       else offCard(root, mode);
     } catch (e) {
       console.error('[agent]', e);
@@ -2035,6 +2058,10 @@
 .ag-ex-btn:hover { border-color: var(--brand); color: var(--brand); }
 .ag-chips { flex: none; display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding: 1px; -webkit-overflow-scrolling: touch; }
 .ag-chips::-webkit-scrollbar { display: none; }
+.ag-chips.ag-more-r { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent); }
+.ag-chips.ag-more-l { -webkit-mask-image: linear-gradient(to right, transparent, #000 40px); mask-image: linear-gradient(to right, transparent, #000 40px); }
+.ag-chips.ag-more-l.ag-more-r { -webkit-mask-image: linear-gradient(to right, transparent, #000 40px, #000 calc(100% - 40px), transparent); mask-image: linear-gradient(to right, transparent, #000 40px, #000 calc(100% - 40px), transparent); }
+body:has(.ag-composer) .toast-wrap { bottom: calc(var(--bottom-h) + 104px + env(safe-area-inset-bottom)); }
 .ag-chip { flex: none; min-height: 36px; padding: 0 12px; border: 1px solid var(--line-2); border-radius: 999px; background: var(--bg-2); color: var(--ink-2); font: inherit; font-size: .82rem; font-weight: 700; white-space: nowrap; cursor: pointer; }
 .ag-chip:hover:not(:disabled) { border-color: var(--brand); color: var(--brand); }
 .ag-composer { flex: none; position: sticky; bottom: calc(var(--bottom-h) + 8px + env(safe-area-inset-bottom)); z-index: 5; display: flex; align-items: flex-end; gap: 8px; padding: 6px 6px 6px 14px; border: 1px solid var(--line-2); border-radius: 18px; background: var(--bg-2); box-shadow: var(--shadow); }

@@ -16,6 +16,9 @@
           금액 칸은 저장 전에 검사(음수·'1억abc' 거부), 1회 한도 초과 이체는 단계 카드에 빨간 경고
           finance.budget.lines[].group 'essential'(꼭 드는 이사 비용) | 'purchase'(새로 사는 살림) | 'optional'(선택·나중에)
           — 없으면 줄 id 로 정함(GROUP_OF), 직접 추가한 줄은 'purchase'. 줄마다 '묶음'에서 옮길 수 있음
+          finance.budget.lines[].edited — 사용자가 한 번이라도 고친 줄. finance.v 3 (2026-10-06 가족 결정):
+          v2 이하 기록은 안 고친 기본 줄만 새 기본값으로 (통돌이 50만원, 간이 옷장 20만원 '선택·나중에',
+          입주청소·커튼·소품·예비비 줄은 빠짐). 고친 줄은 그대로 둠
    계산   MV.calc.financeSummary(state) → { inflow, outflow, leftover, expensesTotal(아직 낼 이사비 전부),
           expensesAll, expensesPaid, refunds, net(= 남는 돈 − 아직 낼 돈 전부),
           essentialUnpaid, purchaseUnpaid, optionalUnpaid (묶음별 아직 낼 돈),
@@ -391,11 +394,14 @@
     return f;
   }
   function ensureState() {
+    /* 저장된 버전은 ensure 전에 읽음 — core ensure 가 빠진 최상위 키(v 포함)를 기본값으로 채워 버려서 */
+    const pre = MV.store.get().finance;
+    const stored = pre && typeof pre === 'object' && !Array.isArray(pre) ? pre : null;
+    const wasV = stored ? num(stored.v) : FIN_V;
     MV.store.ensure('finance', defaults);
     const st = MV.store.get();
-    const stored = st.finance && typeof st.finance === 'object' ? st.finance : null;
-    const wasV = stored ? num(stored.v) : FIN_V;
-    const filled = withDefaults(st.finance); /* v3 예산 줄 바꿈(안 고친 줄만)도 여기서 — 버전은 FIN_V 로 */
+    /* v3 예산 줄 바꿈(안 고친 줄만)도 여기서 — 버전은 FIN_V 로. 버전 판단은 ensure 전 기록으로 */
+    const filled = withDefaults(stored ? Object.assign({}, st.finance, { v: wasV }) : st.finance);
     if (wasV < 2) {
       /* v1 → v2: 예전엔 '신고 상태'만 바꾸고 연결된 체크리스트 항목은 그대로 두는 버그가 있었음.
          그때 고른 상태(신고돼 있음/지금 신고함)를 체크리스트 항목에도 한 번만 맞춰 줌 */
@@ -1360,7 +1366,9 @@ div.fn-alert { cursor: default; }
 .fn-hl.is-bad .fn-hl-res b, .fn-hl.is-bad .fn-hl-res small { color: var(--bad); }
 .fn-hl-more { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line-2); }
 @media (max-width: 520px) {
-  .fn-hl-eq { grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 4px 10px; }
+  .fn-hl-eq { grid-template-columns: minmax(0, 1fr) auto; align-items: stretch; gap: 4px 0; }
+  .fn-hl-cell small, .fn-hl-cell b { display: flex; align-items: center; }
+  .fn-hl-cell b { padding-left: 10px; justify-content: flex-end; }
   .fn-hl-op { display: none; }
   .fn-hl-cell { display: contents; }
   .fn-hl-cell small { font-size: .82rem; }

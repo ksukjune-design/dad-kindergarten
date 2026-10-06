@@ -534,15 +534,29 @@
       if (!row || !row.getClientRects().length) return null;
       return row.getBoundingClientRect().top - viewTop(phone) - a.off;
     }
+    /* 기준 줄 근처 줄이 처음 그려지며 어림값과 실제 높이가 다르면 기준 줄이 조금 밀림 → 다음 프레임에 한 번 더 맞춤 */
+    function recheckAnchor(a, phone, stillSame) {
+      if (!a) return;
+      requestAnimationFrame(() => {
+        if (!alive || !stillSame()) return;
+        const d = anchorDelta(a, phone);
+        if (d == null || Math.abs(d) < 1) return;
+        if (phone) window.scrollTo(0, Math.max(0, window.scrollY + d)); else list.scrollTop += d;
+      });
+    }
     function restoreListScroll(key) {   // 데스크톱·태블릿: 목록 칸
-      const d = anchorDelta(mem.listAnchor[key], false);
+      const a = mem.listAnchor[key];
+      const d = anchorDelta(a, false);
       const cur0 = list.scrollTop;
       const y = d != null ? cur0 + d : (mem.listScroll[key] || 0);
       if (Math.abs(cur0 - y) >= 1) list.scrollTop = y;
+      if (d != null) recheckAnchor(a, false, () => listKey() === key && !isPhone());
     }
     function restoreWinScroll(k, y) {   // 폰: 창 전체
-      const d = y ? anchorDelta(mem.winAnchor[k], true) : null;
+      const a = y ? mem.winAnchor[k] : null;
+      const d = anchorDelta(a, true);
       window.scrollTo(0, Math.max(0, d != null ? window.scrollY + d : y));
+      if (d != null) recheckAnchor(a, true, () => screenKey() === k && isPhone());
     }
 
     function nav(hash, opts) {
@@ -2091,8 +2105,9 @@
 .ck-caret { width: 1em; display: inline-block; }
 /* 줄은 position 을 주지 않음: 위치 지정된 줄은 터치 보정(touch adjustment)에서 바로 위 줄의 칩 터치를 가로챔 */
 .ck-row { display: flex; align-items: flex-start; gap: 4px; padding: 4px 16px 6px 8px; cursor: pointer; transition: background .1s; }
-/* 화면 밖 줄은 그리지 않음 → '전체'(220개)도 빨리 열림. 높이는 어림값(한 줄짜리 64px), 한 번 그린 줄은 실제 높이를 기억 */
-.ck-row { content-visibility: auto; contain-intrinsic-size: auto 64px; }
+/* 화면 밖 줄은 그리지 않음 → '전체'(220개)도 빨리 열림. 높이는 어림값, 한 번 그린 줄은 실제 높이를 기억.
+   (어림값은 안쪽 높이라 위아래 여백은 따로 더해짐: 54 + 4 + 6 = 한 줄짜리 줄 64px) */
+.ck-row { content-visibility: auto; contain-intrinsic-size: auto 54px; }
 .ck-row .ck-cb:focus-visible { outline-offset: -2px; }   /* 줄 밖으로 나간 초점 테두리는 잘리므로 안쪽에 */
 @media (hover: hover) { .ck-row:hover { background: color-mix(in srgb, var(--bg-3) 65%, transparent); } }
 .ck-row.ck-overdue { box-shadow: inset 3px 0 0 var(--bad); }
@@ -2129,7 +2144,7 @@
 .ck-empty-act { margin-top: 12px; display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
 
 /* 최근 활동 */
-.ck-act { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 7px 16px; border: 0; background: transparent; color: var(--ink); font: inherit; text-align: left; content-visibility: auto; contain-intrinsic-size: auto 52px; }
+.ck-act { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 7px 16px; border: 0; background: transparent; color: var(--ink); font: inherit; text-align: left; content-visibility: auto; contain-intrinsic-size: auto 38px; }
 .ck-act-link { cursor: pointer; }
 .ck-act-link:focus-visible { outline-offset: -3px; }
 @media (hover: hover) { .ck-act-link:hover { background: color-mix(in srgb, var(--bg-3) 65%, transparent); } }
@@ -2373,7 +2388,7 @@ body:has(.ck) .toast button { white-space: nowrap; flex: none; }
   .ck-filters { margin-left: 0; justify-content: space-between; }
   .ck-list { overflow: visible; padding-bottom: 8px; }
   .ck-bucket-h { position: static; padding: 14px 2px 6px; background: transparent; backdrop-filter: none; }
-  .ck-row { padding: 6px 4px 8px 0; margin: 0 -4px; border-radius: 12px; contain-intrinsic-size: auto 78px; }
+  .ck-row { padding: 6px 4px 8px 0; margin: 0 -4px; border-radius: 12px; contain-intrinsic-size: auto 62px; }   /* 62 + 6 + 8 ≈ 폰 줄 평균 76px */
   .ck-row.ck-overdue { box-shadow: inset 3px 0 0 var(--bad); }
   .ck-row + .ck-row { background-image: linear-gradient(var(--line), var(--line)); background-repeat: no-repeat; background-position: 44px 0; background-size: calc(100% - 48px) 1px; }
   .ck-cb { width: 44px; height: 44px; }
