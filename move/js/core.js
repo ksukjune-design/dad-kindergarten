@@ -262,7 +262,7 @@
   function normInv(it, seed) {
     return Object.assign({
       id: MV.uid('inv'), name: '', cat: 'misc', fate: 'move', qty: 1, w: 60, d: 60, h: 60,
-      url: '', room: '', roomNew: '', lg: false, ac: null, tag: '', note: '', assumed: false, seed: !!seed,
+      url: '', room: '', roomNew: '', brand: '', lg: false, ac: null, tag: '', note: '', assumed: false, seed: !!seed,
     }, it);
   }
   function freshState() {
@@ -550,6 +550,8 @@
   V.AC = [
     { id: 'wall', label: '벽걸이' }, { id: 'stand', label: '스탠드' }, { id: '2in1', label: '2in1 (스탠드+벽걸이)' }, { id: 'window', label: '창문형' },
   ];
+  // 제조사: 가전을 누가 옮길지(제조사 서비스) 판단에 씁니다. 비어 있으면 이름으로 짐작합니다.
+  V.BRANDS = [{ id: '', label: '모름·해당 없음' }, { id: 'LG', label: 'LG' }, { id: '삼성', label: '삼성' }, { id: '기타', label: '그 밖의 제조사' }];
   V.cat = (id) => V.CATS.find((c) => c.id === id) || V.CATS[V.CATS.length - 1];
   V.fate = (id) => V.FATES.find((f) => f.id === id) || V.FATES[V.FATES.length - 1];
   V.list = (filter) => { const all = S.get().inventory.slice(); return filter ? all.filter(filter) : all; };
@@ -597,6 +599,7 @@
     f.room = el('input', { class: 'input', value: draft.room, placeholder: '예: 안방' });
     f.roomNew = el('input', { class: 'input', value: draft.roomNew, placeholder: '예: 거실' });
     f.url = el('input', { class: 'input', type: 'url', value: draft.url, placeholder: 'https:// 제품 페이지 주소' });
+    f.brand = el('select', { class: 'select' }, V.BRANDS.map((b) => el('option', { value: b.id, selected: b.id === (draft.brand || '') }, b.label)));
     f.lg = el('input', { type: 'checkbox', checked: !!draft.lg });
     f.ac = el('select', { class: 'select' }, el('option', { value: '' }, '해당 없음'), V.AC.map((a) => el('option', { value: a.id, selected: a.id === draft.ac }, a.label)));
     f.note = el('textarea', { class: 'textarea', placeholder: '모델명, 상태, 분해 필요 여부 등' }, draft.note || '');
@@ -621,9 +624,9 @@
       el('div', { class: 'form-grid' },
         field('가로 (cm)', f.w), field('깊이 (cm)', f.d), field('높이 (cm)', f.h)),
       el('div', { class: 'form-grid' },
-        field('지금 집 위치', f.room), field('새 집 위치', f.roomNew), acRow),
+        field('지금 집 위치', f.room), field('새 집 위치', f.roomNew), field('제조사', f.brand), acRow),
       field('제품 링크 (URL)', f.url, '인터넷에서 찾은 제품 페이지를 붙여 두면 규격 확인이 쉽습니다'),
-      el('label', { class: 'check' }, f.lg, 'LG 서비스로 옮김 (이삿짐센터 대신)'),
+      el('label', { class: 'check' }, f.lg, '제조사 서비스(LG·삼성전자서비스)로 옮김 — 이삿짐센터 대신'),
       field('메모', f.note));
     const read = () => ({
       name: f.name.value.trim() || '이름 없는 짐',
@@ -631,7 +634,7 @@
       qty: MV.clamp(parseInt(f.qty.value, 10) || 0, 0, 999),
       w: Math.max(0, +f.w.value || 0), d: Math.max(0, +f.d.value || 0), h: Math.max(0, +f.h.value || 0),
       room: f.room.value.trim(), roomNew: f.roomNew.value.trim(), url: f.url.value.trim(),
-      lg: f.lg.checked, ac: f.cat.value === 'aircon' ? (f.ac.value || null) : null,
+      brand: f.brand.value, lg: f.lg.checked, ac: f.cat.value === 'aircon' ? (f.ac.value || null) : null,
       tag: draft.tag || '', note: f.note.value, assumed: false,
     });
     const actions = [];

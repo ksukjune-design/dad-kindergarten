@@ -105,8 +105,8 @@
     if (k === 0) return '이사 주간';
     return '이사 ' + (-k) + '주 후';
   }
-  function head(icon, title, sub, more) {
-    return el('div', { class: 'db-head' },
+  function head(icon, title, sub, more, key) {
+    return el('div', { class: 'db-head', dataset: key ? { dbKey: key } : null },
       el('h2', el('span', { class: 'db-head-ico', 'aria-hidden': 'true' }, icon), title),
       sub ? el('span', { class: 'db-head-sub' }, sub) : null,
       more || null);
@@ -219,10 +219,10 @@
 .db-total span { font-weight:750; font-size:.88rem; }
 .db-total b { font-size:1.25rem; font-weight:900; font-variant-numeric:tabular-nums; letter-spacing:-.02em; }
 .db-alts { list-style:none; margin:6px 0 0; padding:0 2px; display:flex; flex-direction:column; gap:2px; }
-.db-alt { display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:0 10px; padding:3px 0; font-size:.82rem; color:var(--ink-2); }
+.db-alt { display:grid; grid-template-columns:minmax(0, 1fr) auto; align-items:baseline; gap:0 10px; padding:3px 2px; font-size:.84rem; color:var(--ink-2); }
 .db-alt-k { min-width:0; font-weight:650; }
-.db-alt-k small { font-size:.72rem; font-weight:500; color:var(--ink-3); }
-.db-alt b { margin-left:auto; font-weight:800; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.db-alt-k small { display:block; font-size:.72rem; font-weight:500; color:var(--ink-3); line-height:1.35; }
+.db-alt b { font-weight:800; font-variant-numeric:tabular-nums; white-space:nowrap; text-align:right; }
 .db-alt b.is-bad { color:var(--bad); }
 .db-alt b.is-good { color:var(--good); }
 .db-hug { display:inline-flex; align-items:center; min-height:36px; margin-top:2px; padding:0 2px; font-size:.8rem; font-weight:700; text-decoration:none; }
@@ -428,16 +428,16 @@ button.db-wk-head:hover { background:var(--bg-3); }
     const next = milestones().filter((m) => D.diff(today, m.date) >= 0)[0];
     const whenText = move ? D.fmtLong(move) : '이사일 정보가 올바르지 않아요 (백업 데이터 확인)';
 
-    return el('section', { class: 'card db-hero db-span-12', 'aria-label': '이사 개요' },
-      el('div', { class: 'db-hero-grid' },
-        el('div', { class: 'db-hero-left' },
+    return el('section', { class: 'card db-hero db-span-12', 'aria-label': '이사 개요', dataset: { dbDeep: '1' } },
+      el('div', { class: 'db-hero-grid', dataset: { dbKey: 'hero-grid', dbDeep: '1' } },
+        el('div', { class: 'db-hero-left', dataset: { dbKey: 'hero-l' } },
           el('div', { class: 'db-eyebrow' }, eyebrow),
           big,
           el('div', { class: 'db-when' }, whenText, dd.n > 0 ? el('span', { class: 'nowrap' }, ' · ' + dd.label) : null),
           el('div', { class: 'db-route' },
             el('span', '등촌우성 2층'), el('span', { class: 'db-route-arrow', 'aria-hidden': 'true' }, '→'), el('span', '서광등촌마을 14층'),
             aOld && aNew ? el('span', { class: 'db-route-area' }, '전용 ' + aOld + ' → ' + aNew) : null)),
-        el('div', { class: 'db-hero-right' },
+        el('div', { class: 'db-hero-right', dataset: { dbKey: 'hero-r' } },
           el('div', { class: 'db-prog-top' },
             el('span', { class: 'db-prog-label' }, '전체 진행'),
             el('span', { class: 'db-prog-num' }, MV.fmt.pct(st.pct, 0)),
@@ -458,9 +458,9 @@ button.db-wk-head:hover { background:var(--bg-3); }
   function taskRow(i, pm) {
     const p = partOf(pm, i.partId);
     const cb = el('input', { type: 'checkbox', checked: !!i.done, 'aria-label': (i.done ? '다시 열기: ' : '완료: ') + i.title, dataset: { id: i.id } });
-    cb.addEventListener('change', () => onToggle(i.id));
+    cb.addEventListener('change', () => onToggle(i.id, cb));
     const owner = i.owner ? el('span', { class: 'chip ' + (OWNER_CLS[i.owner] || '') }, '👤 ' + i.owner) : null;
-    return el('div', { class: 'db-task' + (i.done ? ' is-done' : '') },
+    return el('div', { class: 'db-task' + (i.done ? ' is-done' : ''), dataset: { dbKey: 'row-' + i.id } },
       el('label', { class: 'db-check', title: i.done ? '다시 열기' : '완료로 표시' }, cb),
       el('div', { class: 'db-task-main' },
         el('a', { class: 'db-task-title', href: itemHref(i) }, i.title || '(제목 없음)'),
@@ -471,10 +471,14 @@ button.db-wk-head:hover { background:var(--bg-3); }
           i.priority === 'high' && !i.done ? el('span', { class: 'chip bad' }, '중요') : null,
           owner)));
   }
-  function onToggle(id) {
+  function onToggle(id, cb) {
     const it = MV.items.get(id);
     if (!it) return;
     const willDone = !it.done;
+    // 바로 보이는 반응: 다시 그리기(다음 프레임 뒤)를 기다리지 않고 이 줄에 먼저 줄을 긋거나 지움
+    const row = cb && cb.closest ? cb.closest('.db-task') : null;
+    if (row) row.classList.toggle('is-done', willDone);
+    if (cb) cb.setAttribute('aria-label', (willDone ? '다시 열기: ' : '완료: ') + (it.title || ''));
     if (willDone) sessionDone.set(id, Date.now()); else sessionDone.delete(id);
     MV.items.toggle(id);
     // 되돌리기 토스트는 하나만: 앞 토스트가 아직 떠 있으면 거기에 이어 붙여 'n개 완료 · 모두 되돌리기' 로
@@ -554,33 +558,33 @@ button.db-wk-head:hover { background:var(--bg-3); }
     if (nToday) subBits.push('오늘 ' + nToday);
     if (nLate) subBits.push('지연 ' + nLate);
     const sub = pick.length ? (subBits.length ? subBits.join(' · ') : (topped ? '7일 안에 마감' : '3일 안에 마감')) : '';
-    const body = el('div', { class: 'db-tasks' });
+    const body = el('div', { class: 'db-tasks', dataset: { dbKey: 'now-list', dbDeep: '1' } });
     if (chosen.length) {
       NOW_SLOTS.forEach((g) => {
         const rows = chosen.filter((i) => slot.get(i.id) === g.id).sort(byDue);
         if (!rows.length) return;
         const left = pick.filter((i) => slot.get(i.id) === g.id).length;   // 이 칸의 열린 일 전체 (카드에 안 보이는 것 포함)
-        body.appendChild(el('div', { class: 'db-subhead ' + g.cls }, g.label,
+        body.appendChild(el('div', { class: 'db-subhead ' + g.cls, dataset: { dbKey: 'sh-' + g.id } }, g.label,
           el('span', { class: 'db-subhead-n', 'aria-label': left ? '남은 일 ' + left + '개' : '모두 완료' }, left ? String(left) : '✓')));
         rows.forEach((i) => body.appendChild(taskRow(i, pm)));
       });
       const rest = pick.length - chosenOpen.length;
-      if (rest > 0) body.appendChild(el('a', { class: 'db-more db-more-rest', href: allHref }, '그 외 ' + rest + '개 더 보기 →'));
+      if (rest > 0) body.appendChild(el('a', { class: 'db-more db-more-rest', href: allHref, dataset: { dbKey: 'more' } }, '그 외 ' + rest + '개 더 보기 →'));
     }
     if (!chosenOpen.length) {
       // 급한 일이 없거나 방금 다 끝낸 경우 (끝낸 줄은 위에 남아 있음)
       if (!all.length) {
-        body.appendChild(el('div', { class: 'db-empty' }, '아직 체크 항목이 없어요. ', el('a', { href: '#/checklist' }, '체크리스트에서 추가하기 →')));
+        body.appendChild(el('div', { class: 'db-empty', dataset: { dbKey: 'empty' } }, '아직 체크 항목이 없어요. ', el('a', { href: '#/checklist' }, '체크리스트에서 추가하기 →')));
       } else if (!open.length) {
-        body.appendChild(el('div', { class: 'db-empty' }, el('b', '🎉 모든 할 일을 끝냈어요!'), ' 이사 준비 완료.'));
+        body.appendChild(el('div', { class: 'db-empty', dataset: { dbKey: 'empty' } }, el('b', '🎉 모든 할 일을 끝냈어요!'), ' 이사 준비 완료.'));
       } else {
         const upcoming = open.slice().sort(byDue).slice(0, 3);
-        body.appendChild(el('div', { class: 'db-empty' }, el('b', kept.length ? '급한 일은 다 끝냈어요 🙌' : '일주일 안에 급한 일은 없어요 🙌'), ' 미리 해 두면 좋은 일:'));
+        body.appendChild(el('div', { class: 'db-empty', dataset: { dbKey: 'empty' } }, el('b', kept.length ? '급한 일은 다 끝냈어요 🙌' : '일주일 안에 급한 일은 없어요 🙌'), ' 미리 해 두면 좋은 일:'));
         upcoming.forEach((i) => body.appendChild(taskRow(i, pm)));
       }
     }
-    return el('section', { class: 'card db-now db-span-7', 'aria-label': '지금 할 일' },
-      head('✅', '지금 할 일', sub ? el('span', { class: 'db-now-sub' }, sub) : null, moreLink('전체 보기 →', allHref)),
+    return el('section', { class: 'card db-now db-span-7', 'aria-label': '지금 할 일', dataset: { dbDeep: '1' } },
+      head('✅', '지금 할 일', sub ? el('span', { class: 'db-now-sub' }, sub) : null, moreLink('전체 보기 →', allHref), 'now-head'),
       body);
   }
 
@@ -633,17 +637,17 @@ button.db-wk-head:hover { background:var(--bg-3); }
     if (isNum(r.netWithPurchases)) {
       alts.push(el('li', { class: 'db-alt' },
         el('span', { class: 'db-alt-k' }, '살림 구입까지 포함하면',
-          isNum(r.purchase) && r.purchase > 0 ? el('small', ' (통돌이 세탁기 등 +' + MV.fmt.krw(r.purchase) + ')') : null),
+          isNum(r.purchase) && r.purchase > 0 ? el('small', '통돌이 세탁기 등 +' + MV.fmt.krw(r.purchase)) : null),
         el('b', { class: r.netWithPurchases < 0 ? 'is-bad' : 'is-good', title: MV.fmt.won(r.netWithPurchases) }, verdict(r.netWithPurchases))));
     }
     if (isNum(r.net)) {
       alts.push(el('li', { class: 'db-alt' },
         el('span', { class: 'db-alt-k' }, '전부 포함하면',
-          isNum(r.optional) && r.optional > 0 ? el('small', ' (간이 옷장·HUG 보증료 등 +' + MV.fmt.krw(r.optional) + ', 이사 뒤)') : null),
+          isNum(r.optional) && r.optional > 0 ? el('small', '간이 옷장·HUG 보증료 등 +' + MV.fmt.krw(r.optional) + ' (이사 뒤에 내는 돈)') : null),
         el('b', { class: r.net < 0 ? 'is-bad' : 'is-good', title: MV.fmt.won(r.net) }, verdict(r.net))));
     }
     if (alts.length) box.appendChild(el('ul', { class: 'db-alts' }, alts));
-    box.appendChild(el('a', { class: 'db-hug', href: HUG_HREF }, '🛡 HUG 보증료는 선택 — 가입할 때와 안 할 때 비교 →'));
+    box.appendChild(el('a', { class: 'db-hug', href: HUG_HREF }, '🛡 HUG 보증: 가입할 때와 안 할 때 비교 →'));
     return box;
   }
   function moneyCard() {
@@ -674,7 +678,7 @@ button.db-wk-head:hover { background:var(--bg-3); }
         const purchase = isNum(fs.purchaseUnpaid) ? fs.purchaseUnpaid : (nwp != null ? fs.netEssential - nwp : null);
         const optional = isNum(fs.optionalUnpaid) ? fs.optionalUnpaid : (nwp != null && net != null ? nwp - net : null);
         if (left != null) led.appendChild(ledgerRow('남는 돈', null, minus(left), 'sum', null, MV.fmt.won(left)));
-        if (essential != null) led.appendChild(ledgerRow('꼭 드는 이사 비용', '이사업체 · LG 가전 이전 · 엘리베이터 등 (아직 안 낸 돈)', signed(essential, -1), '', null, MV.fmt.won(essential)));
+        if (essential != null) led.appendChild(ledgerRow('꼭 드는 이사 비용', '이사업체 · LG 가전 이전 · 엘리베이터 등', signed(essential, -1), '', null, MV.fmt.won(essential)));
         body.appendChild(led);
         body.appendChild(cashResult({ netEssential: fs.netEssential, netWithPurchases: nwp, net, purchase, optional }));
       } else {
@@ -712,7 +716,7 @@ button.db-wk-head:hover { background:var(--bg-3); }
       body.appendChild(led);
       const nE = bal - pc.essential;
       body.appendChild(cashResult({ netEssential: nE, netWithPurchases: nE - pc.purchase, net: nE - pc.purchase - pc.optional, purchase: pc.purchase, optional: pc.optional }));
-      body.appendChild(el('div', { class: 'db-basis' }, '계획값 기준 (약) · 옷장은 이사 뒤 간이 옷장(선택·나중에), 커튼·소품은 지금 것, 입주청소는 직접, 예비비는 없어요. 11월 월세는 11/3에 낼 때만 넣었어요. 자금흐름 화면에서 실제 금액을 넣으면 자동으로 바뀝니다.'));
+      body.appendChild(el('div', { class: 'db-basis' }, '계획값 기준 (약) · 옷장은 이사 뒤 간이 옷장(선택·나중에), 커튼·소품은 지금 것, 입주청소는 직접, 예비비는 없어요. 11월 월세 70만원은 11/3에 낸다고 넣었어요 (계약서대로 후불이면 그만큼 여유). 자금흐름 화면에서 실제 금액을 넣으면 자동으로 바뀝니다.'));
     }
     return el('section', { class: 'card db-money', 'aria-label': '11월 3일 돈 흐름' },
       head('💸', (moveDay() ? md(moveDay()) : '이사일') + ' 돈 흐름', null, moreLink('자금흐름 자세히 →', '#/money')),
@@ -747,8 +751,8 @@ button.db-wk-head:hover { background:var(--bg-3); }
       body.appendChild(el('div', { class: 'db-est-head' },
         el('span', { class: 'db-est-big', title: MV.fmt.won(typ) + ' (' + vatTxt + ')' }, '약 ' + MV.fmt.krw(typ)),
         el('span', { class: 'db-vat' + (vatIn ? '' : ' is-ex') }, vatTxt)));
-      body.appendChild(el('div', { class: 'db-est-range' }, '범위 ' + MV.fmt.krw(low) + ' ~ ' + MV.fmt.krw(high) +
-        (exTyp != null && Math.abs(exTyp - typ) >= 1 ? ' · 부가세 별도 약 ' + MV.fmt.krw(exTyp) : '')));
+      body.appendChild(el('div', { class: 'db-est-range' }, el('span', { class: 'nowrap' }, '범위 ' + MV.fmt.krw(low) + ' ~ ' + MV.fmt.krw(high)),
+        exTyp != null && Math.abs(exTyp - typ) >= 1 ? el('span', { class: 'nowrap' }, ' · 부가세 별도 약 ' + MV.fmt.krw(exTyp)) : null));
       if (high > low) {
         const pos = MV.clamp((typ - low) / (high - low), 0, 1);
         body.appendChild(el('div', { class: 'db-range', 'aria-hidden': 'true' }, el('i', { style: { left: Math.round(pos * 100) + '%' } })));
@@ -1179,7 +1183,7 @@ button.db-wk-head:hover { background:var(--bg-3); }
         nextEl = el('div', { class: 'db-tile-next' + (late ? ' is-late' : ''), title: next.title },
           '다음: ' + (D.valid(next.due) ? D.fmt(next.due) + ' ' : '') + next.title);
       } else nextEl = el('div', { class: 'db-tile-next' }, complete ? '모두 완료 ✓' : '아직 항목이 없어요');
-      return el('a', { class: 'db-tile' + (complete ? ' is-complete' : ''), href: partHref(p.id), 'aria-label': p.name + ' · ' + st.total + '개 중 ' + st.done + '개 완료' + (st.overdue ? ' · 지연 ' + st.overdue + '개' : '') },
+      return el('a', { class: 'db-tile' + (complete ? ' is-complete' : ''), href: partHref(p.id), dataset: { dbKey: 'tile-' + p.id }, 'aria-label': p.name + ' · ' + st.total + '개 중 ' + st.done + '개 완료' + (st.overdue ? ' · 지연 ' + st.overdue + '개' : '') },
         el('div', { class: 'db-tile-top' },
           el('span', { class: 'db-tile-emo', 'aria-hidden': 'true' }, p.emoji || '📌'),
           el('span', { class: 'db-tile-name' }, p.name),
@@ -1191,30 +1195,30 @@ button.db-wk-head:hover { background:var(--bg-3); }
     let body;
     if (parts.length) {
       const n = Math.max(1, Math.min(isNum(cols) ? cols : 1, groups.length));
-      const pg = (g) => el('div', { class: 'db-pg' },
-        el('div', { class: 'db-pg-title' }, g),
-        el('div', { class: 'db-tiles' }, gmap.get(g).map(tile)));
+      const pg = (g) => el('div', { class: 'db-pg', dataset: { dbKey: 'pg-' + g, dbDeep: '1' } },
+        el('div', { class: 'db-pg-title', dataset: { dbKey: 'pgt' } }, g),
+        el('div', { class: 'db-tiles', dataset: { dbKey: 'tiles', dbDeep: '1' } }, gmap.get(g).map(tile)));
       // 높이 어림: 묶음 제목 ≈ 타일 0.6개
       const ranges = splitCols(groups.map((g) => 0.6 + gmap.get(g).length), n);
-      body = el('div', { class: 'db-pgroups', style: { '--db-pcols': String(ranges.length) } },
-        ranges.map(([a, b]) => el('div', { class: 'db-pcol' }, groups.slice(a, b).map(pg))));
+      body = el('div', { class: 'db-pgroups', style: { '--db-pcols': String(ranges.length) }, dataset: { dbKey: 'pgroups', dbDeep: '1' } },
+        ranges.map(([a, b], ci) => el('div', { class: 'db-pcol', dataset: { dbKey: 'pcol-' + ci, dbDeep: '1' } }, groups.slice(a, b).map(pg))));
     } else {
-      body = el('div', { class: 'db-empty' }, '파트가 없어요. ', el('a', { href: '#/checklist' }, '체크리스트에서 만들기 →'));
+      body = el('div', { class: 'db-empty', dataset: { dbKey: 'parts-empty' } }, '파트가 없어요. ', el('a', { href: '#/checklist' }, '체크리스트에서 만들기 →'));
     }
-    return el('section', { class: 'card db-parts db-span-12', 'aria-label': '파트별 진행' },
-      head('🗂️', '파트별 진행', parts.length + '개 파트', moreLink('체크리스트 →', '#/checklist')),
+    return el('section', { class: 'card db-parts db-span-12', 'aria-label': '파트별 진행', dataset: { dbDeep: '1' } },
+      head('🗂️', '파트별 진행', parts.length + '개 파트', moreLink('체크리스트 →', '#/checklist'), 'parts-head'),
       body);
   }
 
   /* ======================= 섹션: 최근 활동 · 바로가기 ======================= */
   function activityCard() {
     const acts = (MV.store.get().activity || []).slice(0, 8);
-    return el('section', { class: 'card db-activity db-span-7', 'aria-label': '최근 활동' },
-      head('🕘', '최근 활동', null, moreLink('전체 기록 →', '#/checklist/~activity')),
+    return el('section', { class: 'card db-activity db-span-7', 'aria-label': '최근 활동', dataset: { dbDeep: '1' } },
+      head('🕘', '최근 활동', null, moreLink('전체 기록 →', '#/checklist/~activity'), 'act-head'),
       acts.length
-        ? el('ul', { class: 'db-acts' }, acts.map((a) => el('li', { class: 'db-act' },
+        ? el('ul', { class: 'db-acts', dataset: { dbKey: 'acts', dbDeep: '1' } }, acts.map((a) => el('li', { class: 'db-act', dataset: { dbKey: 'a-' + String(a.at) + '|' + String(a.text || '').slice(0, 60) } },
           el('time', { datetime: a.at }, D.time(a.at)), el('span', String(a.text || '')))))
-        : el('div', { class: 'db-empty' }, '아직 기록이 없어요.'));
+        : el('div', { class: 'db-empty', dataset: { dbKey: 'acts-empty' } }, '아직 기록이 없어요.'));
   }
   function linksCard() {
     const mover = guideLink('mover');
@@ -1260,9 +1264,36 @@ button.db-wk-head:hover { background:var(--bg-3); }
     if (!k || keyOf(o) !== k) return false;
     if (!isDeep(n)) return !!o._dbSig && o._dbSig === n._dbSig;
     if (!isDeep(o) || shallow(o) !== shallow(n)) return false;
+    return patchKids(o, n);
+  }
+  /* 자식 목록 맞추기 (열쇠로 짝짓기): 순서가 그대로인 자식은 제자리에 두고 안쪽만 맞추고,
+     새로 생긴 자식은 앞 자식 바로 뒤에 끼우고, 없어진 자식은 뺍니다 (예: 할 일 한 줄 추가, 최근 활동 한 줄 추가). */
+  function patchKids(o, n) {
     const oK = Array.from(o.children), nK = Array.from(n.children);
-    if (oK.length !== nK.length || oK.some((x, i) => !keyOf(x) || keyOf(x) !== keyOf(nK[i]))) return false;
-    oK.forEach((x, i) => { if (!patchNode(x, nK[i])) x.replaceWith(nK[i]); });
+    if (o.childNodes.length !== oK.length || n.childNodes.length !== nK.length) return false;   // 글자 노드가 섞여 있으면 통째로
+    const ko = oK.map(keyOf), kn = nK.map(keyOf);
+    if (ko.some((k) => !k) || kn.some((k) => !k)) return false;
+    if (new Set(ko).size !== ko.length || new Set(kn).size !== kn.length) return false;      // 열쇠가 겹치면 통째로
+    const at = new Map(ko.map((k, j) => [k, j]));
+    const plan = [];
+    let p = 0;
+    kn.forEach((k) => {
+      const j = at.get(k);
+      if (j != null && j >= p) { plan.push(j); p = j + 1; } else plan.push(-1);   // 순서를 지키는 짝만 재사용
+    });
+    const used = new Set();
+    let last = null;
+    nK.forEach((x, i) => {
+      const j = plan[i];
+      let node = x;
+      if (j >= 0) {
+        used.add(j);
+        if (patchNode(oK[j], x)) node = oK[j]; else oK[j].replaceWith(x);
+      } else if (last) last.after(x);
+      else o.prepend(x);
+      last = node;
+    });
+    oK.forEach((x, j) => { if (!used.has(j)) x.remove(); });
     return true;
   }
   const keyed = (key, n) => { if (n && n.dataset) n.dataset.dbKey = key; return n; };
@@ -1357,7 +1388,10 @@ button.db-wk-head:hover { background:var(--bg-3); }
         if (e && e.reset) return;              // 초기화·복원·동기화는 app.js 가 화면 전체를 다시 그림
         if (pending) return;
         pending = true;
-        Promise.resolve().then(() => { pending = false; draw(); });
+        // 체크 표시 같은 바로 보이는 반응이 먼저 화면에 그려지게, 다음 프레임을 그린 뒤에 다시 그림
+        const run = () => { pending = false; draw(); };
+        if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => setTimeout(run, 0));
+        else setTimeout(run, 0);
       };
       ctx.subscribe(schedule);
       // 창 크기가 바뀌면: '파트별 진행' 칸 수가 달라질 때만 다시 그리고, 아니면 칸 흐림만 다시 확인
