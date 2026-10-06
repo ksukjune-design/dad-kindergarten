@@ -2108,6 +2108,12 @@
       const [a, b] = wiz.pts;
       return Math.hypot(b.x - a.x, b.y - a.y);
     }
+    /** 점을 옮기거나 되돌린 뒤 안내 띠의 '약 ○○cm'·단위 풀이를 지금 점에 맞춤 */
+    function syncWizDist() {
+      if (!wiz) return;
+      if (wiz.distEl) wiz.distEl.textContent = Math.round(wizDist()) + 'cm';
+      if (wiz.lenOut) updLen();
+    }
     function drawWizBar() {
       wizBar.hidden = !wiz;
       wizBar.textContent = '';
@@ -3224,8 +3230,11 @@
     };
     stage.addEventListener('pointerup', endDrag);
     stage.addEventListener('pointercancel', endDrag);
+    // 손가락으로 짐·축척 점을 끌 때 화면이 대신 움직이지 않게 (SVG 안 요소의 touch-action 은 브라우저마다 안 먹을 수 있어 직접 막음)
     stage.addEventListener('touchstart', (e) => {
-      if (!editMode && !wiz && e.touches.length === 1 && e.target.closest && e.target.closest('.fp-item')) e.preventDefault();
+      if (e.touches.length !== 1 || !e.target.closest) return;
+      if (!editMode && !wiz && e.target.closest('.fp-item')) e.preventDefault();
+      else if (wiz && wiz.step === 'pts' && e.target.closest('.fp-wizpt')) e.preventDefault();
     }, { passive: false });
 
     // ---- 사진 끌기 · 축척 점 옮기기 · 방 그리기 (마우스·터치·펜) ----
@@ -3258,8 +3267,7 @@
         if (!wiz) return;
         wiz.pts[g.i] = P;
         drawOverlay();
-        if (wiz.distEl) wiz.distEl.textContent = Math.round(wizDist()) + 'cm';
-        if (wiz.lenOut) updLen();
+        syncWizDist();
       } else if (g.type === 'draw') {
         g.rect = rectFrom(g.a, snapPt(P));
         drawOverlay();
@@ -3273,7 +3281,7 @@
       try { stage.releasePointerCapture(g.id); } catch (err) { /* 무시 */ }
       lastUp = Date.now();
       if (g.type === 'bgmove') { const im = svgEl && svgEl.querySelector('.fp-bg image'); if (im) im.setAttribute('transform', bgTransform(g.bg, g.x0, g.y0)); }
-      if (g.type === 'pt' && wiz && g.p0) { wiz.pts[g.i] = g.p0; if (wiz.lenOut) updLen(); }
+      if (g.type === 'pt' && wiz && g.p0) { wiz.pts[g.i] = g.p0; syncWizDist(); }
       drawOverlay();
     }
     stage.addEventListener('pointerdown', (e) => {
