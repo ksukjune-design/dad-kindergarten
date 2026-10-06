@@ -309,7 +309,7 @@ button.db-wk-head:hover { background:var(--bg-3); }
           big,
           el('div', { class: 'db-when' }, D.fmtLong(move) + (dd.n > 0 ? ' · ' + dd.label : '')),
           el('div', { class: 'db-route' },
-            el('span', '등촌우성 2층'), el('span', { class: 'db-route-arrow', 'aria-label': '에서' }, '→'), el('span', '서광등촌마을 14층'),
+            el('span', '등촌우성 2층'), el('span', { class: 'db-route-arrow', 'aria-hidden': 'true' }, '→'), el('span', '서광등촌마을 14층'),
             aOld && aNew ? el('span', { class: 'db-route-area' }, '전용 ' + aOld + ' → ' + aNew) : null)),
         el('div', { class: 'db-hero-right' },
           el('div', { class: 'db-prog-top' },
