@@ -6,7 +6,10 @@
 
    라우트   #/agent        대화 화면 (메뉴 order 15, 기능이 있을 때만 nav 표시)
    대화     이 브라우저의 localStorage 'mv:agent:chat' 에 마지막 40개 (보는 사람마다 따로)
+            같은 브라우저의 다른 탭과는 저장할 때·storage 이벤트 때 메시지 id 로 합침 (지운 id 는 removed 로 기억)
             매 요청 = [지시 턴(오늘·사실·앱 데이터 요약 JSON·규칙)] + 최근 대화 12턴 (120KB 이하)
+            끊긴 답을 '다시 보내기'하면 끊긴 글·이미 바꾼 목록을 같이 보내 같은 변경을 되풀이하지 않게 함
+            (다시 보내기·도구 없이 묻기는 대화의 마지막 답에만). tools_unavailable 을 받으면 이 창에서는 도구 없이 물음
    도구     sample.limits().tools 가 있을 때만 (없으면 요약만 보고 답하고 '직접 고치세요'로 안내)
             읽기: get_overview, list_items, get_item, list_parts, get_budget, get_estimate,
                   get_workplan(주별 일정), get_move_day(이사 당일 순서), list_inventory
@@ -15,8 +18,12 @@
             고치는 도구는 MV.items/MV.inv/MV.store.update 로만 바꾸고 활동 기록에 '🤖 ' 를 붙입니다.
             삭제 도구는 없습니다. 자금흐름 상태가 아직 없으면 자금흐름 화면이 기본값을 만들게 합니다.
    🤖 버튼  #/agent 가 아닌 모든 화면 오른쪽 아래 (모달이 열리면 숨김, 화면 아래 입력줄이 있으면 그 위로)
-   되돌리기 요청 직전 상태를 MV.clone 으로 떠 두고, 답 아래 '변경 n건' 상자에서 한 번에 되돌림
-            (MV.store.restore). 이후 데이터가 바뀌면 되돌리기를 막습니다. 새로고침하면 사라짐.
+            페이지가 스크롤되는 화면에는 맨 아래 76px 빈 자리(body.ag-fab-pad)를 둬서 마지막 버튼이 가려지지 않게
+   되돌리기 도구가 처음 고치기 직전에 그 할 일·짐(하나씩)·예산·견적(통째로)의 값을 떠 두고, 답 아래 '변경 n건'
+            상자에서 그것만 되돌림 (도면 사진·화면 설정·다른 항목은 그대로). 답마다 따로(최근 10개),
+            그 답이 고친 것을 이후에 누가 또 고치면 그 답의 되돌리기만 막음. 새로고침하면 사라짐.
+   예산     예산 화면과 같은 틀: ① 꼭 드는 이사 비용 기준 11/3 전후 현금(netEssential) ② 살림까지 ③ 전부.
+            줄마다 group(essential/purchase/optional), AI가 고친 줄은 edited=true (자금흐름 기본값 바꿈이 건드리지 않게)
    오류     sample 오류 코드마다 한국어 안내, 자동 재시도 없음 (사용자가 '다시 보내기').
    CSS 접두사: ag-
    ============================================================ */
@@ -36,6 +43,7 @@
   const TURN_CHARS = 8000;            // 지난 대화 한 턴의 최대 글자 수
   const MAX_TEXT = 4000;              // 입력 최대 글자 수
   const RESULT_BYTES = 28 * 1024;     // 도구 결과 최대 (플랫폼 한도 32KB)
+  const MAX_UNDOS = 10;               // 되돌리기를 기억하는 답 수 (이 창에서만)
   const OWNER_LABEL = { '': '미정', '나': '나', '아내': '아내', '함께': '함께' };
   const PRI_LABEL = { high: '중요', mid: '보통', low: '여유' };
   const PRI_RANK = { high: 0, mid: 1, low: 2 };
@@ -160,11 +168,15 @@
   const R = {
     capsSeen: false,
     blocked: null,       // 이 화면에서 기능을 숨기게 한 오류 코드
+    toolsOff: false,     // tools_unavailable 을 한 번 받으면 이 창에서는 도구 없이 물음
+    tierNote: false,     // ⚡ 빠른 답변을 요금제가 못 받아 다른 모델이 답한 적 있음
     limitsP: null,       // Promise<limits|null>
     limits: undefined,   // 확인된 limits (null = 확인 실패)
-    chat: loadChat(),
+    mine: new Set(),     // 이 창에서 만들거나 고친 메시지 id (다른 탭과 합칠 때 이 창 것이 이김)
+    removed: new Set(),  // 이 창에서 지운 메시지 id (다른 탭 기록과 합칠 때 다시 살아나지 않게)
+    chat: { msgs: [] },
     active: null,        // 진행 중인 요청
-    undo: null,          // { msgId, snapshot, fp, foreign }
+    undos: new Map(),    // 답 id → { pre, fp, foreign } — 그 답에서 AI가 고친 것들의 고치기 전 값 (답마다 따로 되돌림)
     inTool: false,       // 도구가 데이터를 바꾸는 중 (그때 생긴 change 는 우리 것)
     draft: lsGet(DRAFT_KEY) || '',
     prefs: loadPrefs(),
@@ -172,25 +184,76 @@
     composerFocused: false,
   };
 
-  function loadChat() {
-    let msgs = [];
+  /* ---- 대화 저장: 같은 브라우저의 다른 탭과 합쳐서 저장 (서로 덮어쓰지 않게) ---- */
+  const okMsg = (m) => m && typeof m === 'object' && typeof m.id === 'string' && (m.role === 'user' || m.role === 'assistant') && typeof m.text === 'string';
+  function readStored() {
     try {
-      const raw = lsGet(CHAT_KEY);
-      const o = raw ? JSON.parse(raw) : null;
-      if (o && Array.isArray(o.msgs)) msgs = o.msgs;
-    } catch (e) { msgs = []; }
-    msgs = msgs.filter((m) => m && typeof m === 'object' && (m.role === 'user' || m.role === 'assistant') && typeof m.text === 'string').slice(-KEEP_MSGS);
-    msgs.forEach((m) => {
-      if (!m.id) m.id = MV.uid('am');
-      if (m.status === 'pending') { m.status = 'stopped'; m.note = '창을 닫거나 새로고침해서 답이 끊겼어요.'; }
-      if (m.undo === 'avail') m.undo = 'gone';   // 되돌리기 사진은 그 창에만 있음
-      if (!Array.isArray(m.changes)) m.changes = [];
+      const o = JSON.parse(lsGet(CHAT_KEY) || 'null');
+      if (o && Array.isArray(o.msgs)) return { msgs: o.msgs.filter(okMsg), removed: Array.isArray(o.removed) ? o.removed.filter((x) => typeof x === 'string') : [] };
+    } catch (e) { /* 무시 */ }
+    return { msgs: [], removed: [] };
+  }
+  /** 다른 탭(또는 지난번 창)이 저장한 메시지를 이 창에서 보여 줄 모양으로 */
+  function viewCopy(m, first) {
+    const c = MV.clone(m);
+    if (!Array.isArray(c.changes)) c.changes = [];
+    if (first && c.status === 'pending') { c.status = 'stopped'; c.note = '창을 닫거나 새로고침해서 답이 끊겼어요.'; c.actions = []; }
+    // 되돌리기 정보는 답을 받은 창에만 있음 (답하는 중에 새로고침한 경우 포함)
+    if (c.changes.length && (c.undo === 'avail' || !c.undo)) c.undo = 'gone';
+    return c;
+  }
+  const tms = (m) => { const t = Date.parse(m && m.at); return isFinite(t) ? t : 0; };
+  /** 저장된 기록 + 이 창의 기록 → { mem: 이 창에서 보여 줄 목록, store: 저장할 목록, changed: 다른 탭 것이 바뀜 } */
+  function mergeChat(stored, first) {
+    const removed = new Set(stored.removed);
+    R.removed.forEach((id) => removed.add(id));
+    const sById = new Map(stored.msgs.map((m) => [m.id, m]));
+    const memById = new Map(R.chat.msgs.map((m) => [m.id, m]));
+    const rows = [];
+    let changed = false;
+    R.chat.msgs.forEach((m, k) => {
+      if (removed.has(m.id)) { changed = true; return; }
+      if (R.mine.has(m.id)) { rows.push({ k, m, s: m }); return; }
+      const s = sById.get(m.id);
+      if (!s) { changed = true; return; }           // 다른 탭에서 지웠거나 오래돼 밀려남
+      if (JSON.stringify(s) !== m._raw) { changed = true; const c = viewCopy(s, false); c._raw = JSON.stringify(s); rows.push({ k, m: c, s }); return; }
+      rows.push({ k, m, s });
     });
-    return { msgs };
+    stored.msgs.forEach((s, i) => {
+      if (memById.has(s.id) || removed.has(s.id)) return;
+      const c = viewCopy(s, first);
+      c._raw = JSON.stringify(s);
+      rows.push({ k: 100000 + i, m: c, s });
+      if (!first) changed = true;
+    });
+    rows.sort((a, b) => (tms(a.m) - tms(b.m)) || (a.k - b.k));
+    const keep = rows.slice(-KEEP_MSGS);
+    return { mem: keep.map((r) => r.m), store: keep.map((r) => r.s), removed, changed };
   }
+  function loadChat() {
+    R.chat = { msgs: mergeChat(readStored(), true).mem };
+  }
+  const stripRaw = (m) => { if (!m || m._raw === undefined) return m; const c = Object.assign({}, m); delete c._raw; return c; };
   function saveChat() {
-    lsSet(CHAT_KEY, JSON.stringify({ v: 1, msgs: R.chat.msgs.slice(-KEEP_MSGS) }));
+    const r = mergeChat(readStored(), false);
+    R.chat.msgs = r.mem;
+    lsSet(CHAT_KEY, JSON.stringify({ v: 2, msgs: r.store.map(stripRaw), removed: Array.from(r.removed).slice(-400) }));
+    if (r.changed) repaintSoon();
   }
+  /** 이 창이 메시지를 고쳤음 — 다른 탭 기록과 합칠 때 이 창 것을 씀 */
+  const own = (m) => { if (m && m.id) { R.mine.add(m.id); delete m._raw; } return m; };
+  let repaintTimer = null;
+  function repaintSoon() {
+    if (repaintTimer) return;
+    repaintTimer = setTimeout(() => { repaintTimer = null; paintAll(false); updateComposer(); }, 0);
+  }
+  window.addEventListener('storage', (e) => {
+    if (e.key !== CHAT_KEY) return;
+    const r = mergeChat(readStored(), false);
+    R.chat.msgs = r.mem;
+    if (r.changed) repaintSoon();
+  });
+  loadChat();
   function loadPrefs() {
     try { const o = JSON.parse(lsGet(PREF_KEY) || '{}'); return { quick: !!(o && o.quick) }; } catch (e) { return { quick: false }; }
   }
@@ -258,6 +321,7 @@
       } catch (e) { /* 무시 */ }
     }
     if (fab.hidden !== !show) fab.hidden = !show;
+    padFab(show);
     fab.classList.toggle('ag-busy', !!R.active);
     fab.title = R.active ? 'AI 비서가 답하는 중 — 눌러서 보기' : 'AI 비서에게 묻기';
     if (show) placeSoon();
@@ -303,7 +367,18 @@
     } finally { fab.style.pointerEvents = ''; }
     return top;
   }
+  /* 페이지가 스크롤되는 화면에서는 맨 아래에 버튼만큼 빈 자리를 둬서 마지막 버튼·입력칸이 🤖 아래에 갇히지 않게 */
+  const FAB_PAD = 76;
+  function padFab(show) {
+    const b = document.body;
+    if (!b) return;
+    const on = b.classList.contains('ag-fab-pad');
+    let want = !!show;
+    if (want) want = document.documentElement.scrollHeight - (on ? FAB_PAD : 0) > window.innerHeight + 2;
+    if (want !== on) b.classList.toggle('ag-fab-pad', want);
+  }
   function placeFab() {
+    padFab(!!fab && !fab.hidden && fab.isConnected);
     if (!fab || fab.hidden || !fab.isConnected) return;
     // 움직이는 중(transition)에는 위치를 잴 수 없으니 잠깐 끄고 재요
     const from = fab.style.bottom;
@@ -359,20 +434,79 @@
     if (pr) return pr;
     return (a.order || 0) - (b.order || 0);
   }
-  function financeNumbers() {
-    let fs = null;
-    try { fs = MV.calc && typeof MV.calc.financeSummary === 'function' ? MV.calc.financeSummary(MV.store.get()) : null; } catch (e) { fs = null; }
-    if (!fs || typeof fs !== 'object') return null;
+  /* 예산 묶음 — view-finance.js 의 GROUPS·GROUP_OF 와 같은 규칙 (줄에 group 이 없으면 id 로, 직접 넣은 줄은 '새로 사는 살림') */
+  const GROUP_LABEL = { essential: '꼭 드는 이사 비용', purchase: '새로 사는 살림', optional: '선택·나중에' };
+  const GROUP_OF = { mover: 'essential', lg: 'essential', elevator: 'essential', waste: 'essential', internet: 'essential', washer: 'purchase', wardrobe: 'optional', hug: 'optional', deco: 'purchase', clean: 'optional', reserve: 'optional' };
+  const groupOf = (l) => (l && GROUP_LABEL[l.group] ? l.group : (l && GROUP_OF[l.id]) || 'purchase');
+  function parseGroup(v) {
+    const s = str(v, 20).toLowerCase().replace(/\s+/g, '');
+    if (GROUP_LABEL[s]) return s;
+    if (/^(꼭|필수|이사비|이사비용|꼭드는)/.test(s)) return 'essential';
+    if (/^(살림|구매|구입|새로사는)/.test(s)) return 'purchase';
+    if (/^(선택|나중)/.test(s)) return 'optional';
+    throw new Error('묶음(group)은 essential(꼭 드는 이사 비용)·purchase(새로 사는 살림)·optional(선택·나중에) 중 하나로 주세요.');
+  }
+  /** 이름으로 묶음 짐작 (모델이 group 을 안 줬을 때) */
+  function guessGroup(label) {
+    const s = String(label || '');
+    if (/옷장|세탁기|냉장고|건조기|가구|가전|커튼|소품|침대|소파|책상|식탁|매트리스|조명|구매|구입/.test(s)) return 'purchase';
+    if (/보증료|보험|나중|선택|HUG/i.test(s)) return 'optional';
+    if (/이사|청소|폐기|엘리베이터|사다리|인터넷|이전|설치|보관|관리비|정산|도시가스|수리|열쇠|도어락|용달/.test(s)) return 'essential';
+    return 'purchase';
+  }
+  const verdict = (n) => (n < 0 ? '부족 ' : '여유 ') + krw(Math.abs(n));
+  /** financeSummary 의 경고 — 예산(부족) 경고는 잘리지 않게 앞으로 */
+  function financeWarnings(fs, max) {
+    const ws = Array.isArray(fs && fs.warnings) ? fs.warnings.filter((w) => w && w.text) : [];
+    const isBudget = (w) => (/이사 비용|예산/.test(w.text) ? 1 : 0);
+    const sorted = ws.map((w, i) => ({ w, i })).sort((a, b) => (isBudget(b.w) - isBudget(a.w)) || (a.i - b.i)).map((x) => x.w);
+    return { list: sorted.slice(0, max).map((w) => clip(w.text, 170)), more: Math.max(0, sorted.length - max) };
+  }
+  /** 예산 숫자 — 자금흐름 '이사 비용 예산' 화면과 같은 틀: ① 꼭 드는 비용 기준(머리 숫자) ② 살림까지 ③ 전부 */
+  function moneyFrame(fs) {
     const n = (k) => Math.round(num(fs[k]));
+    const has3 = isFinite(fs.netEssential) && isFinite(fs.essentialUnpaid);
+    const move = D.fmt(D.moveDate());
+    const out = {
+      leftoverAfterMoveDay: n('leftover'),
+      essentialToPay: has3 ? n('essentialUnpaid') : null,
+      purchaseToPay: has3 ? n('purchaseUnpaid') : null,
+      optionalToPay: has3 ? n('optionalUnpaid') : null,
+      netEssential: has3 ? n('netEssential') : n('net'),
+      netWithPurchases: has3 ? n('netWithPurchases') : n('net'),
+      netAll: n('net'),
+      alreadyPaid: n('expensesPaid'), budgetTotal: n('expensesAll'), stillToPayAll: n('expensesTotal'),
+      refundsExpected: n('refunds'), netAllWithRefunds: n('netWithRefunds'),
+      rentOnMoveDay: n('rentPart'),
+    };
+    out.text = {
+      headline: move + ' 전후 꼭 필요한 현금: 꼭 드는 이사 비용 ' + (has3 ? krw(out.essentialToPay) : '?') + ' → ' + (out.netEssential < 0 ? '⚠ 내면 ' : '내고 ') + verdict(out.netEssential),
+      withPurchases: '새로 사는 살림' + (has3 ? '(' + krw(out.purchaseToPay) + ')' : '') + '까지: ' + verdict(out.netWithPurchases),
+      allIncluded: '선택·나중에' + (has3 ? '(' + krw(out.optionalToPay) + ')' : '') + '까지 전부: ' + verdict(out.netAll),
+      leftoverAfterMoveDay: move + ' 돈 흐름 뒤 남는 돈 ' + krw(out.leftoverAfterMoveDay),
+      rent: out.rentOnMoveDay ? move + ' 돈 흐름에 11월 월세 ' + krw(out.rentOnMoveDay) + ' 포함 — 계약서상 후불이면 그만큼 덜 나가요 (확인 필요)' : '',
+    };
+    return out;
+  }
+  function financeSummaryNow() {
+    try { return MV.calc && typeof MV.calc.financeSummary === 'function' ? MV.calc.financeSummary(MV.store.get()) : null; } catch (e) { return null; }
+  }
+  function financeNumbers() {
+    const fs = financeSummaryNow();
+    if (!fs || typeof fs !== 'object') return null;
+    const f = moneyFrame(fs);
+    const w = financeWarnings(fs, 6);
     return {
-      leftoverAfterMoveDay: won(n('leftover')),
-      budgetTotal: won(n('expensesAll')),
-      alreadyPaid: won(n('expensesPaid')),
-      stillToPay: won(n('expensesTotal')),
-      refundsExpected: won(n('refunds')),
-      balance: (n('net') < 0 ? '부족 ' : '여유 ') + won(Math.abs(n('net'))),
-      balanceWithRefunds: (n('netWithRefunds') < 0 ? '부족 ' : '여유 ') + won(Math.abs(n('netWithRefunds'))),
-      warnings: Array.isArray(fs.warnings) ? fs.warnings.slice(0, 5).map((w) => clip(w && w.text, 160)) : [],
+      howToRead: '예산·부족 질문에는 예산 화면(#/money/budget)과 같은 순서로: ① cashVsEssential(머리 숫자) ② withPurchases ③ allIncluded. "부족"을 하나로 뭉뚱그리지 마세요.',
+      cashVsEssential: f.text.headline,
+      withPurchases: f.text.withPurchases,
+      allIncluded: f.text.allIncluded,
+      leftoverAfterMoveDay: f.text.leftoverAfterMoveDay,
+      rentNote: f.text.rent || undefined,
+      alreadyPaid: krw(f.alreadyPaid),
+      refundsExpected: krw(f.refundsExpected) + ' (받으면 전부 기준 ' + verdict(f.netAllWithRefunds) + ')',
+      warnings: w.list,
+      moreWarnings: w.more || undefined,
     };
   }
   function estimateNumbers() {
@@ -443,6 +577,8 @@
       '5. 날짜는 M/D(요일) 형식(예: ' + D.fmt(move) + '), 금액은 "32만원", "2억 9,500만원"처럼 쓰세요. "다음 주 월요일" 같은 말은 [날짜 참고]로 실제 날짜(YYYY-MM-DD)를 계산하세요.',
       '6. 할 일을 추가·수정할 때 "@아내"·"@나"·"@함께"는 담당자, "!중요"는 priority high("!보통" mid, "!여유" low)예요. 파트를 말하지 않으면 가장 알맞은 파트를 고르세요.',
       '7. 앱 화면 링크를 마크다운으로 붙일 수 있어요: [할 일](#/checklist/<partId>/<itemId>), [지금 할 일](#/checklist/~focus), [예산](#/money/budget), [' + D.fmt(move) + ' 돈 흐름](#/money/flow), [업체 견적](#/stuff/quotes), [이사 견적](#/stuff/estimate), [짐 목록](#/stuff/inventory), [대시보드](#/dashboard), [가이드](#/guide/<partId>).',
+      '8. 예산·부족을 물으면 예산 화면(#/money/budget)과 같은 순서로 답하세요: ① 꼭 드는 이사 비용 기준 ' + D.fmt(move) + ' 전후 현금 여유/부족(머리 숫자 — finance.cashVsEssential) ② 새로 사는 살림까지 ③ 선택·나중에까지 전부. "부족"을 한 숫자로 뭉뚱그리지 마세요. 중개보수·잔금·대출 상환·월세는 예산이 아니라 돈 흐름에 이미 들어 있어요.',
+      '9. 지난 답에 "(이 답에서 앱에 이미 반영한 변경: …)"이 붙어 있으면 그 변경은 이미 저장됐어요 — 같은 변경을 다시 하지 마세요.',
     ];
     return [
       '[역할]',
@@ -478,12 +614,52 @@
     ctx.call.changes.push({ t: String(t), href: href || null });
     paintMsg(ctx.call.msgId);
   }
-  /** 도구가 데이터를 바꿀 때 — 중지됐거나 끝난 요청이면 바꾸지 않음 */
-  function mutate(ctx, fn) {
+  /* ---- 되돌리기용 기록: AI가 고친 것만 (할 일·짐은 하나씩, 예산·견적은 통째로) ----
+     touch = { items: [id...] } | { inventory: [id...] } | { section: 'finance' | 'estimate' }
+     pre   = { items: {id: 고치기 전 값 | null(새로 만듦)}, inventory: {...}, sections: {key: 값 | null(없었음)} } */
+  const NONE = null;
+  function entityNow(kind, id) {
+    const st = MV.store.get();
+    const list = Array.isArray(st[kind]) ? st[kind] : [];
+    const x = list.find((y) => y && y.id === id);
+    return x === undefined ? NONE : x;
+  }
+  function sectionNow(key) { const v = MV.store.get()[key]; return v === undefined ? NONE : v; }
+  function touchKeys(touch) {
+    const out = [];
+    if (touch.items) touch.items.forEach((id) => out.push(['items', id]));
+    if (touch.inventory) touch.inventory.forEach((id) => out.push(['inventory', id]));
+    if (touch.section) out.push(['sections', touch.section]);
+    return out;
+  }
+  const valueOf = (kind, id) => (kind === 'sections' ? sectionNow(id) : entityNow(kind, id));
+  function fpValue(v) { try { return hash(JSON.stringify(v === undefined ? null : v)); } catch (e) { return MV.uid('fp'); } }
+  /** 되돌리기 대상(AI가 고친 것)의 지금 모습 지문 — 이게 바뀌면(사람이 이후에 고치면) 한 번에 되돌리기를 막음 */
+  function undoFingerprint(pre) {
+    if (!pre) return '';
+    const parts = [];
+    ['items', 'inventory', 'sections'].forEach((kind) => Object.keys(pre[kind] || {}).sort().forEach((id) => parts.push(kind + ':' + id + '=' + fpValue(valueOf(kind, id)))));
+    // AI가 새로 넣은 짐을 도면에 놓았으면 되돌릴 때 배치가 깨지니 도면 배치도 같이 봄
+    if (Object.keys(pre.inventory || {}).some((id) => pre.inventory[id] === NONE)) parts.push('layouts=' + fpValue(MV.store.get().layouts));
+    return parts.join('|');
+  }
+  /** 도구가 데이터를 바꿀 때 — 중지됐거나 끝난 요청이면 바꾸지 않음. touch: 무엇을 바꾸는지 (되돌리기용) */
+  function mutate(ctx, fn, touch) {
     if (ctx.signal && ctx.signal.aborted) throw new Error('중지해서 바꾸지 않았어요.');
     if (R.active !== ctx.call) throw new Error('이 요청은 이미 끝나서 바꾸지 않았어요.');
+    const call = ctx.call;
+    const keys = touch ? touchKeys(touch) : [];
+    keys.forEach(([kind, id]) => {
+      const box = call.pre[kind];
+      if (!Object.prototype.hasOwnProperty.call(box, id)) box[id] = MV.clone(valueOf(kind, id));
+      // AI가 앞서 고친 뒤에 사람이 같은 것을 또 고쳤으면 되돌릴 때 그것도 되돌아감 → 확인 창에서 알림
+      else if (call.post[kind + ':' + id] && call.post[kind + ':' + id] !== fpValue(valueOf(kind, id))) call.foreign = true;
+    });
     R.inTool = true;
-    try { return fn(); } finally { R.inTool = false; }
+    try { return fn(); } finally {
+      R.inTool = false;
+      keys.forEach(([kind, id]) => { call.post[kind + ':' + id] = fpValue(valueOf(kind, id)); });
+    }
   }
   function capResult(out) {
     if (typeof out === 'string') return bytes(out) <= RESULT_BYTES ? out : out.slice(0, 8000) + '…(잘림)';
@@ -543,27 +719,28 @@
     }
     return Math.round(num(line.amount));
   }
+  /** 도구 결과용 예산 요약 — 숫자(원) + 화면과 같은 틀의 글 */
   function budgetSummary() {
-    const fsum = MV.calc && MV.calc.financeSummary;
-    if (typeof fsum !== 'function') return null;
-    let fs;
-    try { fs = fsum(MV.store.get()); } catch (e) { return null; }
-    const n = (k) => Math.round(num(fs[k]));
+    const fs = financeSummaryNow();
+    if (!fs || typeof fs !== 'object') return null;
+    const f = moneyFrame(fs);
+    const w = financeWarnings(fs, 5);
     return {
-      leftoverAfterMoveDay: n('leftover'), budgetTotal: n('expensesAll'), alreadyPaid: n('expensesPaid'), stillToPay: n('expensesTotal'),
-      refundsExpected: n('refunds'), balance: n('net'), balanceWithRefunds: n('netWithRefunds'),
-      text: {
-        leftoverAfterMoveDay: krw(n('leftover')), budgetTotal: krw(n('expensesAll')), alreadyPaid: krw(n('expensesPaid')), stillToPay: krw(n('expensesTotal')),
-        balance: (n('net') < 0 ? '부족 ' : '여유 ') + krw(Math.abs(n('net'))),
-        balanceWithRefunds: (n('netWithRefunds') < 0 ? '부족 ' : '여유 ') + krw(Math.abs(n('netWithRefunds'))),
-      },
-      warnings: Array.isArray(fs.warnings) ? fs.warnings.slice(0, 5).map((w) => clip(w && w.text, 160)) : [],
+      howToRead: '"얼마나 부족해?"에는 text.headline(꼭 드는 이사 비용 기준, 예산 화면 머리 숫자)을 먼저, 그다음 withPurchases, allIncluded 순서로 답하세요.',
+      leftoverAfterMoveDay: f.leftoverAfterMoveDay,
+      essentialToPay: f.essentialToPay, purchaseToPay: f.purchaseToPay, optionalToPay: f.optionalToPay,
+      netEssential: f.netEssential, netWithPurchases: f.netWithPurchases, netAll: f.netAll,
+      alreadyPaid: f.alreadyPaid, budgetTotal: f.budgetTotal, refundsExpected: f.refundsExpected,
+      text: Object.assign({ balance: '꼭 드는 이사 비용 기준 ' + verdict(f.netEssential) + ' (전부 포함 ' + verdict(f.netAll) + ')' }, f.text),
+      warnings: w.list,
     };
   }
   function lineView(st, l) {
     const v = lineValue(st, l);
+    const g = groupOf(l);
     return {
       id: l.id, label: l.label, amount: v, amountTxt: krw(v),
+      group: g, groupLabel: GROUP_LABEL[g],
       mode: AUTO_BUDGET.has(l.id) ? (l.auto !== false ? 'auto' : 'manual') : 'manual',
       included: l.on !== false, paid: !!l.paid, date: l.date || '', memo: clip(l.memo, 120),
     };
@@ -743,6 +920,7 @@
   const S_PRI = { type: 'string', enum: ['high', 'mid', 'low'], description: 'high=중요, mid=보통, low=여유' };
   const S_DATE = { type: ['string', 'null'], description: 'YYYY-MM-DD (지우려면 null)' };
   const S_MONEY = { type: ['number', 'string'], description: '원 단위 숫자 또는 "32만원"·"2.1억" 같은 글' };
+  const S_GROUP = { type: 'string', enum: ['essential', 'purchase', 'optional'], description: 'essential=꼭 드는 이사 비용, purchase=새로 사는 살림, optional=선택·나중에' };
   const TOOLS = [
     {
       name: 'get_overview', label: '전체 현황 보는 중',
@@ -838,7 +1016,7 @@
         if (!diffs.length) return { id: it.id, title: it.title, changed: [], note: '이미 그 상태라 바꾼 것이 없어요.' };
         const onlyDone = Object.keys(patch).every((k) => k === 'done' || k === 'doneAt');
         const logText = onlyDone ? (patch.done ? '🤖 ✅ 완료: ' : '🤖 ↩︎ 다시 열기: ') + it.title : '🤖 항목 수정: ' + it.title + ' (' + diffs.join(', ') + ')';
-        mutate(ctx, () => MV.items.update(it.id, patch, logText));
+        mutate(ctx, () => MV.items.update(it.id, patch, logText), { items: [it.id] });
         const now = MV.items.get(it.id) || it;
         record(ctx, (patch.done === true && onlyDone ? '✅ ' : '✏️ ') + '“' + clip(now.title, 40) + '” — ' + diffs.join(', '), itemHref(now));
         return { id: now.id, title: now.title, changed: diffs, item: compactItem(now) };
@@ -866,7 +1044,7 @@
         const dup = MV.items.list((x) => x.partId === p.id && !x.done && String(x.title || '').replace(/\s+/g, '') === title.replace(/\s+/g, ''))[0];
         if (dup) throw new Error('같은 제목의 할 일이 이미 있어요 (id ' + dup.id + ', 기한 ' + fmtDue(dup.due) + '). 고치려면 update_item 을 쓰세요.');
         const it = MV.store.normItem({ partId: p.id, title, due, owner, priority, detail, order: Date.now() });
-        mutate(ctx, () => MV.store.update((st) => { st.items.push(it); }, { log: '🤖 할 일 추가: ' + title }));
+        mutate(ctx, () => MV.store.update((st) => { st.items.push(it); }, { log: '🤖 할 일 추가: ' + title }), { items: [it.id] });
         record(ctx, '➕ 할 일 추가: “' + clip(title, 40) + '” (' + p.name + ' · ' + fmtDue(due) + ' · ' + OWNER_LABEL[owner] + ' · ' + PRI_LABEL[priority] + ')', itemHref(it));
         return { id: it.id, partId: p.id, part: p.name, title, due, dueFmt: fmtDue(due), owner, priority };
       },
@@ -879,6 +1057,10 @@
         const it = needItem(a.id);
         const text = String(a.text == null ? '' : a.text).trim().slice(0, 2000);
         if (!text) throw new Error('메모 내용이 비어 있어요.');
+        // 같은 메모가 이미 있으면 다시 남기지 않음 (끊긴 답을 다시 보낼 때 두 번 남는 것 방지)
+        const flat = (x) => String(x || '').replace(/\s+/g, ' ').trim();
+        const same = (Array.isArray(it.notes) ? it.notes : []).slice(-20).find((n) => n && flat(n.text) === flat(text));
+        if (same) return { noteId: same.id, id: it.id, title: it.title, changed: [], note: '같은 메모가 이미 있어 다시 남기지 않았어요 (' + D.time(same.at) + ').' };
         const note = { id: MV.uid('nt'), text, at: MV.nowISO() };
         mutate(ctx, () => MV.store.update((st) => {
           const x = st.items.find((y) => y.id === it.id);
@@ -886,14 +1068,14 @@
           if (!Array.isArray(x.notes)) x.notes = [];
           x.notes.push(note);
           x.updatedAt = note.at;
-        }, { log: '🤖 💬 메모: ' + it.title }));
+        }, { log: '🤖 💬 메모: ' + it.title }), { items: [it.id] });
         record(ctx, '💬 메모 “' + clip(it.title, 30) + '”: ' + clip(text, 60), itemHref(it));
         return { noteId: note.id, id: it.id, title: it.title };
       },
     },
     {
       name: 'get_budget', label: '예산 보는 중',
-      description: '이사 예산(자금흐름 화면)을 읽어요: 지출 항목 lines[{id, label, amount, mode(auto=자동 계산/manual=직접), included, paid, date, memo}], 들어올 돈 refunds[{id, label, amount, received}], 요약 summary(이사 날 뒤 남는 돈, 예산 합계, 낸 돈, 낼 돈, 여유/부족). 금액은 원.',
+      description: '이사 예산(자금흐름 화면)을 읽어요: 지출 항목 lines[{id, label, amount, group(essential=꼭 드는 이사 비용/purchase=새로 사는 살림/optional=선택·나중에), mode(auto/manual), included, paid, date, memo}], 들어올 돈 refunds[], 요약 summary — 부족·여유는 summary.text.headline(꼭 드는 비용 기준, 머리 숫자) → withPurchases → allIncluded 순서로 말하세요. 금액은 원.',
       run: () => {
         const fin = ensureFinance();
         const st = MV.store.get();
@@ -901,17 +1083,19 @@
           lines: fin.budget.lines.filter((x) => x && typeof x === 'object').map((l) => lineView(st, l)),
           refunds: (fin.budget.refunds || []).filter((x) => x && typeof x === 'object').map((r) => ({ id: r.id, label: r.label, amount: Math.round(num(r.amount)), amountTxt: krw(r.amount), received: !!r.got, memo: clip(r.memo, 120) })),
           summary: budgetSummary(),
+          note: '중개보수·잔금·보증금·대출 상환·11월 월세는 예산이 아니라 ' + D.fmt(D.moveDate()) + ' 돈 흐름(#/money/flow)에 들어 있어요 (leftoverAfterMoveDay 에 이미 반영).',
           link: '#/money/budget',
         };
       },
     },
     {
       name: 'update_budget', label: '예산 고치는 중',
-      description: '예산 항목(지출 또는 들어올 돈) 하나를 고쳐요. id 는 get_budget 의 id(또는 정확한 항목 이름). amount 를 주면 자동 계산 항목은 직접 입력으로 바뀌어요. paid=냈음(들어올 돈은 받음), included=예산에 넣기, auto:true=자동 계산으로 되돌리기. 결과에 바뀐 내용과 다시 계산한 요약.',
+      description: '예산 항목(지출 또는 들어올 돈) 하나를 고쳐요. id 는 get_budget 의 id(또는 정확한 항목 이름). amount 를 주면 자동 계산 항목은 직접 입력으로 바뀌어요. paid=냈음(들어올 돈은 받음), included=예산에 넣기, auto:true=자동 계산으로 되돌리기, group=묶음 옮기기. 결과에 바뀐 내용과 다시 계산한 요약.',
       inputSchema: {
         type: 'object',
         properties: {
           id: { type: 'string' }, amount: S_MONEY, paid: { type: 'boolean' }, included: { type: 'boolean' }, auto: { type: 'boolean' },
+          group: S_GROUP,
           date: { type: ['string', 'null'], description: '결제일 YYYY-MM-DD' }, memo: { type: 'string' }, label: { type: 'string' },
         },
         required: ['id'],
@@ -945,6 +1129,11 @@
           const on = toBool(a.included);
           if (on !== (L.on !== false)) { patch.on = on; diffs.push(on ? '예산에 넣음' : '예산에서 뺌'); }
         }
+        if (has(a, 'group')) {
+          if (found.refund) throw new Error('들어올 돈에는 묶음(group)이 없어요.');
+          const g = parseGroup(a.group);
+          if (g !== groupOf(L)) { patch.group = g; diffs.push('묶음 ' + GROUP_LABEL[groupOf(L)] + ' → ' + GROUP_LABEL[g]); }
+        }
         if (has(a, 'date')) {
           if (found.refund) throw new Error('들어올 돈에는 결제일이 없어요.');
           const d = parseDate(a.date, '결제일') || '';
@@ -953,26 +1142,28 @@
         if (has(a, 'memo')) { const m = str(a.memo, 300); if (m !== (L.memo || '')) { patch.memo = m; diffs.push('메모 “' + clip(m || '-', 40) + '”'); } }
         if (has(a, 'label')) { const t = str(a.label, 80); if (!t) throw new Error('항목 이름이 비어 있어요.'); if (t !== L.label) { patch.label = t; diffs.push('이름 “' + L.label + '” → “' + t + '”'); } }
         if (!diffs.length) return { id: L.id, label: L.label, changed: [], note: '이미 그 값이라 바꾼 것이 없어요.', summary: budgetSummary() };
+        // 사람이(여기서는 AI가 대신) 고친 줄 — 자금흐름 화면의 기본값 바꿈(마이그레이션)이 건드리지 않게
+        if (!found.refund) { patch.edited = true; if (!has(patch, 'group')) patch.group = groupOf(L); }
         const id = L.id;
         mutate(ctx, () => MV.store.update((st) => {
           const list = found.refund ? st.finance.budget.refunds : st.finance.budget.lines;
           const x = list.find((y) => y && y.id === id);
           if (x) Object.assign(x, patch);
-        }, { log: '🤖 예산 수정: ' + (patch.label || L.label) + ' (' + diffs.join(', ') + ')' }));
+        }, { log: '🤖 예산 수정: ' + (patch.label || L.label) + ' (' + diffs.join(', ') + ')' }), { section: 'finance' });
         const st1 = MV.store.get();
         const L1 = (found.refund ? st1.finance.budget.refunds : st1.finance.budget.lines).find((y) => y && y.id === id) || L;
         const after = found.refund ? Math.round(num(L1.amount)) : lineValue(st1, L1);
         const sum = budgetSummary();
-        record(ctx, '💰 예산 “' + clip(L1.label, 30) + '” — ' + diffs.join(', ') + (sum ? ' · 지금 ' + sum.text.balance : ''), '#/money/budget');
-        return { id, label: L1.label, kind: found.refund ? '들어올 돈' : '지출', changed: diffs, amountBefore: before, amountAfter: after, summary: sum };
+        record(ctx, '💰 예산 “' + clip(L1.label, 30) + '” — ' + diffs.join(', ') + (sum ? ' · 지금 꼭 드는 비용 기준 ' + verdict(sum.netEssential) : ''), '#/money/budget');
+        return { id, label: L1.label, kind: found.refund ? '들어올 돈' : '지출', group: found.refund ? undefined : groupOf(L1), changed: diffs, amountBefore: before, amountAfter: after, summary: sum };
       },
     },
     {
       name: 'add_budget_line', label: '예산 항목 추가하는 중',
-      description: '예산에 새 항목을 추가해요. type: expense(지출, 기본) 또는 refund(들어올 돈). 이미 있는 항목(예: LG 가전 이전설치, 이사업체)은 추가하지 말고 update_budget 으로 고치세요. 결과에 새 id 와 다시 계산한 요약.',
+      description: '예산에 새 항목을 추가해요. type: expense(지출, 기본) 또는 refund(들어올 돈). 지출은 group 을 정하세요: essential=이사 날 전후 꼭 드는 이사 비용(입주청소·사다리차·보관이사 등), purchase=새로 사는 살림(가구·가전), optional=선택·나중에. 이미 있는 항목(이사업체·가전 이전설치 등)은 update_budget 으로 고치고, 중개보수·잔금·대출 상환·월세는 돈 흐름에 이미 있으니 넣지 마세요.',
       inputSchema: {
         type: 'object',
-        properties: { label: { type: 'string' }, amount: S_MONEY, type: { type: 'string', enum: ['expense', 'refund'] }, paid: { type: 'boolean' }, date: { type: ['string', 'null'] }, memo: { type: 'string' } },
+        properties: { label: { type: 'string' }, amount: S_MONEY, type: { type: 'string', enum: ['expense', 'refund'] }, group: S_GROUP, paid: { type: 'boolean' }, date: { type: ['string', 'null'] }, memo: { type: 'string' } },
         required: ['label', 'amount'],
       },
       run: (a, ctx) => {
@@ -980,27 +1171,30 @@
         const label = str(a.label, 80);
         if (!label) throw new Error('항목 이름이 비어 있어요.');
         const refund = str(a.type, 10) === 'refund';
+        if (!refund && /중개\s*보수|복비|잔금|보증금|대출\s*상환|월세/.test(label)) throw new Error('“' + label + '”은(는) ' + D.fmt(D.moveDate()) + ' 돈 흐름(#/money/flow)에 이미 들어 있어 예산에 넣으면 두 번 세져요. 금액을 바꾸려면 자금흐름 화면에서 직접 고치도록 안내하세요.');
         const amount = parseAmount(a.amount, '금액');
         const norm = (s) => String(s || '').replace(/\s+/g, '').toLowerCase();
         const dup = (refund ? fin.budget.refunds : fin.budget.lines).find((x) => x && norm(x.label) === norm(label));
         if (dup) throw new Error('같은 이름의 예산 항목이 이미 있어요 (id ' + dup.id + '). update_budget 으로 고치세요.');
         const paid = has(a, 'paid') ? toBool(a.paid) : false;
         const memo = str(a.memo, 300);
+        if (refund && has(a, 'group')) throw new Error('들어올 돈에는 묶음(group)이 없어요.');
+        const group = refund ? null : (has(a, 'group') ? parseGroup(a.group) : guessGroup(label));
         const line = refund
           ? { id: MV.uid('rf'), label, amount, got: paid, memo }
-          : { id: MV.uid('bl'), label, amount, auto: true, on: true, paid, date: has(a, 'date') ? (parseDate(a.date, '결제일') || '') : '', memo };
+          : { id: MV.uid('bl'), label, amount, auto: true, on: true, paid, date: has(a, 'date') ? (parseDate(a.date, '결제일') || '') : '', memo, group, edited: true };
         mutate(ctx, () => MV.store.update((st) => {
           if (refund) { if (!Array.isArray(st.finance.budget.refunds)) st.finance.budget.refunds = []; st.finance.budget.refunds.push(line); }
           else st.finance.budget.lines.push(line);
-        }, { log: '🤖 예산 ' + (refund ? '들어올 돈' : '항목') + ' 추가: ' + label + ' ' + krw(amount) }));
+        }, { log: '🤖 예산 ' + (refund ? '들어올 돈' : '항목') + ' 추가: ' + label + ' ' + krw(amount) }), { section: 'finance' });
         const sum = budgetSummary();
-        record(ctx, '💰 예산 ' + (refund ? '들어올 돈' : '항목') + ' 추가: “' + clip(label, 30) + '” ' + krw(amount) + (paid ? (refund ? ' (받음)' : ' (냄)') : '') + (sum ? ' · 지금 ' + sum.text.balance : ''), '#/money/budget');
-        return { id: line.id, label, amount, kind: refund ? '들어올 돈' : '지출', summary: sum };
+        record(ctx, '💰 예산 ' + (refund ? '들어올 돈' : '항목') + ' 추가: “' + clip(label, 30) + '” ' + krw(amount) + (group ? ' · ' + GROUP_LABEL[group] : '') + (paid ? (refund ? ' (받음)' : ' (냄)') : '') + (sum ? ' · 지금 꼭 드는 비용 기준 ' + verdict(sum.netEssential) : ''), '#/money/budget');
+        return { id: line.id, label, amount, kind: refund ? '들어올 돈' : '지출', group: group || undefined, groupLabel: group ? GROUP_LABEL[group] : undefined, summary: sum };
       },
     },
     {
       name: 'get_estimate', label: '견적 보는 중',
-      description: '이사 견적: 짐 목록으로 계산한 모델 추정치(기준가·범위·차량·인원·LG 이전비)와 지금까지 넣은 업체 견적 quotes(같은 조건 환산 금액, 모델 대비 %). 금액은 원.',
+      description: '이사 견적: 짐 목록으로 계산한 모델 추정치(기준가·범위·차량·인원·가전 이전비)와 지금까지 넣은 업체 견적 quotes(같은 조건 환산 금액, 모델 대비 %). 금액은 원.',
       run: () => {
         const est = modelEstimate();
         if (!est) throw new Error('짐·견적 화면이 없어 견적을 계산할 수 없어요.');
@@ -1032,7 +1226,7 @@
           if (!st.estimate || typeof st.estimate !== 'object' || Array.isArray(st.estimate)) st.estimate = {};
           if (!Array.isArray(st.estimate.quotes)) st.estimate.quotes = [];
           st.estimate.quotes.push(q);
-        }, { log: '🤖 업체 견적 추가: ' + q.company + ' ' + krw(q.amount) }));
+        }, { log: '🤖 업체 견적 추가: ' + q.company + ' ' + krw(q.amount) }), { section: 'estimate' });
         const est = modelEstimate();
         const v = quoteView(q, est);
         const inc = [['ladder', '사다리차'], ['aircon', '에어컨'], ['waste', '폐기물'], ['arrange', '정리']].filter(([k]) => q[k]).map(([, l]) => l);
@@ -1063,7 +1257,7 @@
         mutate(ctx, () => MV.store.update((st) => {
           const q = quotesOf(st).find((x) => x.id === q0.id);
           if (q) Object.assign(q, p);
-        }, { log: '🤖 업체 견적 수정: ' + (p.company || q0.company) + ' (' + diffs.join(', ') + ')' }));
+        }, { log: '🤖 업체 견적 수정: ' + (p.company || q0.company) + ' (' + diffs.join(', ') + ')' }), { section: 'estimate' });
         const q1 = quotesOf(MV.store.get()).find((x) => x.id === q0.id) || q0;
         const v = quoteView(q1, modelEstimate());
         record(ctx, '🚚 견적 “' + clip(q1.company, 24) + '” — ' + diffs.join(', '), '#/stuff/quotes');
@@ -1178,7 +1372,7 @@
         if (!x) throw new Error('id 가 "' + id + '"인 짐을 찾지 못했어요. list_inventory 로 먼저 찾아 주세요.');
         const { p, diffs } = invPatch(a, x);
         if (!diffs.length) return { id, name: x.name, changed: [], note: '이미 그 값이라 바꾼 것이 없어요.' };
-        mutate(ctx, () => MV.inv.update(id, p, '🤖 짐 수정: ' + (p.name || x.name) + ' (' + diffs.join(', ') + ')'));
+        mutate(ctx, () => MV.inv.update(id, p, '🤖 짐 수정: ' + (p.name || x.name) + ' (' + diffs.join(', ') + ')'), { inventory: [id] });
         const y = MV.inv.get(id) || x;
         record(ctx, '📦 짐 “' + clip(y.name, 30) + '” — ' + diffs.join(', '), '#/stuff/inventory');
         return { id, changed: diffs, item: invView(y) };
@@ -1199,6 +1393,9 @@
       run: (a, ctx) => {
         const { p } = invPatch(a, null);
         if (!p.name) throw new Error('짐 이름이 필요해요.');
+        const nn = (x) => String(x || '').replace(/\s+/g, '').toLowerCase();
+        const twin = MV.inv.list((x) => nn(x.name) === nn(p.name))[0];
+        if (twin) throw new Error('“' + twin.name + '”이(가) 짐 목록에 이미 있어요 (id ' + twin.id + ', ' + MV.inv.fate(twin.fate).label + ', 수량 ' + num(twin.qty) + '). 같은 물건이면 update_inventory 로 qty 를 고치고, 다른 물건이면 이름을 구분되게(예: "' + p.name + ' 2") 주세요.');
         const dimsGiven = has(p, 'w') && has(p, 'd') && has(p, 'h');
         let preset = null;
         if (!dimsGiven) {
@@ -1215,7 +1412,7 @@
         if (!has(p, 'fate')) p.fate = 'move';
         if (!has(p, 'qty')) p.qty = 1;
         const it = MV.store.normInv(p);
-        mutate(ctx, () => MV.store.update((st) => { if (!Array.isArray(st.inventory)) st.inventory = []; st.inventory.push(it); }, { log: '🤖 짐 추가: ' + it.name }));
+        mutate(ctx, () => MV.store.update((st) => { if (!Array.isArray(st.inventory)) st.inventory = []; st.inventory.push(it); }, { log: '🤖 짐 추가: ' + it.name }), { inventory: [it.id] });
         record(ctx, '📦 짐 추가: ' + clip(it.name, 30) + ' (' + MV.inv.fate(it.fate).label + ', ' + it.w + '×' + it.d + '×' + it.h + 'cm' + (it.assumed ? ' 추정' : '') + ')', '#/stuff/inventory');
         return { id: it.id, item: invView(it), sizeNote: it.assumed ? (preset ? '규격은 “' + preset.name + '” 프리셋으로 추정했어요 — 실측하면 알려 주세요.' : '규격을 몰라 60×60×60cm 로 넣었어요 — 실측하면 알려 주세요.') : '' };
       },
@@ -1259,36 +1456,61 @@
   /* ======================= 대화 보내기 ======================= */
   function findMsg(id) { return R.chat.msgs.find((m) => m.id === id) || null; }
   function pushMsg(m) {
+    own(m);
     R.chat.msgs.push(m);
     if (R.chat.msgs.length > KEEP_MSGS) R.chat.msgs.splice(0, R.chat.msgs.length - KEEP_MSGS);
   }
+  /** 대화의 마지막 메시지인지 ('다시 보내기'는 마지막 답에만 — 옛 요청을 다시 실행하지 않게) */
+  function isLatest(m) { const l = R.chat.msgs[R.chat.msgs.length - 1]; return !!l && !!m && l.id === m.id; }
+  const hasBody = (m) => !!(String(m.text || '').trim() || (m.changes && m.changes.length));
   function turnText(m) {
-    let t = String(m.text || '');
+    let t = String(m.text || '').trim();
+    if (m.role === 'assistant' && (m.status === 'error' || m.status === 'stopped')) t += (t ? '\n\n' : '') + '(이 답은 여기서 끊겼어요)';
     if (m.role === 'assistant' && m.changes && m.changes.length) {
-      t += '\n\n(이 답에서 앱에 반영한 변경: ' + m.changes.map((c) => c.t).join(' / ') + (m.undo === 'used' ? ' — 이후 사용자가 이 변경을 모두 되돌림' : '') + ')';
+      t += '\n\n(이 답에서 앱에 이미 반영한 변경: ' + m.changes.map((c) => c.t).join(' / ') + (m.undo === 'used' ? ' — 이후 사용자가 이 변경을 모두 되돌림' : '') + ')';
     }
     if (t.length > TURN_CHARS) t = t.slice(0, TURN_CHARS) + '…(이하 생략)';
     return t;
   }
-  function buildInput(userId, withTools, budget) {
+  /** 같은 역할이 이어지면 한 턴으로 (끊긴 답 + 다시 보낸 답) */
+  function mergeTurns(turns) {
+    const out = [];
+    turns.forEach((t) => {
+      const prev = out[out.length - 1];
+      if (prev && prev.role === t.role) prev.content += '\n\n' + t.content;
+      else out.push({ role: t.role, content: t.content });
+    });
+    return out;
+  }
+  const CONTINUE = '(앞 답이 중간에 끊겼어요. 위에 적힌 "앱에 이미 반영한 변경"은 저장돼 있으니 같은 변경을 다시 하지 마세요 — 필요하면 도구로 지금 상태를 확인하고, 남은 일만 한 뒤 처음 질문에 대한 답을 처음부터 끝까지 다시 써 주세요.)';
+  /** 보낼 턴: [지시 턴] + 최근 대화 (cont: 끊긴 답을 이어서 다시 묻는 경우 그 질문에 대한 앞선 답들) */
+  function buildInput(userId, withTools, budget, cont) {
     const idx = R.chat.msgs.findIndex((m) => m.id === userId);
-    const hist = R.chat.msgs.slice(0, idx + 1).filter((m) => m.status !== 'pending' && String(m.text || '').trim());
-    let tail = hist.slice(-SEND_TURNS).map((m) => ({ role: m.role, content: turnText(m) }));
-    while (tail.length && tail[0].role !== 'user' && tail.length > 1) tail.shift();
+    const hist = R.chat.msgs.slice(0, idx + 1).filter((m) => m.status !== 'pending' && hasBody(m));
+    let turns = hist.map((m) => ({ role: m.role, content: turnText(m) }));
+    if (cont && cont.length) {
+      turns = turns.concat(cont.map((m) => ({ role: 'assistant', content: turnText(m) })), [{ role: 'user', content: CONTINUE }]);
+    }
+    let tail = mergeTurns(turns).slice(-SEND_TURNS);
+    const trimHead = () => { while (tail.length > 1 && tail[0].role !== 'user') tail.shift(); };
+    trimHead();
     const instr = instruction(withTools);
     const size = () => bytes(instr) + tail.reduce((s, t) => s + bytes(t.content), 0);
-    while (tail.length > 1 && size() > budget) tail.shift();
+    while (tail.length > 1 && size() > budget) { tail.shift(); trimHead(); }
     return [{ role: 'user', content: instr }].concat(tail);
   }
 
+  const TIER_LABEL = { default: '기본', complex: '고급', quick: '빠른' };
   async function send(text, opts) {
     opts = opts || {};
     const sample = sampleFn();
     if (!sample || R.blocked || R.active) return false;
     let userMsg;
+    let cont = null;
     if (opts.retryOf) {
       userMsg = findMsg(opts.retryOf);
       if (!userMsg) return false;
+      if (opts.cont) cont = R.chat.msgs.filter((m) => m.replyTo === userMsg.id && m.role === 'assistant' && m.status !== 'pending' && hasBody(m));
     } else {
       text = String(text || '').trim().slice(0, MAX_TEXT);
       if (!text) return false;
@@ -1296,9 +1518,10 @@
       pushMsg(userMsg);
     }
     const bot = { id: MV.uid('am'), role: 'assistant', text: '', at: MV.nowISO(), status: 'pending', replyTo: userMsg.id, changes: [] };
-    if (opts.noTools) bot.noTools = true;
-    // 다시 묻는 경우: 사용자 메시지 바로 뒤에 붙임 (그 사이의 실패한 빈 답은 이미 지웠음)
+    if (opts.noTools || R.toolsOff) bot.noTools = true;
     if (opts.retryOf) {
+      // 그 질문에 대한 앞선 답들 바로 뒤에 붙임 (실패한 빈 답은 이미 지웠음)
+      own(bot);
       const at = R.chat.msgs.findIndex((m) => m.id === userMsg.id);
       let j = at + 1;
       while (j < R.chat.msgs.length && R.chat.msgs[j].replyTo === userMsg.id) j++;
@@ -1307,7 +1530,7 @@
     } else pushMsg(bot);
     const call = {
       id: MV.uid('call'), ctl: new AbortController(), msgId: bot.id, changes: bot.changes, tools: [], foreign: false,
-      snapshot: MV.clone(MV.store.get()), status: null, gotText: false,
+      pre: { items: {}, inventory: {}, sections: {} }, post: {}, status: null, gotText: false,
     };
     R.active = call;
     saveChat();
@@ -1317,15 +1540,15 @@
     let finished = false;
     try {
       let tools = null;
-      if (!opts.noTools) {
+      if (!bot.noTools) {
         const lim = await getLimits();
-        if (lim && lim.tools) tools = buildTools(call, num(lim.tools.maxCount) || TOOLS.length);
+        if (lim && lim.tools && !R.toolsOff) tools = buildTools(call, num(lim.tools.maxCount) || TOOLS.length);
         else bot.noTools = true;
       }
       if (call.ctl.signal.aborted) throw { code: 'cancelled' };
       const lim = R.limits;
       const budget = Math.max(16 * 1024, Math.min(INPUT_BUDGET, (lim && num(lim.maxPromptBytes) ? num(lim.maxPromptBytes) - 24 * 1024 : INPUT_BUDGET)));
-      const input = buildInput(userMsg.id, !!tools, budget);
+      const input = buildInput(userMsg.id, !!tools, budget, cont);
       const options = {
         signal: call.ctl.signal,
         cache: false,
@@ -1342,6 +1565,12 @@
       bot.text = String((res && res.text) || bot.text || '');
       bot.status = 'done';
       if (res && res.truncated) { bot.truncated = true; bot.note = '답이 길이 제한에 걸려 중간에 끊겼어요. 나눠서 물어봐 주세요.'; }
+      // ⚡ 빠른 답변을 골랐는데 요금제가 다른 모델을 썼으면 알려 줌
+      if (options.modelTier && res && typeof res.modelTierApplied === 'string' && res.modelTierApplied !== options.modelTier) {
+        bot.tier = res.modelTierApplied;
+        if (!R.tierNote) { R.tierNote = true; MV.ui.toast('이 계정 요금제에서는 ⚡ 빠른 답변을 쓸 수 없어 ' + (TIER_LABEL[bot.tier] || '다른') + ' 모델로 답했어요.', { ms: 6000 }); }
+        paintHeadState();
+      }
       finished = true;
     } catch (e) {
       handleError(bot, e);
@@ -1371,17 +1600,25 @@
     }
     if (code === 'refused') {
       bot.text = '';
-      bot.note = '이 요청은 처리할 수 없었어요. 묻는 내용을 바꿔서 다시 물어봐 주세요.';
+      bot.note = '이 요청은 처리할 수 없었어요. 묻는 내용을 바꿔서 다시 물어봐 주세요.' + (bot.changes && bot.changes.length ? ' 그 전에 바꾼 것은 아래에 남아 있어요.' : '');
       return;
     }
     bot.text = partial || bot.text || '';
     if (code === 'rate_limited') { bot.note = '요청이 많아요. 잠시 뒤 다시 물어봐 주세요.'; bot.actions = ['retry']; return; }
     if (code === 'session_expired') { bot.note = 'Claude 로그인이 끝났어요. 다시 로그인해 주세요.'; bot.actions = ['retry']; return; }
     if (code === 'prompt_too_large') { bot.note = '대화가 너무 길어요. 대화를 지우고 다시 물어봐 주세요.'; bot.actions = ['clear']; return; }
-    if (code === 'tools_unavailable') { bot.note = '이 화면에서는 AI가 앱 데이터를 직접 읽고 고칠 수 없어요. 도구 없이 다시 물으면 요약 정보로만 답해요.'; bot.actions = ['notools']; return; }
+    if (code === 'tools_unavailable') {
+      // 이 보기에서는 도구를 못 씀 → 이 창에서는 다음 질문부터 도구 없이 물음 ('읽기 전용' 표시)
+      R.toolsOff = true;
+      paintHeadState();
+      bot.note = '이 화면에서는 AI가 앱 데이터를 직접 읽고 고칠 수 없어요. 도구 없이 다시 물으면 요약 정보로만 답하고, 다음 질문부터는 처음부터 도구 없이 물어요.';
+      bot.actions = ['notools'];
+      return;
+    }
     if (code === 'empty_completion') { bot.note = '답을 받지 못했어요. 질문을 조금 줄이거나 바꿔서 다시 보내 주세요.'; bot.actions = ['retry']; return; }
     if (code === 'invalid_request' || code === 'transform_error' || code === 'queue_overflow') { bot.note = '요청을 보내지 못했어요 (앱 문제: ' + code + '). 잠시 뒤 다시 보내 주세요.'; bot.actions = ['retry']; return; }
     bot.note = bot.text ? '답이 중간에 끊겼어요 (연결 문제).' : '답을 받지 못했어요 (연결 문제).';
+    if (bot.changes && bot.changes.length) bot.note += ' 아래 변경은 이미 반영됐어요 — 다시 보내면 그 변경은 빼고 이어서 답해요.';
     bot.actions = ['retry'];
   }
 
@@ -1392,15 +1629,27 @@
     bot.tools = call.tools.slice();
     if (finished && !String(bot.text || '').trim()) bot.text = '(빈 답)';
     if (bot.status === 'pending') bot.status = 'done';
-    // 이전 답의 되돌리기는 이번에 데이터가 바뀌었으면 막힘
-    const prevUndo = R.undo ? R.undo.msgId : null;
+    const prevUndo = Array.from(R.undos.keys());
+    // 앞선 답의 되돌리기는 이번 답이 같은 항목을 고쳤으면 막힘 (다른 항목이면 그대로 둠)
     checkUndo();
     if (bot.changes.length && findMsg(bot.id)) {
-      if (R.undo) { const prev = findMsg(R.undo.msgId); if (prev && prev.undo === 'avail') prev.undo = 'stale'; }
-      R.undo = { msgId: bot.id, snapshot: call.snapshot, fp: fingerprint(), foreign: call.foreign };
+      // 답이 끝나기 전에 사람이 AI가 고친 것을 또 고쳤으면, 되돌릴 때 그것도 되돌아감 (확인 창에서 알림)
+      const foreign = call.foreign || Object.keys(call.post).some((k) => {
+        const i = k.indexOf(':');
+        return call.post[k] !== fpValue(valueOf(k.slice(0, i), k.slice(i + 1)));
+      });
+      R.undos.set(bot.id, { pre: call.pre, fp: undoFingerprint(call.pre), foreign });
       bot.undo = 'avail';
+      // 너무 오래된 되돌리기는 정리 (메모리)
+      while (R.undos.size > MAX_UNDOS) {
+        const oldId = R.undos.keys().next().value;
+        R.undos.delete(oldId);
+        const om = findMsg(oldId);
+        if (om && om.undo === 'avail') { om.undo = 'stale'; om.undoWhy = 'old'; own(om); }
+        prevUndo.push(oldId);
+      }
     }
-    call.snapshot = null;
+    call.pre = null;
     saveChat();
     if (R.blocked) {
       syncAvailability();
@@ -1408,7 +1657,7 @@
       if (R.view && R.view.root.isConnected && R.view.mode !== 'blocked') { MV.rerender(true); return; }
     }
     // 바뀐 답만 다시 그림 (대화 전체를 다시 그리면 화면 낭독기가 처음부터 다시 읽어요)
-    refreshMsgs([bot.id].concat(prevUndo ? [prevUndo] : [], R.chat.msgs.filter((m) => m.actions && m.actions.length).map((m) => m.id)));
+    refreshMsgs([bot.id].concat(prevUndo, R.chat.msgs.filter((m) => m.actions && m.actions.length).map((m) => m.id)));
     updateComposer();
     updateFab();
     if (R.view && document.activeElement === document.body && R.composerFocused) focusComposer();
@@ -1417,85 +1666,145 @@
   function retry(botId, noTools) {
     if (R.active) return;
     const bot = findMsg(botId);
-    if (!bot) return;
+    if (!bot || !isLatest(bot)) return;
     const userId = bot.replyTo;
     if (!userId || !findMsg(userId)) return;
-    if (!String(bot.text || '').trim() && !(bot.changes && bot.changes.length)) {
+    if (!hasBody(bot)) {
+      R.removed.add(botId);
       R.chat.msgs = R.chat.msgs.filter((m) => m.id !== botId);
     } else {
       bot.actions = [];
+      own(bot);
     }
-    send('', { retryOf: userId, noTools: !!noTools });
+    // 그 질문에 대한 앞선 답(끊긴 글·이미 바꾼 것)을 같이 보내 같은 변경을 다시 하지 않게
+    const cont = R.chat.msgs.some((m) => m.replyTo === userId && m.role === 'assistant' && hasBody(m));
+    send('', { retryOf: userId, noTools: !!noTools, cont });
   }
   function stop() {
     if (R.active) { try { R.active.ctl.abort(); } catch (e) { /* 무시 */ } }
   }
 
   /* ======================= 되돌리기 ======================= */
-  function fingerprint() {
-    const s = MV.store.get();
-    try { return hash(JSON.stringify([s.items, s.parts, s.inventory, s.finance, s.estimate, s.layouts, s.planEdits, s.meta && s.meta.moveDate, s.meta && s.meta.deletedSeed])); } catch (e) { return MV.uid('fp'); }
-  }
+  /** 되돌리기가 남은 답마다: 그 답이 고친 것이 이후에 또 바뀌었으면 막음 */
   function checkUndo() {
-    if (!R.undo) return;
-    if (fingerprint() === R.undo.fp) return;
-    const m = findMsg(R.undo.msgId);
-    R.undo = null;
-    if (m && m.undo === 'avail') { m.undo = 'stale'; saveChat(); paintMsg(m.id); }
+    if (!R.undos.size) return;
+    let dirty = false;
+    Array.from(R.undos.entries()).forEach(([id, u]) => {
+      const m = findMsg(id);
+      if (m && undoFingerprint(u.pre) === u.fp) return;
+      R.undos.delete(id);
+      if (m && m.undo === 'avail') { m.undo = 'stale'; m.undoWhy = 'changed'; own(m); dirty = true; paintMsg(m.id); }
+    });
+    if (dirty) saveChat();
   }
   const checkUndoSoon = MV.debounce(checkUndo, 300);
-  MV.store.on('change', () => {
-    if (R.active && !R.inTool) R.active.foreign = true;
-    if (R.undo) checkUndoSoon();
-  });
+  MV.store.on('change', () => { if (R.undos.size) checkUndoSoon(); });
   MV.store.on('flush', () => { if (R.active) saveChat(); });
 
+  /** AI가 고친 것만 고치기 전 값으로 (다른 데이터 — 도면 사진·화면 설정·다른 항목 — 는 그대로) */
+  function applyUndo(pre, n) {
+    try {
+      MV.store.update((st) => {
+        ['items', 'inventory'].forEach((kind) => {
+          const box = pre[kind] || {};
+          Object.keys(box).forEach((id) => {
+            if (!Array.isArray(st[kind])) st[kind] = [];
+            const list = st[kind];
+            const i = list.findIndex((x) => x && x.id === id);
+            const old = box[id];
+            if (old === NONE) {
+              if (i >= 0) list.splice(i, 1);
+              if (kind === 'inventory' && st.layouts && typeof st.layouts === 'object') {
+                Object.values(st.layouts).forEach((lay) => { if (lay && Array.isArray(lay.placements)) lay.placements = lay.placements.filter((p) => p.invId !== id); });
+              }
+            } else if (i >= 0) list[i] = MV.clone(old);
+            else list.push(MV.clone(old));
+          });
+        });
+        Object.keys(pre.sections || {}).forEach((key) => {
+          const old = pre.sections[key];
+          if (old === NONE) delete st[key]; else st[key] = MV.clone(old);
+        });
+      }, { log: '🤖 AI 변경 되돌리기 (' + n + '건)' });
+      return true;
+    } catch (e) { console.error('[agent] undo', e); return false; }
+  }
   function undoChanges(msgId) {
     const m = findMsg(msgId);
     if (!m) return;
     checkUndo();
-    if (!R.undo || R.undo.msgId !== msgId) {
-      if (m.undo === 'avail') m.undo = 'stale';
+    const u = R.undos.get(msgId);
+    if (!u) {
+      if (m.undo === 'avail') { m.undo = 'stale'; own(m); }
       saveChat(); paintMsg(msgId);
-      MV.ui.toast('이후에 다른 변경이 있어 되돌릴 수 없어요.');
+      MV.ui.toast('이후에 같은 항목이 또 바뀌어 되돌릴 수 없어요.');
       return;
     }
     const n = m.changes.length;
-    const msg = 'AI 비서가 이번 답에서 바꾼 ' + n + '건을 모두 되돌릴까요?' +
-      (R.undo.foreign ? ' AI가 답하는 동안 생긴 다른 변경도 함께 되돌아가요.' : '') + ' 되돌린 뒤에는 다시 살릴 수 없어요.';
+    const msg = 'AI 비서가 이번 답에서 바꾼 ' + n + '건을 모두 되돌릴까요? 다른 데이터(다른 할 일·도면 사진 등)는 그대로예요.' +
+      (u.foreign ? ' AI가 답하는 동안 같은 항목을 직접 고친 것도 함께 되돌아가요.' : '') + ' 되돌린 뒤에는 다시 살릴 수 없어요.';
     MV.ui.confirm(msg, { okLabel: '모두 되돌리기', danger: true, title: '변경 되돌리기' }).then((ok) => {
       if (!ok) return;
       checkUndo();
-      if (!R.undo || R.undo.msgId !== msgId) { MV.ui.toast('그 사이 다른 변경이 있어 되돌리지 않았어요.'); return; }
-      const snap = R.undo.snapshot;
-      R.undo = null;
-      m.undo = 'used';
+      if (!R.undos.has(msgId)) { MV.ui.toast('그 사이 같은 항목이 바뀌어 되돌리지 않았어요.'); return; }
+      const pre = R.undos.get(msgId).pre;
+      R.undos.delete(msgId);
+      const done = applyUndo(pre, n);
+      m.undo = done ? 'used' : 'stale';
+      own(m);
       saveChat();
-      const done = MV.store.restore(snap, '🤖 AI 변경 되돌리기 (' + n + '건)');
-      if (done) MV.ui.toast('AI 변경 ' + n + '건을 되돌렸어요.');
-      else { m.undo = 'stale'; saveChat(); MV.ui.toast('되돌리지 못했어요.'); }
+      MV.ui.toast(done ? 'AI 변경 ' + n + '건을 되돌렸어요.' : '되돌리지 못했어요.');
       paintMsg(msgId);
+      // 눌렀던 버튼이 다시 그려져 사라졌으니 키보드 초점을 입력칸으로 (터치 화면은 키보드가 뜨지 않게 그대로)
+      if (!document.activeElement || document.activeElement === document.body || !document.activeElement.isConnected) focusComposer();
     });
   }
 
   function clearChat() {
+    if (!R.chat.msgs.length) return;
+    /* 답하는 중이면 멈추고, 그 답이 이미 바꾼 것이 있으면 그 질문과 답은 남겨 둠 (변경 목록·되돌리기를 잃지 않게) */
+    const liveKeep = () => {
+      const c = R.active;
+      const bot = c && c.changes.length ? findMsg(c.msgId) : null;
+      return bot ? [bot.replyTo, bot.id] : [];
+    };
+    const keepAtAsk = liveKeep();   // 확인 창이 떠 있는 동안 답이 끝나도 약속대로 남김
     const run = () => {
+      const keep = new Set(liveKeep().concat(keepAtAsk));
       stop();
-      R.chat.msgs = [];
-      R.undo = null;
+      saveChat();   // 다른 탭에서 온 메시지까지 합친 뒤 지움
+      R.chat.msgs.forEach((m) => { if (!keep.has(m.id)) R.removed.add(m.id); });
+      R.chat.msgs = R.chat.msgs.filter((m) => keep.has(m.id));
+      Array.from(R.undos.keys()).forEach((id) => { if (!keep.has(id)) R.undos.delete(id); });
       saveChat();
       paintAll(true);
       updateComposer();
       focusComposer();
     };
-    if (!R.chat.msgs.length) return;
-    const extra = R.undo ? ' 마지막 답의 ‘변경 되돌리기’도 더는 할 수 없어요.' : '';
+    const call = R.active;
+    let extra = '';
+    if (call) extra = call.changes.length ? ' 지금 답하는 중인 질문은 멈춰요. 그 답이 이미 바꾼 ' + call.changes.length + '건은 되돌릴 수 있게 그 질문과 답만 남겨 둬요.' : ' 지금 답하는 중인 질문도 멈춰요.';
+    else if (R.undos.size) extra = ' 답 아래 ‘변경 되돌리기’도 더는 할 수 없어요 (바뀐 데이터는 그대로예요).';
     MV.ui.confirm('대화 기록을 모두 지울까요? 앱 데이터(체크·예산·견적)는 그대로예요.' + extra, { okLabel: '대화 지우기', danger: true }).then((ok) => { if (ok) run(); });
   }
 
   /* ======================= 안전한 마크다운 ======================= */
   const LIST_RE = /^(\s*)([-*•+]|\d{1,3}[.)])\s+(.*)$/;
-  const INLINE_RE = /\*\*([^*\n]+?)\*\*|`([^`\n]+)`|\[([^\]\n]+)\]\(\s*([^)\s]+)\s*\)|(https?:\/\/[^\s<>"'`]+)|(#\/[A-Za-z0-9_~%\-/.]+)|~~([^~\n]+)~~|\*([^*\s][^*\n]*?)\*/g;
+  /* **굵게**(안에 *기울임* 가능) · `코드` · [글](주소 — 괄호 한 겹 허용) · 맨 주소 · #/앱 링크 · ~~취소~~ · *기울임* */
+  const INLINE_RE = /\*\*((?:[^*\n]|\*(?!\*))+?)\*\*|`([^`\n]+)`|\[([^\]\n]+)\]\(\s*((?:[^()\s]|\([^()\s]*\))+)\s*\)|(https?:\/\/[^\s<>"'`]+)|(#\/[A-Za-z0-9_~%\-/.]+)|~~([^~\n]+)~~|\*([^*\s][^*\n]*?)\*/g;
+  /* '11. 3.(화) 이사 당일' 같은 날짜 줄은 번호 목록이 아님 */
+  const DATE_LINE = /^\s*(1[0-2]|0?[1-9])\.\s*([12]\d|3[01]|0?[1-9])\.(?!\d)/;
+  const isListLine = (line) => LIST_RE.test(line) && !/^\s*\*\*/.test(line) && !DATE_LINE.test(line);
+  /** 맨 주소 끝의 문장부호는 빼고, 닫는 괄호는 짝이 맞을 때만 주소에 포함 */
+  function trimUrl(u) {
+    let s = u;
+    for (;;) {
+      const ch = s.slice(-1);
+      if (/[.,;:!?'"。、\]}]/.test(ch)) { s = s.slice(0, -1); continue; }
+      if (ch === ')' && (s.match(/\(/g) || []).length < (s.match(/\)/g) || []).length) { s = s.slice(0, -1); continue; }
+      return s;
+    }
+  }
   const indentOf = (s) => String(s || '').replace(/\t/g, '    ').length;
   function md(text) {
     const frag = document.createDocumentFragment();
@@ -1543,7 +1852,7 @@
         frag.appendChild(q);
         continue;
       }
-      if (LIST_RE.test(line) && !/^\s*\*\*/.test(line)) { flush(); i = list(lines, i, frag); continue; }
+      if (isListLine(line)) { flush(); i = list(lines, i, frag); continue; }
       (para = para || []).push(line.trim());
       i++;
     }
@@ -1572,6 +1881,7 @@
     const first = LIST_RE.exec(lines[i]);
     const base = indentOf(first[1]);
     const ordered = /\d/.test(first[2]);
+    const delim = first[2].slice(-1);   // '1.' 과 '1)' 은 다른 목록
     const node = el(ordered ? 'ol' : 'ul', { class: 'ag-list' });
     if (ordered) { const n = parseInt(first[2], 10); if (n > 1) node.setAttribute('start', String(n)); }
     let li = null;
@@ -1580,16 +1890,17 @@
       if (!line.trim()) {
         let j = i + 1;
         while (j < lines.length && !lines[j].trim()) j++;
-        const nm = j < lines.length ? LIST_RE.exec(lines[j]) : null;
-        if (nm && (indentOf(nm[1]) > base || (indentOf(nm[1]) === base && /\d/.test(nm[2]) === ordered))) { i = j; continue; }
+        const nm = j < lines.length && isListLine(lines[j]) ? LIST_RE.exec(lines[j]) : null;
+        if (nm && (indentOf(nm[1]) > base || (indentOf(nm[1]) === base && /\d/.test(nm[2]) === ordered && (!ordered || nm[2].slice(-1) === delim)))) { i = j; continue; }
         break;
       }
-      const m = LIST_RE.exec(line);
-      if (m && !/^\s*\*\*/.test(line)) {
+      const m = isListLine(line) ? LIST_RE.exec(line) : null;
+      if (m) {
         const ind = indentOf(m[1]);
         if (ind < base) break;
         if (ind > base && li) { i = list(lines, i, li); continue; }
         if (/\d/.test(m[2]) !== ordered) break;
+        if (ordered && m[2].slice(-1) !== delim) break;
         li = el('li');
         inline(li, m[3], 0);
         node.appendChild(li);
@@ -1634,7 +1945,7 @@
       } else if (m[2] != null) node = el('code', m[2]);
       else if (m[3] != null) node = linkNode(m[3], m[4]);
       else if (m[5] != null) {
-        const url = m[5].replace(/[.,;:!?)\]}'"。、]+$/, '');
+        const url = trimUrl(m[5]);
         consumed = url;
         re.lastIndex = start + url.length;
         node = linkNode(url.length > 64 ? url.slice(0, 61) + '…' : url, url);
@@ -1695,7 +2006,7 @@
     } else if (m.undo === 'stale') {
       box.appendChild(el('div', { class: 'ag-undo-note' },
         el('button', { type: 'button', class: 'btn btn-sm ag-undo', disabled: true }, '↺ 이번 변경 모두 되돌리기'),
-        el('span', { class: 'tiny muted' }, '이후에 다른 변경이 있어 한 번에 되돌릴 수 없어요 — 링크를 눌러 직접 고쳐 주세요.')));
+        el('span', { class: 'tiny muted' }, (m.undoWhy === 'old' ? '오래된 답이라' : '이후에 같은 항목이 다시 바뀌어') + ' 한 번에 되돌릴 수 없어요 — 링크를 눌러 직접 고쳐 주세요.')));
     } else if (m.undo === 'gone') {
       box.appendChild(el('p', { class: 'tiny muted mb-0 ag-undo-note' }, '한 번에 되돌리기는 답을 받은 창에서만 할 수 있어요 — 링크를 눌러 직접 고쳐 주세요.'));
     }
@@ -1727,7 +2038,8 @@
     if (m.note && m.status !== 'pending') {
       const bad = m.status === 'error' && (m.code === 'refused' || HIDE_CODES.has(m.code) || m.code === 'session_expired');
       const box = el('div', { class: 'ag-alert' + (m.status === 'stopped' ? ' ag-soft' : bad ? ' ag-bad' : ''), role: m.status === 'error' ? 'alert' : null }, el('span', m.note));
-      const acts = (m.actions || []).filter(() => !R.active);
+      // '다시 보내기'·'도구 없이'는 대화의 마지막 답에만 (옛 요청을 다시 실행하지 않게)
+      const acts = (m.actions || []).filter((a) => !R.active && (a === 'clear' || isLatest(m)));
       if (acts.length && sampleFn() && !R.blocked) {
         box.appendChild(el('div', { class: 'row ag-acts' }, acts.map((a) => {
           if (a === 'retry') return el('button', { type: 'button', class: 'btn btn-sm', onclick: () => retry(m.id, !!m.noTools) }, '↻ 다시 보내기');
@@ -1745,7 +2057,8 @@
       node.appendChild(el('div', { class: 'ag-meta' },
         el('span', '🤖 ' + D.time(m.at)),
         used.length ? el('span', '· 확인: ' + used.join(', ')) : null,
-        m.noTools ? el('span', { title: '이 답은 앱 데이터를 직접 읽거나 바꾸지 않았어요' }, '· 요약만 보고 답함') : null));
+        m.noTools ? el('span', { title: '이 답은 앱 데이터를 직접 읽거나 바꾸지 않았어요' }, '· 요약만 보고 답함') : null,
+        m.tier ? el('span', { title: '⚡ 빠른 답변을 이 요금제에서 쓸 수 없어 다른 모델이 답했어요' }, '· ⚡ 대신 ' + (TIER_LABEL[m.tier] || m.tier) + ' 모델') : null));
     }
     return node;
   }
@@ -1811,7 +2124,8 @@
   function paintHeadState() {
     const v = R.view;
     if (!v || !v.ro) return;
-    v.ro.hidden = !(R.limits !== undefined && !(R.limits && R.limits.tools));
+    v.ro.hidden = !(R.toolsOff || (R.limits !== undefined && !(R.limits && R.limits.tools)));
+    if (v.tier) v.tier.hidden = !(R.tierNote && R.prefs.quick);
   }
   function updateComposer() {
     const v = R.view;
@@ -1891,7 +2205,7 @@
   /* ---- 화면: 대화 ---- */
   function chatView(root, mode, ctx) {
     const blocked = mode === 'blocked';
-    const v = { root: null, mode, log: null, ta: null, send: null, chips: null, clear: null, ro: null, stick: true };
+    const v = { root: null, mode, log: null, ta: null, send: null, chips: null, clear: null, ro: null, tier: null, stick: true };
     const quickBtn = el('button', {
       type: 'button', class: 'btn btn-sm btn-ghost ag-quick' + (R.prefs.quick ? ' ag-on' : ''), 'aria-pressed': R.prefs.quick ? 'true' : 'false',
       title: '빠른 모델로 답해요 — 간단한 체크·추가에 좋아요 (복잡한 점검은 끄는 게 좋아요)',
@@ -1900,15 +2214,17 @@
         lsSet(PREF_KEY, JSON.stringify(R.prefs));
         quickBtn.classList.toggle('ag-on', R.prefs.quick);
         quickBtn.setAttribute('aria-pressed', R.prefs.quick ? 'true' : 'false');
-        MV.ui.toast(R.prefs.quick ? '⚡ 빠른 답변을 켰어요.' : '꼼꼼한 답변으로 바꿨어요.');
+        paintHeadState();
+        MV.ui.toast(R.prefs.quick ? (R.tierNote ? '⚡ 빠른 답변을 켰지만, 이 요금제에서는 다른 모델이 답할 수 있어요.' : '⚡ 빠른 답변을 켰어요.') : '꼼꼼한 답변으로 바꿨어요.');
       },
     }, '⚡ 빠른 답변');
     v.clear = el('button', { type: 'button', class: 'btn btn-sm btn-ghost', onclick: clearChat, disabled: !R.chat.msgs.length }, '🗑 대화 지우기');
-    v.ro = el('span', { class: 'chip warn', title: '이 화면에서는 AI가 앱 데이터를 직접 바꿀 수 없어요', hidden: true }, '읽기 전용');
+    v.ro = el('span', { class: 'chip warn', title: '이 화면에서는 AI가 앱 데이터를 직접 바꿀 수 없어요 — 바꿀 것은 화면에서 직접 고쳐 주세요', hidden: true }, '읽기 전용');
+    v.tier = el('span', { class: 'chip', title: '요금제가 빠른 모델을 지원하지 않아 다른 모델이 답해요', hidden: true }, '⚡ 이 요금제에선 빠른 답변이 안 돼요');
     const head = el('div', { class: 'ag-head' },
       el('div', { class: 'ag-title' }, el('h1', '🤖 AI 비서'), el('span', { class: 'ag-sub' }, '진척도·비용·일정을 묻고 바로 고쳐요')),
       el('div', { class: 'ag-tools' }, blocked ? null : quickBtn, v.clear),
-      el('div', { class: 'ag-note' }, el('span', '⚠ 질문할 때마다 이 계정의 Claude 사용량을 써요'), v.ro));
+      el('div', { class: 'ag-note' }, el('span', '⚠ 질문할 때마다 이 계정의 Claude 사용량을 써요'), v.ro, v.tier));
     v.log = el('div', { class: 'ag-log', role: 'log', 'aria-label': 'AI 비서 대화', 'aria-live': 'polite', tabindex: '0' });
     const wrap = el('div', { class: 'ag' + (blocked ? ' ag-blocked' : '') }, head, v.log);
     v.root = wrap;
@@ -1965,6 +2281,19 @@
     }
     root.appendChild(wrap);
     R.view = v;
+    /* 최신 메시지에 붙어 있었는지 기억 → 폰을 돌려 대화가 페이지째 스크롤되는 모양으로 바뀌어도 최신 메시지에 머묾 */
+    let resizedAt = 0;
+    const track = () => { if (Date.now() - resizedAt > 400 && v.log.isConnected) v.stick = atBottom(v); };
+    v.log.addEventListener('scroll', track, { passive: true });
+    window.addEventListener('scroll', track, { passive: true });
+    const onResize = () => {
+      resizedAt = Date.now();
+      if (!v.stick || !R.chat.msgs.length) return;
+      requestAnimationFrame(() => { if (v.log.isConnected) toBottom(v); });
+      setTimeout(() => { if (v.log.isConnected && v.stick) toBottom(v); }, 250);
+    };
+    window.addEventListener('resize', onResize, { passive: true });
+    ctx.onCleanup(() => { window.removeEventListener('scroll', track); window.removeEventListener('resize', onResize); });
     paintAll(true);
     if (!blocked) {
       updateComposer();
@@ -2112,6 +2441,7 @@ body:has(.ag-composer) .toast-wrap { bottom: calc(var(--bottom-h) + 104px + env(
 .ag-can li { display: flex; gap: 10px; align-items: flex-start; }
 .ag-can-i { flex: none; width: 1.6em; text-align: center; }
 .ag-fab { position: fixed; right: 22px; bottom: calc(var(--bottom-h) + 22px + env(safe-area-inset-bottom)); z-index: 45; width: 56px; height: 56px; border-radius: 50%; border: 0; padding: 0; display: grid; place-items: center; background: var(--brand); color: var(--on-brand); font-size: 1.6rem; line-height: 1; box-shadow: var(--shadow-lg); cursor: pointer; transition: transform .12s, background .12s, bottom .18s ease-out; -webkit-tap-highlight-color: transparent; }
+body.ag-fab-pad #view::after { content: ''; display: block; height: 76px; }
 .ag-fab:hover { background: var(--brand-2); transform: translateY(-1px); }
 .ag-fab:focus-visible { outline: 3px solid color-mix(in srgb, var(--brand) 55%, transparent); outline-offset: 3px; }
 .ag-fab-dot { position: absolute; top: 3px; right: 3px; width: 13px; height: 13px; border-radius: 50%; background: var(--good); border: 2px solid var(--bg-2); display: none; }

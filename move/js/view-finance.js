@@ -18,12 +18,18 @@
           — 없으면 줄 id 로 정함(GROUP_OF), 직접 추가한 줄은 'purchase'. 줄마다 '묶음'에서 옮길 수 있음
           finance.budget.lines[].edited — 사용자가 한 번이라도 고친 줄. finance.v 3 (2026-10-06 가족 결정):
           v2 이하 기록은 안 고친 기본 줄만 새 기본값으로 (통돌이 50만원, 간이 옷장 20만원 '선택·나중에',
-          입주청소·커튼·소품·예비비 줄은 빠짐). 고친 줄은 그대로 둠
+          입주청소·커튼·소품·예비비 줄은 빠짐). 고친 줄은 그대로 둠.
+          finance.v 4 (2026-10-06 가전 결정): 줄 id 'lg' 는 호환 때문에 그대로 두고 '삼성 에어컨 이전설치 (이사 전)'
+          (금액 = 짐·견적 MV.calc.moveEstimate().lgCost — 제조사 서비스 전체, 없으면 50만원), 인터넷 이전 2만 → 3.6만원.
+          v3 기록도 안 고친 줄만 바꿈 (V3_LINES)
+   이사 전 결제  LINE_META[].before — 결제일이 비어 있으면 '이사 전에 냄'(에어컨 이전설치), 결제일을 넣으면 그 날짜로 판단.
+          묶음은 그대로(꼭 드는 비용)이고, 11/3 돈이 들어오기 전에 지금 통장에서 먼저 나간다고 따로 보여 줌
    계산   MV.calc.financeSummary(state) → { inflow, outflow, leftover, expensesTotal(아직 낼 이사비 전부),
           expensesAll, expensesPaid, refunds, net(= 남는 돈 − 아직 낼 돈 전부),
           essentialUnpaid, purchaseUnpaid, optionalUnpaid (묶음별 아직 낼 돈),
           netEssential(= 남는 돈 − 꼭 드는 이사 비용: 11/3 전후 현금 여유/부족 — 머리 숫자),
           netWithPurchases(= 남는 돈 − 꼭 드는 비용 − 살림), rentPart(11/3에 함께 내는 월세),
+          beforeMoveUnpaid(이사 전에 지금 통장에서 먼저 나갈 돈 — 위 합계에 이미 들어 있음), beforeMoveLabels,
           warnings:[{text, level}] } — 순수 함수 (대시보드가 호출)
    근거   리서치 검증본 finance_verified.json (2026-10-06). 규칙·요율 옆에 신뢰도와 짧은 근거,
           신뢰도가 높지 않으면 '세무사·은행 확인 권장' 표시.
@@ -185,6 +191,9 @@
     lawSpecial: { label: '조세특례제한법', url: 'https://www.law.go.kr/법령/조세특례제한법' },
     lawReport: { label: '부동산 거래신고법', url: 'https://www.law.go.kr/법령/부동산거래신고등에관한법률' },
     lawCollect: { label: '국세징수법', url: 'https://www.law.go.kr/법령/국세징수법' },
+    ssAc: { label: '삼성 에어컨 이전설치 안내', url: 'https://www.samsung.com/sec/samsung-care-plus/move-out-ac/AC-TCMACMUU/' },
+    openapt: { label: '서울시 공동주택 통합정보마당 (단지별 승강기 사용료)', url: 'https://openapt.seoul.go.kr' },
+    gangseoWaste: { label: '강서구 대형폐기물 수수료', url: 'https://www.gangseo.seoul.kr/gs010205' },
   };
   const CONF = {
     high: { label: '신뢰도 높음', cls: 'good' },
@@ -239,30 +248,36 @@
     [0.122, '연 0.122% (중간값)'],
     [0.128, '연 0.128% (부채비율 높음)'],
   ];
-  /* LG 이전설치 단가 (appliances_verified, 2025 기준·신뢰도 낮음) — 이사 견적 화면이 없을 때만 씀 */
-  const LG_PRICE = { fridge: 120000, dryer: 110000, washer: 98000, tv: 100000 };
-  const LG_AC = { wall: 226000, stand: 318000, '2in1': 417000 };
+  /* 가전 결정(2026-10-06): 냉장고(LG)·건조기(삼성)는 이삿짐센터 견적에 포함, 삼성 2in1 에어컨만 삼성전자서비스가
+     이사 전에 새 집에 설치. 제조사 서비스 금액은 짐·견적 계산(lgCost)을 쓰고, 그게 없을 때만 아래 가족 결정 금액 */
+  const AC_MOVE_FALLBACK = 500000;
 
   /* ======================= 기본값 ======================= */
   const DEFAULT_TIMES = { bankA: '09:20', recv: '09:30', keys: '09:45', registry: '10:00', toC: '10:15', broker: '10:40', bank: '11:00', movein: '14:00' };
   /* 가족 결정(2026-10-06): 옷장은 이사 후 간이 옷장(약 20만원, 선택·나중에), 통돌이 약 50만원(이사 후 배송),
      커튼·소품은 지금 것 가져감(0원), 입주청소는 직접(0원), 예비비 없음 */
   const LINE_META = {
-    mover: { auto: 'mover', low: 1500000, high: 2800000, conf: 'low', basis: '서울 20평대 3인 포장이사 약 150만~280만원(부가세 별도 시세), 모델 기준가 197만원(에어컨 제외). 11/3은 손없는날·주말 할증은 없고 월초라 업체에 따라 약 5% 붙을 수 있어요. 예산에는 실제로 낼 돈(부가세 포함)을 넣어요. 옷장을 이사 전에 사지 않으니 행거박스를 몇 개 가져오는지 물어 견적에 넣기. 방문견적 3곳으로 다시 맞추기' },
-    lg: { auto: 'lg', low: 300000, high: 800000, conf: 'low', basis: 'LG 이전설치: 냉장고 약 12만·건조기 약 11만(2개 이상 10% 할인)·운송비 약 4만원, 스탠드 에어컨 31.8만원(2025-11 기준). 1544-7777 확인' },
+    mover: { auto: 'mover', low: 1500000, high: 2800000, conf: 'low', basis: '서울 20평대 3인 포장이사 약 150만~280만원(부가세 별도 시세), 리서치 모델 기준가 197만원(에어컨 제외). 냉장고·건조기는 이삿짐센터가 옮겨서 이 견적에 들어가요. 11/3(화)은 손없는날·주말은 아니지만, 월초라 업체에 따라 약 5% 할증이 붙을 수 있어요. 예산에는 실제로 낼 돈(부가세 포함)을 넣어요. 옷장을 이사 전에 사지 않으니 행거박스를 몇 개 가져오는지 물어 견적에 넣기. 방문견적 3곳으로 다시 맞추기' },
+    /* 줄 id 'lg' 는 저장 기록 호환 때문에 그대로 — 내용은 삼성 2in1 에어컨 이전설치 (이사 전에 새 집에 설치) */
+    lg: { auto: 'lg', before: true, low: 450000, high: 700000, conf: 'mid', links: [LINK.ssAc], check: '1588-3366 예약 때 견적을 문자로 받아 확인',
+      basis: '삼성전자서비스(1588-3366) 이전설치. 2in1(거실 스탠드 + 안방 벽걸이, 실외기 1대) 공식 기본 약 40.4만원(2026-05 단가표) + 배관 연장(1m당 약 1.9만~2.7만원)·실외기 앵글(외벽에 달 때 약 11만~13만원)·냉매 보충·타공 등 추가 → 예산 약 50만원(45만~70만원, 추정). 운반이 포함되는지는 자료마다 달라 예약 때 꼭 확인. 설치가 이사 전이라 11/3 돈이 들어오기 전에 지금 통장에서 나가요. 냉장고·건조기는 이삿짐센터 견적에 들어 있어요' },
     wardrobe: { low: 100000, high: 300000, conf: 'low', basis: '간이 옷장·행거 약 10만~30만원 (이케아 등, 추정). 이사 전에는 사지 않아요 — 옷은 박스·행거박스로 옮기고, 이사 후 방을 실측해서 사요. 키 큰 옷장을 고르면 그때 벽 고정이 필요한지 확인. 11/3 현금에는 넣지 않아요' },
-    washer: { low: 400000, high: 600000, conf: 'low', basis: '통돌이 세탁기 약 50만원 선 (40만~60만원, 추정). 이사 후 11/4~11/6 배송으로 주문. 고장 세탁기는 지금 집에서 폐가전 무상방문수거(1599-0903)' },
-    waste: { auto: 'waste', low: 0, high: 100000, conf: 'low', basis: '대형폐기물 스티커 품목당 약 1.5만원(강서구 단가표 확인). 폐가전은 무상수거' },
-    elevator: { auto: 'elevator', low: 0, high: 200000, conf: 'low', basis: '단지당 0~10만원, 관리사무소마다 달라요 — 두 관리사무소에 확인' },
-    internet: { low: 0, high: 50000, conf: 'low', basis: '통신사 이전설치비(보통 수만원 이내) — 통신사에 확인' },
+    washer: { low: 400000, high: 600000, conf: 'mid', check: '주문 전에 가격·배송비·설치비 포함인지 확인',
+      basis: '통돌이 16~17kg급 약 46만~50만원(예: LG 17kg, 온라인 할인가), 18~19kg급은 약 58만~66만원 → 예산 약 50만원(40만~60만원). 이사 후 11/4~11/6 새 집 배송으로 주문. 고장 세탁기는 지금 집에서 폐가전 무상방문수거(1599-0903)' },
+    waste: { auto: 'waste', low: 0, high: 100000, conf: 'low', links: [LINK.gangseoWaste], check: '"빼기"에서 신고할 때 금액 확정',
+      basis: '버릴 가구 1개에 약 1.5만원으로 넉넉히 잡았어요(추정 — 강서구 공식 금액은 아직 확인 못 했어요). 강서구는 2025년 2월부터 온라인 신고를 "빼기" 앱·누리집으로 모았고, 동 주민센터 방문이나 전화(평일 09~18시)로도 신청돼요. 고장 세탁기 같은 폐가전은 무상방문수거(1599-0903)라 0원' },
+    elevator: { auto: 'elevator', low: 0, high: 300000, conf: 'mid', links: [LINK.openapt], check: '새 집 관리사무소에 금액 확인',
+      basis: '단지마다 달라요 — 서울 평균 약 10.4만원(2019 서울시 조사, 84%가 받음), 무료부터 수십만원까지. 사다리차를 써도 사용료를 받는 단지가 많아요. 새 집(14층) 관리사무소에 금액·보양·예약 방법을 꼭 묻고, 지금 집 관리사무소에도 확인하세요' },
+    internet: { low: 36000, high: 70000, conf: 'mid', check: '쓰는 통신사에 확인',
+      basis: '통신사 이전설치비 — 평일 낮 인터넷만 약 3.6만원, TV까지 약 5.6만원(통신 3사 비슷, 2026 정리 기준). 주말·평일 18시 이후는 약 25% 더 붙어요 → 11/3(화)이나 11/4 평일 낮으로 예약' },
     hug: { auto: 'hug', optional: true, low: 736000, high: 819200, conf: 'mid', basis: 'HUG 아파트 요율 연 약 0.115~0.128% × 2년 (3.2억이면 약 74만~82만원). 전입·확정일자 뒤 11월 중 가입할 때 내는 돈이라 11/3 당일 현금과는 따로예요. 2025~2026 개편 여부는 신청 화면에서 확인' },
   };
   /* HUG 미가입 때 생길 수 있는 문제를 실제 숫자로 비교한 별첨 가이드 */
   const HUG_GUIDE = '#/guide/hug';
   /* 예산 묶음 — 11/3 전후에 꼭 현금이 필요한 돈과 살림 구입·선택 항목을 나눠 봄 */
   const GROUPS = [
-    { id: 'essential', icon: '🚚', label: '꼭 드는 이사 비용', short: '꼭 드는 비용', what: '이사 날 전후로 반드시 나가는 돈 — 11/3 남는 돈으로 낼 수 있어야 해요',
-      desc: '이사 날 전후로 반드시 나가는 돈이에요 (이사업체, LG 가전 이전, 엘리베이터 사용료, 대형폐기물, 인터넷 이전). 11/3에 남는 돈으로 이걸 낼 수 있는지가 가장 중요해요.' },
+    { id: 'essential', icon: '🚚', label: '꼭 드는 이사 비용', short: '꼭 드는 비용', what: '이사 날 전후로 반드시 나가는 돈 — 11/3 남는 돈으로 낼 수 있어야 해요. 에어컨 이전설치는 이사 전에 내요',
+      desc: '이사 날 전후로 반드시 나가는 돈이에요 (이사업체 — 냉장고·건조기 포함, 삼성 에어컨 이전설치 — 이사 전에 냄, 엘리베이터 사용료, 대형폐기물, 인터넷 이전). 11/3에 남는 돈으로 이걸 낼 수 있는지가 가장 중요해요.' },
     { id: 'purchase', icon: '🛒', label: '새로 사는 살림', short: '살림 구입', what: '새로 사는 물건 — 고장 난 세탁기 대신 통돌이(약 50만원, 이사 후 배송). 커튼·소품은 지금 것을 가져가요',
       desc: '이사비가 아니라 새로 사는 물건이에요. 고장 난 세탁기 대신 통돌이 세탁기(약 50만원)를 이사 후 11/4~11/6에 배송받아요. 커튼·소품은 지금 것을 가져가서 0원이에요. 카드 할부로 나눠 낼 수도 있어요.' },
     { id: 'optional', icon: '🗂', label: '선택·나중에', short: '선택·나중에', what: '이사 뒤에 정하거나 내는 돈 — 간이 옷장(이사 후 실측하고 구매), HUG 보증료(전입 후 11월 중 가입할 때)',
@@ -290,13 +305,13 @@
     o.label = String(o.label == null ? '' : o.label);
     return o;
   }
-  /* 기본 줄 (v3, 2026-10-06 가족 결정 반영) */
+  /* 기본 줄 (v4, 2026-10-06 가족 결정 반영 — 'lg' 줄은 삼성 에어컨 이전설치) */
   const DEFAULT_LINES = [
     { id: 'mover', label: '이사업체 (포장이사 · 부가세 포함)', amount: 2167000, group: 'essential' },
-    { id: 'lg', label: 'LG 가전 이전설치', amount: 565000, group: 'essential' },
+    { id: 'lg', label: '삼성 에어컨 이전설치 (이사 전)', amount: AC_MOVE_FALLBACK, group: 'essential' },
     { id: 'waste', label: '대형폐기물 스티커', amount: 50000, group: 'essential' },
-    { id: 'elevator', label: '엘리베이터 사용료 (두 단지)', amount: 100000, group: 'essential' },
-    { id: 'internet', label: '인터넷 이전설치', amount: 20000, group: 'essential' },
+    { id: 'elevator', label: '엘리베이터 사용료 (두 단지)', amount: 200000, group: 'essential' },
+    { id: 'internet', label: '인터넷 이전설치', amount: 36000, group: 'essential' },
     { id: 'washer', label: '통돌이 세탁기 (이사 후 배송)', amount: 500000, group: 'purchase', memo: '11/4~11/6 배송으로 주문' },
     { id: 'wardrobe', label: '간이 옷장 (이사 후, 이케아 등)', amount: 200000, group: 'optional', memo: '이사 후 실측하고 구매' },
     { id: 'hug', label: '전세보증금반환보증 보증료 (HUG 2년)', amount: 780800, group: 'optional' },
@@ -326,12 +341,17 @@
     if (l.paid || l.on === false || (l.date && String(l.date).trim()) || (l.memo && String(l.memo).trim())) return false;
     return true;
   }
-  /* v2 → v3: 줄 id 별로, 사용자가 안 고친 줄만 새 기본값으로 (고친 줄은 그대로 둠).
+  /* v3 기본 줄 중 v4 에서 바뀐 것 — 안 고친 줄만 새 기본값으로 */
+  const V3_LINES = {
+    lg: { label: 'LG 가전 이전설치', group: 'essential' },               /* → 삼성 에어컨 이전설치 (이사 전), 금액은 자동 */
+    internet: { label: '인터넷 이전설치', amount: 20000, group: 'essential' }, /* → 36,000원 (평일 낮, 인터넷만) */
+  };
+  /* 줄 id 별로, 사용자가 안 고친 줄만 새 기본값으로 (고친 줄은 그대로 둠). table = 그 버전의 기본 줄.
      lines 는 저장된 줄의 얕은 복사본 (normLine 전 — 묶음이 새 GROUP_OF 로 채워지기 전에 비교) */
-  function migrateLinesV3(lines) {
+  function migrateLines(lines, table) {
     const out = [];
     lines.forEach((l) => {
-      const old = OLD_LINES[l.id];
+      const old = table[l.id];
       if (!pristineLine(l, old)) { out.push(l); return; }
       if (old.drop) return; /* 입주청소(직접 청소)·커튼·소품(지금 것 가져감)·예비비(없음) — 빼기 */
       const def = DEFAULT_LINES.find((d) => d.id === l.id);
@@ -346,7 +366,7 @@
       { id: 'hfFee', label: 'HF 보증료 미경과분 환급 (있으면)', amount: 0 },
     ].map(normRefund);
   }
-  const FIN_V = 3; /* 2: 임대차 신고 상태 ↔ 체크리스트 맞춤, 3: 예산 기본 줄 가족 결정 반영 */
+  const FIN_V = 4; /* 2: 임대차 신고 상태 ↔ 체크리스트 맞춤, 3: 예산 기본 줄 가족 결정 반영, 4: 삼성 에어컨 줄·인터넷 3.6만 */
   function defaults() {
     return {
       v: FIN_V,
@@ -385,7 +405,8 @@
     const f = fill(fin, defaults());
     f.budget = Object.assign({}, f.budget);
     let raw = (Array.isArray(f.budget.lines) ? f.budget.lines : []).filter((x) => x && typeof x === 'object').map((x) => Object.assign({}, x));
-    if (rawV < 3) raw = migrateLinesV3(raw);
+    if (rawV < 3) raw = migrateLines(raw, OLD_LINES);
+    if (rawV < 4) raw = migrateLines(raw, V3_LINES);
     f.budget.lines = raw.map(normLine);
     f.v = Math.max(rawV, FIN_V);
     f.budget.refunds = (Array.isArray(f.budget.refunds) ? f.budget.refunds : []).filter((x) => x && typeof x === 'object').map(normRefund);
@@ -534,20 +555,15 @@
     };
   }
 
-  function lgFallback(state) {
+  /* 짐 목록에서 가져가는 에어컨 수 (제조사 서비스 계산이 비어 있을 때 — 그러면 이삿짐센터가 옮기는 것) */
+  function aircons(state) {
     const inv = state && Array.isArray(state.inventory) ? state.inventory : [];
-    let ac = 0, other = 0, otherCount = 0, n = 0;
-    inv.forEach((x) => {
-      if (!x || !x.lg || x.fate !== 'move') return;
-      const q = Math.max(0, Math.round(num(x.qty)));
-      if (!q) return;
-      n += q;
-      if (x.cat === 'aircon' || x.tag === 'aircon') ac += (LG_AC[x.ac] || LG_AC.stand) * q;
-      else { other += (LG_PRICE[x.tag] || 100000) * q; otherCount += q; }
-    });
-    if (otherCount >= 2) other = Math.round(other * 0.9);
-    const transport = otherCount ? 40000 : 0;
-    return { value: Math.round((ac + other + transport) / 1000) * 1000, count: n };
+    return sum(inv.filter((x) => x && (x.cat === 'aircon' || x.tag === 'aircon') && x.fate === 'move'), (x) => Math.max(0, Math.round(num(x.qty))));
+  }
+  /* 결제 시점: 결제일을 넣었으면 그 날짜로(이사일 전이면 'before'), 비어 있으면 줄의 기본(meta.before) */
+  function timingOf(l, meta, move) {
+    if (l && l.date && D.valid(l.date)) return D.diff(D.str(D.parse(l.date)), move) > 0 ? 'before' : 'after';
+    return meta && meta.before ? 'before' : '';
   }
   function hugPremium(f) {
     const dep = Math.max(0, num(f.newHome.deposit));
@@ -570,11 +586,18 @@
       return { value: 2167000, src: 'research', note: '리서치 모델 기준가 197만원 + 부가세 10% (에어컨 제외) — 짐·견적 계산이 생기면 자동으로 바뀌어요' };
     }
     if (kind === 'lg') {
+      /* 짐·견적의 제조사 서비스 전체(lgCost — 지금은 삼성 2in1 에어컨 세트, 부가세 포함 소비자가) */
       const c = est && est.lgCost;
-      if (c && isNum(c.typical)) return { value: Math.round(c.typical / 1000) * 1000, src: 'est', note: '짐·견적 화면의 LG 이전 계산값' };
-      const fb = lgFallback(state);
-      if (!fb.count) return { value: 0, src: 'inv', note: '짐 목록에 LG 서비스로 옮길 가전이 아직 없어요' };
-      return { value: fb.value, src: 'inv', note: '짐 목록의 LG 이전 가전 ' + fb.count + '개 × 리서치 단가' };
+      if (c && isNum(c.typical)) {
+        const range = isNum(c.low) && isNum(c.high) && c.high > 0 ? ' (범위 ' + krw(c.low) + '~' + krw(c.high) + ')' : '';
+        /* 구성 (기본·배관·냉매·앵글) — 짐·견적이 rows[].parts 를 줄 때만 */
+        const rows = Array.isArray(c.rows) ? c.rows.filter((r) => r && r.parts) : [];
+        const part = (k) => sum(rows, (r) => r.parts[k]);
+        const bits = rows.length ? [['기본', part('base')], ['배관', part('pipe')], ['냉매', part('gas')], ['앵글', part('angle')]].filter((x) => x[1] > 0).map((x) => x[0] + ' ' + krw(x[1])) : [];
+        return { value: Math.round(c.typical / 1000) * 1000, src: 'est', note: '짐·견적 화면의 ' + (c.label || '제조사 서비스') + ' 계산값' + (bits.length ? ' — ' + bits.join(' + ') : '') + range };
+      }
+      if (est && aircons(state) > 0) return { value: 0, src: 'est', note: '짐 목록에서 에어컨을 이삿짐센터가 옮기는 것으로 돼 있어 이사업체 견적에 들어가요 — 삼성전자서비스로 옮기면 짐 목록에서 바꾸세요' };
+      return { value: AC_MOVE_FALLBACK, src: 'research', note: '가족 결정 기준 약 50만원 (2in1 기본 약 40.4만원 + 추가 작업, 추정) — 짐·견적 계산이 생기면 자동으로 바뀌어요' };
     }
     if (kind === 'waste') {
       const inv = state && Array.isArray(state.inventory) ? state.inventory : [];
@@ -583,9 +606,15 @@
       return { value: 50000, src: 'research', note: '짐 목록에 버릴 가구가 아직 없어 리서치 평균(약 5만원)' };
     }
     if (kind === 'elevator') {
-      const line = est && Array.isArray(est.lines) ? est.lines.find((l) => l && /엘리베이터/.test(String(l.label || ''))) : null;
-      if (line && isNum(line.typical) && line.typical > 0) return { value: 0, src: 'est', note: '이사 견적에 이미 들어 있어요 (' + krw(line.typical) + ') — 두 번 세지 않아요' };
-      return { value: 100000, src: 'research', note: '두 단지 각 약 5만원으로 가정 (관리사무소 확인)' };
+      /* 짐·견적의 '엘리베이터 사용료' 줄 (반출입 추가 인력 줄과 헷갈리지 않게 key·이름으로 찾음) */
+      const elines = est && Array.isArray(est.lines) ? est.lines : null;
+      const line = elines ? elines.find((l) => l && (l.key === 'elevFee' || /엘리베이터\s*사용료/.test(String(l.label || '')))) : null;
+      if (line && isNum(line.typical) && line.typical > 0) return { value: 0, src: 'est', note: '이사 견적에 이미 들어 있어요 (' + krw(line.typical) + ') — 두 번 세지 않아요. 새 집 관리사무소에 금액 확인' };
+      const ei = state && state.estimate && state.estimate.inputs;
+      if (elines && ei && isNum(ei.elevFeeFrom) && isNum(ei.elevFeeTo) && ei.elevFeeFrom + ei.elevFeeTo === 0) {
+        return { value: 0, src: 'est', note: '짐·견적 화면에 양쪽 단지 0원으로 넣었어요 (관리사무소에서 무료라고 들었으면 그대로)' };
+      }
+      return { value: 200000, src: 'research', note: '두 단지 각 약 10만원으로 가정 (서울 평균 약 10.4만원, 2019 서울시 조사) — 새 집 관리사무소에 확인' };
     }
     if (kind === 'hug') {
       const h = hugPremium(f);
@@ -593,12 +622,12 @@
     }
     return null;
   }
-  function computeBudget(f, state, est) {
+  function computeBudget(f, state, est, move) {
     const lines = f.budget.lines.map((l) => {
       const meta = LINE_META[l.id] || null;
       const a = meta && meta.auto ? autoAmount(meta.auto, f, state, est) : null;
       const isAuto = !!(a && l.auto !== false);
-      return Object.assign({}, l, { meta, autoInfo: a, isAuto, value: isAuto ? a.value : num(l.amount), on: l.on !== false, group: groupOf(l) });
+      return Object.assign({}, l, { meta, autoInfo: a, isAuto, value: isAuto ? a.value : num(l.amount), on: l.on !== false, group: groupOf(l), when: timingOf(l, meta, move) });
     });
     const active = lines.filter((l) => l.on);
     const total = sum(active, (l) => l.value);
@@ -612,8 +641,12 @@
       const gp = sum(gl.filter((l) => l.paid), (l) => l.value);
       groups[g.id] = { id: g.id, total: gt, paid: gp, unpaid: gt - gp, count: gl.length, labels: gl.map((l) => l.label).filter(Boolean) };
     });
+    /* 이사 전에 지금 통장에서 먼저 나갈 돈 (아직 안 낸 줄, 0원 줄 빼고) — 묶음 합계에 이미 들어 있음 */
+    const bl = active.filter((l) => l.when === 'before' && !l.paid && l.value > 0);
+    const before = { unpaid: sum(bl, (l) => l.value), labels: bl.map((l) => l.label || '항목'), ids: bl.map((l) => l.id),
+      essential: sum(bl.filter((l) => l.group === 'essential'), (l) => l.value) };
     return {
-      lines, total, paid, unpaid: total - paid, count: active.length, groups,
+      lines, total, paid, unpaid: total - paid, count: active.length, groups, before,
       refunds, refundsTotal: sum(refunds, (r) => r.amount), refundsPending: sum(refunds.filter((r) => !r.got), (r) => r.amount),
     };
   }
@@ -939,6 +972,12 @@
         text: '꼭 드는 이사 비용은 ' + D.fmt(c.move) + ' 남는 돈으로 낼 수 있어요 (여유 ' + krw(c.netEssential) + '). ' +
           (c.netWithPurchases < 0 ? '새로 사는 살림(세탁기 등)까지 사면 ' + krw(-c.netWithPurchases) + ' 모자라요 — 카드 할부 등으로 나눠 내세요.' : '선택·나중에 항목(간이 옷장·HUG 보증료)까지 모두 내면 ' + krw(-c.net) + ' 모자라요 — 이사 뒤에 내는 돈이에요.') });
     }
+    /* 이사 전에 먼저 나가는 돈 (에어컨 이전설치) — 11/3 돈이 들어오기 전이라 지금 통장에 남겨 둬야 함 */
+    const BF = c.budget.before;
+    if (BF && BF.unpaid > 0) {
+      A.push({ id: 'before', level: 'info', tab: 'budget', anchor: 'fn-before',
+        text: '이사 전에 먼저 나가는 돈 ' + krw(BF.unpaid) + ' (' + BF.labels.join(', ') + ') — ' + D.fmt(c.move) + ' 돈이 들어오기 전이라 지금 통장에 남겨 두세요.' });
+    }
     if (c.broker.verdict === 'under' && !f.broker.agreed) {
       A.push({ id: 'brokerUnder', level: 'info', tab: 'tax', anchor: 'fn-broker',
         text: '중개보수는 최대 ' + won(c.broker.maxWithVat) + '까지 청구될 수 있어요 (계획 ' + won(c.broker.planned) + ') — 금액을 문자로 미리 확정하세요.' });
@@ -956,7 +995,7 @@
     try { est = (MV.calc && typeof MV.calc.moveEstimate === 'function') ? MV.calc.moveEstimate(state) : null; } catch (e) { est = null; }
     if (est && typeof est !== 'object') est = null;
     const flow = computeFlow(f, move);
-    const budget = computeBudget(f, state, est);
+    const budget = computeBudget(f, state, est, move);
     const G = budget.groups;
     const c = {
       f, est, today, move, flow, budget,
@@ -994,6 +1033,8 @@
       netEssential: c.netEssential,
       netWithPurchases: c.netWithPurchases,
       rentPart: c.flow.rentPart,
+      beforeMoveUnpaid: c.budget.before.unpaid,       // 이사 전에 지금 통장에서 먼저 나갈 돈 (위 합계에 이미 포함)
+      beforeMoveLabels: c.budget.before.labels.slice(),
       mode: c.flow.direct ? 'direct' : 'self',
       steps: c.flow.steps.map((s) => ({ id: s.id, kind: s.kind, title: stepTitle(s.id, c), amount: s.amount, time: s.time, done: s.done, balance: s.balance })),
       warnings: c.alerts.filter((a) => a.level !== 'info').map((a) => ({ text: a.text, level: a.level })),
@@ -1408,6 +1449,14 @@ div.fn-alert { cursor: default; }
 .fn-bl-grp { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: .78rem; color: var(--ink-3); font-weight: 700; min-width: 0; }
 .fn-bl-grp > span { white-space: nowrap; }
 .fn-bl-grp .select { flex: 0 1 auto; min-width: 0; max-width: 100%; min-height: 36px; padding-top: 4px; padding-bottom: 4px; font-size: .84rem; }
+.fn-when-wrap:empty { display: none; }
+.fn-when { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 6px; font-size: .78rem; color: var(--ink-2); line-height: 1.4; min-width: 0; }
+.fn-when .chip { flex: none; }
+.fn-when > span:last-child { min-width: 0; overflow-wrap: anywhere; }
+.fn-before { margin-top: 10px; }
+.fn-before a { white-space: normal; }
+.fn-before-wrap:empty { display: none; }
+.fn-before-wrap .fn-before { margin: 8px 0 4px; }
 .fn-adv-h { display: flex; align-items: center; gap: 6px; margin: 14px 0 4px; font-size: .92rem; }
 .fn-adv-h:first-of-type { margin-top: 6px; }
 
@@ -1838,7 +1887,9 @@ div.fn-alert { cursor: default; }
       tile('is-in', D.fmt(c.move) + ' 받을 돈', eok(fl.inflow), fl.direct ? 'A가 대출을 직접 갚고 남은 돈' : 'A → 내 통장', won(fl.inflow)),
       tile('is-out', D.fmt(c.move) + ' 보낼 돈', eok(fl.outflow), fl.direct ? 'C 잔금 · 중개보수' : 'C 잔금 · 중개보수 · 대출 완제', won(fl.outflow)),
       tile('', '그날 남는 돈', krw(fl.leftover), '받을 돈 − 보낼 돈' + (fl.rentPart ? ' (월세 ' + krw(fl.rentPart) + ' 포함해 뺌)' : ''), won(fl.leftover)),
-      tile('', D.fmt(c.move) + ' 전후 꼭 필요한 현금', krw(b.groups.essential.unpaid), '꼭 드는 이사 비용 (이사업체·가전 이전 등, 아직 낼 돈)', won(b.groups.essential.unpaid)),
+      tile('', D.fmt(c.move) + ' 전후 꼭 필요한 현금', krw(b.groups.essential.unpaid),
+        '꼭 드는 이사 비용 (이사업체·에어컨 이전 등, 아직 낼 돈)' + (b.before.essential > 0 ? ' · 그중 ' + krw(b.before.essential) + '은 이사 전에 지금 통장에서 나가요' : ''),
+        won(b.groups.essential.unpaid)),
       el('div', { class: 'fn-stat is-final' + (c.netEssential < 0 ? ' is-neg' : '') },
         el('span', { class: 'fn-stat-k' }, c.netEssential < 0 ? '⚠ 꼭 드는 비용 내면 부족' : '꼭 드는 비용 내고 여유'),
         el('span', { class: 'fn-stat-v', title: won(c.netEssential) }, krw(Math.abs(c.netEssential))),
@@ -1959,7 +2010,25 @@ div.fn-alert { cursor: default; }
           return [MV.ui.progress(fl.doneCount / fl.steps.length), '당일 체크 ' + fl.doneCount + '/' + fl.steps.length];
         })),
       el('p', { class: 'small muted mb-0' }, '금액(예: 3.78억, 120만)과 시각은 눌러서 고칠 수 있어요. 단계마다 그 뒤 내 통장 잔액이 바로 계산돼요.'),
+      /* 이사 전에 먼저 나가는 돈은 이 흐름(11/3 하루)에 넣지 않음 — 따로 알려 줌 */
+      P.live('div', 'fn-before-wrap', () => beforeNote(P, 'flow')),
       ol);
+  }
+  /* 이사 전에 지금 통장에서 먼저 나가는 돈 (에어컨 이전설치) 안내 — where: 'flow'(돈 흐름 탭) | 'budget'(예산 탭) */
+  function beforeNote(P, where) {
+    const c = P.c, B = c.budget.before;
+    if (!B || !(B.unpaid > 0)) return null;
+    const what = B.labels.join(', ');
+    if (where === 'flow') {
+      return el('div', { class: 'callout warn fn-before' },
+        el('p', { class: 'mb-0' }, el('b', '⏰ 이사 전에 먼저 나가는 돈 ' + krw(B.unpaid)), ' — ' + what + '. ',
+          D.fmt(c.move) + ' 돈이 들어오기 전에 지금 통장에서 내요. 이 흐름에는 넣지 않았고, 아래 잔액은 ' + D.fmt(c.move) + '에 오가는 돈만으로 계산해요. ',
+          el('a', { href: '#/money/budget', onclick: P.tabLink('budget', 'fn-before') }, '예산 보기 →')));
+    }
+    return el('div', { class: 'callout warn fn-before fn-anchor', id: 'fn-before' },
+      el('p', { class: 'mb-0' }, el('b', '⏰ 이사 전에 먼저 나가는 돈 ' + krw(B.unpaid)), ' — ' + what + '.'),
+      el('p', { class: 'mb-0 mt-8 small' }, (B.ids.indexOf('lg') >= 0 ? '에어컨은 이사 전에 새 집에 설치해서, ' : '') + D.fmt(c.move) + '에 A의 돈이 들어오기 전에 지금 통장에서 나가요. 결제하는 날까지 통장에 ' + krw(B.unpaid) + ' 이상 남겨 두세요. ' +
+        '위 "꼭 드는 이사 비용"에 이미 들어 있어서 따로 더하지 않아요. 결제일을 넣으면 그 날짜로 다시 판단해요 (이사 뒤로 미루면 이 안내에서 빠져요).'));
   }
 
   function stepItem(P, s0, i) {
@@ -2494,6 +2563,7 @@ div.fn-alert { cursor: default; }
         el('div', { class: 'fn-kv fn-hl-more' },
           el('span', { class: 'k' }, '살림 구입까지 포함하면 (+' + krw(pur) + ')'), el('span', { class: vCls(c.netWithPurchases) }, verdictTxt(c.netWithPurchases)),
           el('span', { class: 'k' }, '전부 포함하면 (선택·나중에 +' + krw(opt) + ')'), el('span', { class: vCls(c.net) }, verdictTxt(c.net)))),
+      beforeNote(P, 'budget'),
       fl.rentPart ? el('div', { class: 'callout fn-rent-tip' },
         el('p', { class: 'mb-0' }, el('b', '월세가 계약서대로 후불이면 ' + D.fmt(c.move) + '에 ' + krw(fl.rentPart) + '을 안 내도 돼서 남는 돈이 그만큼 늘어요'),
           ' — 그러면 꼭 드는 비용 기준 ' + verdictTxt(c.netEssential + fl.rentPart) + '. ',
@@ -2503,7 +2573,7 @@ div.fn-alert { cursor: default; }
           '아니요. ' + krw(b.unpaid) + '은 예산 전부예요. 그중 ' + D.fmt(c.move) + ' 전후에 꼭 현금으로 나가는 건 "꼭 드는 이사 비용" ' + krw(ess) + '이에요. ' +
           '"새로 사는 살림" ' + krw(pur) + '은 이사비가 아니라 물건 값(통돌이 세탁기 등)이라 카드 할부로 나눠 낼 수 있고, ' +
           '"선택·나중에" ' + krw(opt) + '은 이사 뒤에 정하거나 내는 돈(간이 옷장, HUG 보증료)이에요.'),
-        el('p', { class: 'mb-0 mt-8 small' }, el('b', '가족이 정한 것: '), '옷장은 이사 후 실측하고 간이 옷장으로 · 커튼·소품은 지금 것 가져감(0원) · 입주청소는 직접(0원) · 예비비는 따로 잡지 않음.')),
+        el('p', { class: 'mb-0 mt-8 small' }, el('b', '가족이 정한 것: '), '냉장고·건조기는 이삿짐센터가 옮김(이사업체 견적에 포함) · 에어컨은 삼성전자서비스가 이사 전에 새 집에 설치 · 통돌이 약 50만원은 이사 후 배송 · 옷장은 이사 후 실측하고 간이 옷장으로 · 커튼·소품은 지금 것 가져감(0원) · 입주청소는 직접(0원) · 예비비는 따로 잡지 않음.')),
       el('div', { class: 'fn-cmp', role: 'img', 'aria-label': '같은 눈금 비교 — 그날 남는 돈 ' + krw(fl.leftover) + ', 앞으로 낼 돈 ' + krw(b.unpaid) + ' (꼭 드는 비용 ' + krw(ess) + ', 살림 구입 ' + krw(pur) + ', 선택·나중에 ' + krw(opt) + ')' },
         el('div', { class: 'fn-cmp-row' }, el('span', '그날 남는 돈'), el('div', { class: 'fn-cmp-track' }, el('i', { class: 'is-left', style: { width: w(Math.max(0, fl.leftover)) } })), el('b', krw(fl.leftover))),
         el('div', { class: 'fn-cmp-row' }, el('span', '앞으로 낼 돈'),
@@ -2536,7 +2606,15 @@ div.fn-alert { cursor: default; }
     const labelCell = el('div', { class: 'fn-bl-label' },
       textField('항목 이름', l.label, (v) => setLineSilent((x) => { x.label = v; }), { fk: 'bl-label-' + l.id, bare: true }),
       meta ? el('div', { class: 'fn-range' }, el('span', '보통 ' + (meta.low ? krw(meta.low) : '0원') + ' ~ ' + krw(meta.high)),
-        basis(meta.conf, meta.basis, meta.auto === 'hug' ? [LINK.hug] : [], meta.conf === 'mid' ? 'HUG에 확인' : '견적·영수증으로 확인', true)) : null,
+        basis(meta.conf, meta.basis, meta.links || (meta.auto === 'hug' ? [LINK.hug] : []), meta.check || (meta.auto === 'hug' ? 'HUG에 확인' : '견적·영수증으로 확인'), true)) : null,
+      /* 결제 시점 — 이사 전에 내는 줄(에어컨 이전설치)은 11/3 돈보다 먼저 통장에서 나간다고 표시 */
+      P.live('div', 'fn-when-wrap', () => {
+        const x = curLine();
+        if (x.paid || x.on === false) return null;
+        if (x.when === 'before') return el('div', { class: 'fn-when is-before' }, chip('⏰ 이사 전에 냄', 'warn'), el('span', D.fmt(P.c.move) + ' 돈이 들어오기 전 — 지금 통장에서 나가요'));
+        if (x.meta && x.meta.before && x.when === 'after') return el('div', { class: 'fn-when' }, chip('결제일이 이사 뒤', ''), el('span', D.fmt(P.c.move) + '에 받은 돈으로 내요'));
+        return null;
+      }),
       meta && meta.auto === 'hug' ? el('a', { class: 'fn-cl-link fn-hug-link', href: HUG_GUIDE }, '📎 가입하지 않으면? 별첨 보기 →') : null,
       /* 묶음 옮기기 — 바꾸면 그 묶음 아래로 줄이 옮겨 가고 위 합계가 바로 바뀜 */
       el('label', { class: 'fn-bl-grp' }, el('span', '묶음'),
@@ -2573,7 +2651,8 @@ div.fn-alert { cursor: default; }
     } else {
       amountCell.appendChild(moneyField('금액', l.value, (v) => setLine((x) => { x.amount = v; }), { fk: 'bl-amt-' + l.id, bare: true }));
     }
-    const dateCell = el('div', { class: 'fn-bl-date' }, dateField('결제일', l.date, (v) => setLineSilent((x) => { x.date = v; }), { fk: 'bl-date-' + l.id, bare: true }));
+    /* 결제일은 '이사 전에 냄' 판단에 쓰여서 바꾸면 계산도 다시 (날짜 칸은 다시 그리지 않음) */
+    const dateCell = el('div', { class: 'fn-bl-date' }, dateField('결제일', l.date, (v) => setLine((x) => { x.date = v; }), { fk: 'bl-date-' + l.id, bare: true }));
     const paidCell = el('div', { class: 'fn-bl-paid' }, checkbox('냄', l.paid, (v) => setLine((x) => { x.paid = v; }), { fk: 'bl-paid-' + l.id }));
     const memoCell = el('div', { class: 'fn-bl-memo' }, textField('메모', l.memo, (v) => setLineSilent((x) => { x.memo = v; }), { fk: 'bl-memo-' + l.id, bare: true, placeholder: '메모 (업체·견적 등)' }));
     const delCell = el('div', { class: 'fn-bl-del' }, !meta ? el('button', {
@@ -2641,11 +2720,13 @@ div.fn-alert { cursor: default; }
       sec(GROUP_BY_ID.essential, [
         fl.rentPart ? li('월세 후불 확인', ' — 계약서대로 ' + D.fmt(addMonths(c.move, 1)) + '에 내면 ' + D.fmt(c.move) + '에 ' + krw(fl.rentPart) + '이 덜 나가요. 중개사·C와 확정하세요.') : null,
         li('장기수선충당금 돌려받기', ' — 약 20만~50만원. 구집 관리사무소 납부확인서로 A에게 청구.'),
-        li('이사업체 단가 협상', ' — 11/3(화)은 평일이고 손없는날이 아니라 손없는날·주말 할증은 없고, 월초라 업체에 따라 약 5% 붙을 수 있어요. 방문견적 3곳을 "부가세 포함 총액"으로 비교하세요 (카드 수수료 전가는 금지).'),
+        li('이사업체 단가 협상', ' — 11/3(화)은 평일이고 손없는날도 아니지만, 월초라 업체에 따라 약 5% 할증이 붙을 수 있어요. 방문견적 3곳을 "부가세 포함 총액"으로 비교하고, 할증이 들어 있는지 물어보세요 (카드 수수료 전가는 금지). 냉장고·건조기도 이 견적에 넣어요.'),
+        li('에어컨 이전설치는 이사 전에 내요', ' — 삼성전자서비스(1588-3366)에 되도록 빨리 예약하고, 운반 포함 여부와 배관 연장·앵글·타공 추가비를 견적 문자로 받으세요. 설치 날 내는 돈이라 ' + D.fmt(c.move) + ' 돈이 들어오기 전에 지금 통장에서 나가요.'),
+        li('엘리베이터 사용료·인터넷 이전비 확인', ' — 새 집 관리사무소에 사용료·보양·예약을 물어보세요(서울 평균 약 10만원, 사다리차를 써도 받는 단지가 많아요). 인터넷 이전은 평일 낮(약 3.6만원)으로 잡으면 주말·저녁 할증(약 25%)을 피해요.'),
         li('행거박스 개수 묻기', ' — 옷장을 이사 전에 사지 않으니 옷은 박스·행거박스로 옮겨요. 업체가 행거박스를 몇 개 가져오는지 물어 견적에 넣어 달라고 하세요.'),
       ]),
       sec(GROUP_BY_ID.purchase, [
-        li('통돌이 세탁기 약 50만원', ' — 이사 후 11/4~11/6 배송으로 주문해요. 고장 난 세탁기는 지금 집에서 폐가전 무상방문수거(1599-0903). 카드 무이자 할부로 나누면 ' + D.fmt(c.move) + ' 현금이 줄지 않아요.'),
+        li('통돌이 세탁기 약 50만원', ' — 16~17kg급이 약 46만~50만원이에요. 이사 후 11/4~11/6 새 집 배송으로 주문하고, 배송·설치비가 포함인지 확인하세요. 고장 난 세탁기는 지금 집에서 폐가전 무상방문수거(1599-0903). 카드 무이자 할부로 나누면 ' + D.fmt(c.move) + ' 현금이 줄지 않아요.'),
         li('커튼·소품은 지금 것 가져가기 (0원)', ' — 새로 사지 않아요. 사전방문 때 창 치수만 재서 지금 커튼이 맞는지 보고, 안 맞으면 이사 후에 조정해요.'),
         li('안 쓰는 물건 중고 판매', ' — 붙박이장에서 나온 물건·책·장난감.'),
       ]),
