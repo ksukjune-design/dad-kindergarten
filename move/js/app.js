@@ -61,13 +61,38 @@
     const stamp = new Date();
     const pad = (n) => String(n).padStart(2, '0');
     const fname = 'move-backup-' + stamp.getFullYear() + pad(stamp.getMonth() + 1) + pad(stamp.getDate()) + '-' + pad(stamp.getHours()) + pad(stamp.getMinutes()) + '.json';
+    const Y = MV.sync || { mode: 'local', status: 'local' };
+    const shared = Y.mode === 'shared';
+    const SYNC_TEXT = {
+      synced: '🔗 공유 중이에요. 부부가 같은 기록을 보고, 바꾼 내용이 바로 서로에게 보여요.',
+      saving: '⏳ 공유 저장소에 저장하는 중이에요.',
+      empty: '🆕 공유 저장소가 아직 비어 있어요. 아래 버튼으로 이 기기의 기록을 올려 공유를 시작하세요.',
+      readonly: '👁 보기 전용 권한이에요. 바꾼 내용은 이 기기에만 남아요.',
+      offline: '⚠ 공유 저장소와 잠시 연결이 끊겼어요. 자동으로 다시 시도해요.',
+      connecting: '⏳ 공유 저장소에 연결하는 중이에요.',
+    };
+    const syncCard = (Y.mode !== 'local' || Y.status === 'offline') ? el('div', { class: 'card flat tint-kid' },
+      el('h3', '함께 쓰기'),
+      el('p', { class: 'small' }, SYNC_TEXT[Y.status] || '이 기기에만 저장돼요.'),
+      Y.empty && !Y.readOnly ? el('button', { class: 'btn btn-kid', type: 'button', onclick: () => {
+        MV.ui.confirm('지금 이 기기의 체크·메모·짐 목록으로 공유를 시작할까요?', { okLabel: '공유 시작' }).then((ok) => {
+          if (ok && Y.initFromLocal()) { m.close(); MV.ui.toast('공유를 시작했어요.'); }
+        });
+      } }, '이 기기 기록으로 공유 시작') : null,
+      Y.localBackup && Y.localBackup() ? el('button', { class: 'btn btn-sm btn-ghost mt-8', type: 'button', onclick: () => {
+        MV.ui.download('move-before-share.json', Y.localBackup());
+      } }, '공유 전 이 기기 기록 받기') : null) : null;
     const body = el('div', { class: 'stack' },
-      el('p', { class: 'small muted' },
-        '모든 기록은 이 브라우저 안에만 저장됩니다 (서버로 나가지 않음). 다른 기기·배우자와 맞추려면 백업 파일을 보내고 그쪽에서 복원하세요.'),
+      el('p', { class: 'small muted' }, shared
+        ? '기록은 공유 저장소와 이 브라우저에 함께 저장돼요. 혹시 모르니 중요한 날 전에는 백업 파일도 받아 두세요.'
+        : '모든 기록은 이 브라우저 안에만 저장됩니다 (서버로 나가지 않음). 다른 기기·배우자와 맞추려면 백업 파일을 보내고 그쪽에서 복원하세요.'),
+      syncCard,
       el('div', { class: 'card flat' },
         el('h3', '백업 · 복원'),
         el('div', { class: 'row' },
-          el('button', { class: 'btn btn-primary', type: 'button', onclick: () => { MV.ui.download(fname, MV.store.exportJSON()); MV.ui.toast('백업 파일을 저장했어요.'); } }, '⬇ 백업 파일 저장'),
+          el('button', { class: 'btn btn-primary', type: 'button', onclick: () => {
+            Promise.resolve(MV.ui.download(fname, MV.store.exportJSON())).then((ok) => { if (ok !== false) MV.ui.toast('백업 파일을 저장했어요.'); });
+          } }, '⬇ 백업 파일 저장'),
           el('button', { class: 'btn', type: 'button', onclick: () => fileInput.click() }, '⬆ 백업에서 복원'),
           fileInput),
         el('p', { class: 'tiny muted mt-8 mb-0' }, '마지막 저장: ' + MV.date.time(st.meta.updatedAt) + (MV.store.storageOK ? '' : ' · ⚠ 브라우저 저장소 사용 불가'))),
@@ -84,7 +109,9 @@
           }, t === '' ? '시스템 따라가기' : t === 'light' ? '밝게' : '어둡게')))),
       el('div', { class: 'card flat tint-bad' },
         el('h3', '처음부터 다시'),
-        el('p', { class: 'small' }, '체크·메모·짐 목록·도면 배치를 모두 지우고 기본값으로 되돌립니다. 먼저 백업하세요.'),
+        el('p', { class: 'small' }, shared
+          ? '체크·메모·짐 목록·도면 배치를 모두 지우고 기본값으로 되돌립니다. 공유 중이라 배우자 화면에서도 지워져요. 먼저 백업하세요.'
+          : '체크·메모·짐 목록·도면 배치를 모두 지우고 기본값으로 되돌립니다. 먼저 백업하세요.'),
         el('button', { class: 'btn btn-danger', type: 'button', onclick: () => {
           MV.ui.confirm('정말 모든 기록을 지우고 처음 상태로 돌릴까요?', { danger: true, okLabel: '모두 지우기' }).then((ok) => {
             if (ok) { MV.store.reset(); m.close(); MV.ui.toast('초기화했어요.'); }
@@ -107,6 +134,7 @@
       renderNav(); renderTop();
       if (e && e.reset) MV.rerender(true);
     });
+    MV.store.on('caps', () => renderNav());
     if (!location.hash) history.replaceState(null, '', '#/dashboard');
     onRoute();
     // 날짜가 바뀌면(자정) D-day 갱신

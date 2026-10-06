@@ -35,7 +35,7 @@
             MV.ui.prompt(title, {value, placeholder, multiline, label}) → Promise<string|null>
             MV.ui.toast(msg, {action:{label, onClick}, ms})
             MV.ui.progress(pct, cls) / MV.ui.dueChip(dateStr, done) / MV.ui.moneyInput(value, onChange, opts)
-            MV.ui.download(filename, text, mime)
+            MV.ui.download(filename, text, mime)  (공유 버전에서는 Promise)
    ============================================================ */
 (function (global) {
   'use strict';
@@ -323,10 +323,18 @@
       S.lastSaved = Date.now();
       S.storageOK = true;
     } catch (e) {
-      if (S.storageOK) MV.ui && MV.ui.toast && MV.ui.toast('브라우저 저장소를 쓸 수 없어 이 창을 닫으면 사라집니다. ⋯ 메뉴에서 백업하세요.');
+      // 공유 저장소에 연결돼 있으면 기록은 거기에 남으므로 경고하지 않음
+      if (S.storageOK && !(MV.sync && MV.sync.mode === 'shared')) MV.ui && MV.ui.toast && MV.ui.toast('브라우저 저장소를 쓸 수 없어 이 창을 닫으면 사라집니다. ⋯ 메뉴에서 백업하세요.');
       S.storageOK = false;
     }
+    S.afterPersist.forEach((fn) => { try { fn(); } catch (err) { console.error(err); } });
   };
+  /** 저장 직후 불리는 훅 (공유 저장소 동기화가 씀) */
+  S.afterPersist = [];
+  S.KEY = KEY;
+  S.mergeSeed = (st) => mergeSeed(st);
+  S.normItem = (it) => normItem(it, !!(it && it.seed));
+  S.normInv = (it) => normInv(it, !!(it && it.seed));
   const persistSoon = MV.debounce(() => S.persist(), 250);
   // 창을 닫기 직전: 뷰들이 입력 중이던 값을 먼저 반영하도록 'flush' 를 알린 뒤 저장
   const flushAll = () => { try { bus.emit('flush'); } catch (e) { /* 무시 */ } persistSoon.flush(); };
@@ -386,7 +394,17 @@
     S.persist();
     bus.emit('change', { log: 'reset', reset: true });
   };
+  /** 통째로 되돌리기 (AI 비서 '이번 변경 되돌리기' 등) */
+  S.restore = function restore(snapshot, logText) {
+    if (!validState(snapshot)) return false;
+    S.state = MV.clone(snapshot);
+    S.persist();
+    if (logText) S.log(logText, true);
+    bus.emit('change', { log: logText || 'restore', reset: true });
+    return true;
+  };
   global.addEventListener('storage', (e) => {
+    if (MV.sync && MV.sync.mode === 'shared') return; // 공유 모드에서는 공유 저장소가 동기화를 맡음
     if (e.key !== KEY || !e.newValue) return;
     try {
       const st = JSON.parse(e.newValue);
@@ -722,6 +740,16 @@
     return wrap;
   };
   U.download = function download(filename, text, mime) {
+    // claude.ai 공유 버전: 브라우저 다운로드가 막혀 있어 downloads 기능으로 저장
+    const dl = MV.sync && MV.sync.cap && MV.sync.cap.downloads;
+    if (dl && typeof dl.save === 'function') {
+      return dl.save({ filename, data: text }).then(() => true).catch((e) => {
+        const code = e && e.code;
+        if (code === 'declined') return false;
+        U.toast(code === 'rate_limited' ? '저장 창이 이미 열려 있어요. 잠시 뒤 다시 눌러 주세요.' : '파일 저장을 할 수 없어요 (' + (code || '오류') + ').');
+        return false;
+      });
+    }
     const blob = new Blob([text], { type: mime || 'application/json' });
     const a = MV.el('a', { href: URL.createObjectURL(blob), download: filename });
     document.body.appendChild(a); a.click();
