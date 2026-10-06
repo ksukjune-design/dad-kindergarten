@@ -103,7 +103,7 @@
         : el('p', { class: 'small' }, '아내와 같은 기록을 보고 함께 고치려면 함께 쓰기를 설정하세요 (처음 한 번, 약 15분).'),
       FB.configured && Y.empty && !Y.readOnly && Y.mode === 'shared' ? el('button', { class: 'btn btn-kid', type: 'button', onclick: () => {
         MV.ui.confirm('지금 이 기기의 체크·메모·짐 목록으로 공유를 시작할까요?', { okLabel: '공유 시작' }).then((ok) => {
-          if (ok && Y.initFromLocal()) { m.close(); MV.ui.toast('공유를 시작했어요.'); }
+          if (ok) Y.initFromLocal().then((r) => { m.close(); if (r) MV.ui.toast('공유를 시작했어요.'); });
         });
       } }, '이 기기 기록으로 공유 시작') : null,
       el('div', { class: 'row mt-8' },
@@ -116,7 +116,7 @@
       el('p', { class: 'small' }, SYNC_TEXT[Y.status] || extraText || '이 기기에만 저장돼요.'),
       Y.empty && !Y.readOnly ? el('button', { class: 'btn btn-kid', type: 'button', onclick: () => {
         MV.ui.confirm('지금 이 기기의 체크·메모·짐 목록으로 공유를 시작할까요?', { okLabel: '공유 시작' }).then((ok) => {
-          if (ok && Y.initFromLocal()) { m.close(); MV.ui.toast('공유를 시작했어요.'); }
+          if (ok) Y.initFromLocal().then((r) => { m.close(); if (r) MV.ui.toast('공유를 시작했어요.'); });
         });
       } }, '이 기기 기록으로 공유 시작') : null,
       Y.localBackup && Y.localBackup() ? el('button', { class: 'btn btn-sm btn-ghost mt-8', type: 'button', onclick: () => {

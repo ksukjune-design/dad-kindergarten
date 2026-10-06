@@ -201,7 +201,7 @@
       card.appendChild(el('p', { class: 'small mb-0' }, '처음 한 번, 이 기기의 체크·메모·짐 목록·도면 배치를 올려 공유를 시작하세요. 아내는 그다음에 로그인하면 같은 기록을 봐요.'));
       acts.appendChild(el('button', { type: 'button', class: 'btn btn-kid btn-tall', onclick: () => {
         MV.ui.confirm('지금 이 기기의 체크·메모·짐 목록으로 공유를 시작할까요?', { okLabel: '공유 시작' }).then((ok) => {
-          if (ok && MV.sync.initFromLocal()) MV.ui.toast('공유를 시작했어요. 이제 아내를 초대하세요.');
+          if (ok) MV.sync.initFromLocal().then((r) => { if (r) MV.ui.toast('공유를 시작했어요. 이제 아내를 초대하세요.'); });
         });
       } }, '이 기기 기록으로 공유 시작'));
     } else if (st === 'revoked' || st === 'unreachable') {
@@ -378,7 +378,7 @@
   function render(root, params, ctx) {
     root.appendChild(el('div', { class: 'view-head' },
       el('h1', '💑 함께 쓰기'),
-      el('span', { class: 'sub' }, '아내와 각자 로그인해서 같은 기록을 보고 고쳐요')));
+      el('span', { class: 'sub' }, fbOk() ? '아내와 각자 로그인해서 같은 기록을 보고 고쳐요' : '클로드 공유 버전은 따로 설정할 것이 없어요')));
     const wrap = el('div', { class: 'tg' });
     root.appendChild(wrap);
     if (!fbOk()) {

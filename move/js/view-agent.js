@@ -1385,16 +1385,23 @@
         if (has(a, 'done')) { const d = toBool(a.done); if (d !== !!it.done) { patch.done = d; patch.doneAt = d ? MV.nowISO() : null; diffs.push(d ? '완료로 체크' : '완료 해제'); } }
         if (has(a, 'due')) { const due = parseDate(a.due, '기한'); if (due !== (D.valid(it.due) ? it.due : null)) { patch.due = due; diffs.push('기한 ' + fmtDue(it.due) + ' → ' + fmtDue(due)); } }
         if (has(a, 'priority')) { const p = parsePri(a.priority); if (p !== (it.priority || 'mid')) { patch.priority = p; diffs.push('우선순위 ' + (PRI_LABEL[it.priority] || '보통') + ' → ' + PRI_LABEL[p]); } }
-        if (has(a, 'title')) { const t = str(a.title, 200); if (!t) throw new Error('제목이 비어 있어요.'); if (t !== it.title) { patch.title = t; diffs.push('제목 “' + clip(it.title, 30) + '” → “' + clip(t, 30) + '”'); } }
+        let tagDropped = false;
+        if (has(a, 'title')) {
+          const so = MV.items.stripOwnerTag(str(a.title, 200));   // '@아내' 같은 옛 담당 표시는 빼고 저장
+          tagDropped = so.dropped.length > 0;
+          const t = so.title;
+          if (!t) throw new Error('제목이 비어 있어요.');
+          if (t !== it.title) { patch.title = t; diffs.push('제목 “' + clip(it.title, 30) + '” → “' + clip(t, 30) + '”'); }
+        }
         if (has(a, 'detail')) { const d = String(a.detail == null ? '' : a.detail).slice(0, 5000); if (d !== (it.detail || '')) { patch.detail = d; diffs.push('설명 바꿈'); } }
-        if (!diffs.length) return { id: it.id, title: it.title, changed: [], note: has(a, 'owner') ? OWNER_NOTE : '이미 그 상태라 바꾼 것이 없어요.' };
+        if (!diffs.length) return { id: it.id, title: it.title, changed: [], note: has(a, 'owner') || tagDropped ? OWNER_NOTE : '이미 그 상태라 바꾼 것이 없어요.' };
         const onlyDone = Object.keys(patch).every((k) => k === 'done' || k === 'doneAt');
         const logText = onlyDone ? (patch.done ? '🤖 ✅ 완료: ' : '🤖 ↩︎ 다시 열기: ') + it.title : '🤖 항목 수정: ' + it.title + ' (' + diffs.join(', ') + ')';
         mutate(ctx, () => MV.items.update(it.id, patch, logText), { items: [it.id] });
         const now = MV.items.get(it.id) || it;
         record(ctx, (patch.done === true && onlyDone ? '✅ ' : '✏️ ') + '“' + clip(now.title, 40) + '” — ' + diffs.join(', '), itemHref(now));
         const res = { id: now.id, title: now.title, changed: diffs, item: compactItem(now) };
-        if (has(a, 'owner')) res.note = OWNER_NOTE;   // 담당은 말없이 버리지 않고 알려 줌
+        if (has(a, 'owner') || tagDropped) res.note = OWNER_NOTE;   // 담당은 말없이 버리지 않고 알려 줌
         return res;
       },
     },
@@ -1411,7 +1418,8 @@
         const parts = MV.parts.list();
         const p = MV.parts.get(key) || parts.find((x) => x.name === key);
         if (!p) throw new Error('파트 id "' + key + '"가 없어요. 쓸 수 있는 파트: ' + parts.map((x) => x.id + '(' + x.name + ')').join(', '));
-        const title = str(a.title, 200);
+        const so = MV.items.stripOwnerTag(str(a.title, 200));   // '@아내' 같은 옛 담당 표시는 빼고 저장
+        const title = so.title;
         if (!title) throw new Error('할 일 제목이 비어 있어요.');
         const due = has(a, 'due') ? parseDate(a.due, '기한') : null;
         const priority = has(a, 'priority') ? parsePri(a.priority) : 'mid';
@@ -1422,7 +1430,7 @@
         mutate(ctx, () => MV.store.update((st) => { st.items.push(it); }, { log: '🤖 할 일 추가: ' + title }), { items: [it.id] });
         record(ctx, '➕ 할 일 추가: “' + clip(title, 40) + '” (' + p.name + ' · ' + fmtDue(due) + ' · ' + PRI_LABEL[priority] + ')', itemHref(it));
         const res = { id: it.id, partId: p.id, part: p.name, title, due, dueFmt: fmtDue(due), priority };
-        if (has(a, 'owner')) res.note = OWNER_NOTE;
+        if (has(a, 'owner') || so.dropped.length) res.note = OWNER_NOTE;
         return res;
       },
     },

@@ -185,7 +185,7 @@
     return null;
   }
   /* 예전에 빠른 추가에서 담당으로 쓰던 낱말 — 이제는 제목에서 빼기만 함 (r.dropped) */
-  const OLD_OWNER_WORDS = ['나', '내가', '아내', '와이프', '함께', '같이', '우리', '둘다', '둘이'];
+  const OLD_OWNER_WORDS = MV.items.OLD_OWNER_WORDS;   // core 와 같은 목록 (AI 비서도 같은 규칙)
   /* 같은 종류 토큰이 여러 번이면 마지막 것을 쓰고, 미리보기에서 알려 줌 (r.multi) */
   function parseQuick(raw) {
     const r = { title: '', due: null, priority: null, bad: [], multi: [], dropped: [] };
@@ -1155,7 +1155,7 @@
       if (/^(항목|파트|짐) 삭제/.test(text)) return { icon: '🗑️', text };
       if (/^파트/.test(text)) return { icon: '📁', text };
       if (/^짐/.test(text)) return { icon: '📦', text };
-      if (/^(백업|이사 관리|새 기본)/.test(text)) return { icon: '💾', text };
+      if (/^(백업|이사 관리|새 기본|기본 파트)/.test(text)) return { icon: '💾', text };
       return { icon: '•', text };
     }
     function buildActivity() {

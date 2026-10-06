@@ -24,6 +24,7 @@
             MV.items.remove(id) / toggle(id) / addNote(id, text) / removeNote(id, noteId)
             MV.items.status(item) → 'done'|'overdue'|'today'|'soon'|'week'|'later'|'nodate'
             할 일은 '우리 집 할 일' — 나·아내로 담당을 나누지 않음 (옛 기록의 owner 값은 보이지 않게 둠)
+            MV.items.stripOwnerTag(title) → {title, dropped} 제목의 '@아내'·'@나' 같은 옛 담당 표시 빼기 (빠른 추가·AI 비서 공용)
    짐목록   MV.inv.list(filterFn) / get / add / update / remove / volume(item) m³
             MV.inv.CATS / MV.inv.FATES / MV.inv.cat(id) / MV.inv.fate(id)
             MV.inv.editor(idOrNull, {preset, defaults, onSave}) 편집 모달
@@ -276,15 +277,38 @@
       url: '', room: '', roomNew: '', brand: '', model: '', lg: false, ac: null, tag: '', note: '', assumed: false, seed: !!seed,
     }, it);
   }
+  /* 기본 항목의 만든·고친 시각은 기기마다 다르지 않게 기본 데이터 버전의 고정 시각으로
+     (두 기기가 같이 새 기본 항목을 더해도 내용이 글자 하나까지 같아서 공유 기록과 어긋나지 않음) */
+  const SEED_AT_DEFAULT = '2026-10-06T00:00:00.000Z';
+  function seedAt(seed) {
+    const v = seed && seed.versionAt;
+    return typeof v === 'string' && !isNaN(new Date(v)) ? v : SEED_AT_DEFAULT;
+  }
+  /** 기본 항목 글 지문 — 직전 버전 기본값 그대로인지 볼 때 (migrations 의 itemsFrom) */
+  function itemPrint(it) {
+    const body = JSON.stringify([it.partId || '', it.title || '', it.detail || '', it.due || null, it.priority || 'mid', it.guide || '', it.links || []]);
+    let h1 = 0xdeadbeef;
+    let h2 = 0x41c6ce57;
+    for (let i = 0; i < body.length; i++) {
+      const ch = body.charCodeAt(i);
+      h1 = Math.imul(h1 ^ ch, 2654435761);
+      h2 = Math.imul(h2 ^ ch, 1597334677);
+    }
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+    return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+  }
+  MV.seedItemPrint = itemPrint;
   function freshState() {
     const seed = MV.seed || { version: 0, parts: [], items: [], inventory: [] };
     const now = MV.nowISO();
+    const at = seedAt(seed);
     return {
       version: 1,
       seedVersion: seed.version || 0,
       meta: { moveDate: seed.moveDate || '2026-11-03', createdAt: now, updatedAt: now, deletedSeed: [] },
       parts: MV.clone(seed.parts || []).map((p, i) => Object.assign({ order: i }, p)),
-      items: (seed.items || []).map((it, i) => normItem(Object.assign({ order: i }, MV.clone(it)), true)),
+      items: (seed.items || []).map((it, i) => normItem(Object.assign({ order: i, createdAt: at, updatedAt: at }, MV.clone(it)), true)),
       inventory: (seed.inventory || []).map((it) => normInv(MV.clone(it), true)),
       activity: [{ at: now, text: '이사 관리 시작 — 기본 체크리스트를 불러왔습니다.' }],
       // 큰 가전을 도면에 미리 놓아 둔 기본 배치 (data-layouts.js)
@@ -295,16 +319,30 @@
   function migrateSeed(state, seed) {
     const from = state.seedVersion || 0;
     let n = 0;
-    // 손대지 않은 기본 항목(완료·메모 없음, 한 번도 고치지 않음)은 새 기본 내용으로 바꿔요
+    // 직전 버전 기본 글의 지문 (migrations 의 itemsFrom: { id: 지문 }) — 담당만 바꾼 항목도 '글은 그대로'로 봄
+    const prev = new Map();
+    (seed.migrations || []).forEach((m) => {
+      if (!(m.to > from && m.to <= seed.version) || !m.itemsFrom) return;
+      Object.keys(m.itemsFrom).forEach((iid) => {
+        const v = m.itemsFrom[iid];
+        (Array.isArray(v) ? v : [v]).forEach((h) => { if (typeof h === 'string') { if (!prev.has(iid)) prev.set(iid, new Set()); prev.get(iid).add(h); } });
+      });
+    });
+    // 손대지 않은 기본 항목(완료·메모 없음, 한 번도 고치지 않았거나 글이 직전 기본값 그대로)은 새 기본 내용으로 바꿔요.
+    // 숫자(n)에는 글·날짜·중요도·링크가 실제로 바뀐 항목만 셈 — 보이지 않는 옛 담당(owner)은 조용히 지움
     const seedItems = new Map((seed.items || []).map((x) => [x.id, x]));
+    const keys = ['partId', 'title', 'detail', 'due', 'priority', 'guide'];
+    const sv = (sp, k) => (sp[k] === undefined ? (k === 'due' ? null : k === 'priority' ? 'mid' : '') : sp[k]);
     state.items.forEach((it) => {
       const sp = seedItems.get(it.id);
-      if (!sp || !it.seed || it.done || (it.notes && it.notes.length) || it.updatedAt !== it.createdAt) return;
-      const keys = ['partId', 'title', 'detail', 'due', 'priority', 'owner', 'guide'];
-      const changed = keys.some((k) => (sp[k] === undefined ? (k === 'due' ? null : '') : sp[k]) !== it[k])
+      if (!sp || !it.seed || it.done || (it.notes && it.notes.length)) return;
+      const untouched = it.updatedAt === it.createdAt || (prev.has(it.id) && prev.get(it.id).has(itemPrint(it)));
+      if (!untouched) return;
+      const changed = keys.some((k) => sv(sp, k) !== (it[k] === undefined ? sv({}, k) : it[k]))
         || JSON.stringify(sp.links || []) !== JSON.stringify(it.links || []);
+      if (it.owner) it.owner = '';
       if (!changed) return;
-      keys.forEach((k) => { it[k] = sp[k] === undefined ? (k === 'due' ? null : '') : MV.clone(sp[k]); });
+      keys.forEach((k) => { it[k] = MV.clone(sv(sp, k)); });
       it.links = MV.clone(sp.links || []);
       n++;
     });
@@ -388,16 +426,21 @@
     (seed.parts || []).forEach((p, i) => {
       if (!partIds.has(p.id) && !deleted.has(p.id)) { state.parts.push(Object.assign({ order: 100 + i }, MV.clone(p))); added++; }
     });
+    const at = seedAt(seed);
     (seed.items || []).forEach((it, i) => {
-      if (!itemIds.has(it.id) && !deleted.has(it.id)) { state.items.push(normItem(Object.assign({ order: 1000 + i }, MV.clone(it)), true)); added++; }
+      if (!itemIds.has(it.id) && !deleted.has(it.id)) { state.items.push(normItem(Object.assign({ order: 1000 + i, createdAt: at, updatedAt: at }, MV.clone(it)), true)); added++; }
     });
     (seed.inventory || []).forEach((it) => {
       if (!invIds.has(it.id) && !deleted.has(it.id)) { state.inventory.push(normInv(MV.clone(it), true)); added++; }
     });
     const migrated = migrateSeed(state, seed);
     state.seedVersion = seed.version;
-    if (migrated) state.activity.unshift({ at: MV.nowISO(), text: '기본 파트·항목을 새 버전에 맞췄습니다 (' + migrated + '곳, 고친 내용·완료·메모는 그대로).' });
-    if (added) state.activity.unshift({ at: MV.nowISO(), text: '새 기본 항목 ' + added + '개를 추가했습니다 (기존 메모·완료 표시는 그대로).' });
+    // 활동 줄에 버전별 key 를 붙여 둠 — 두 기기가 같이 새 버전으로 맞춰도 공유 기록에는 한 줄만 (sync.js mergeActivity)
+    const hasKey = (k) => state.activity.some((a) => a && a.key === k);
+    const kFix = 'seed-v' + seed.version + '-fix';
+    const kAdd = 'seed-v' + seed.version + '-add';
+    if (migrated && !hasKey(kFix)) state.activity.unshift({ at: MV.nowISO(), key: kFix, text: '기본 파트·항목을 새 버전에 맞췄습니다 (' + migrated + '곳, 고친 내용·완료·메모는 그대로).' });
+    if (added && !hasKey(kAdd)) state.activity.unshift({ at: MV.nowISO(), key: kAdd, text: '새 기본 항목 ' + added + '개를 추가했습니다 (기존 메모·완료 표시는 그대로).' });
     return true;
   }
   function validState(s) {
@@ -573,6 +616,22 @@
 
   /* ---------------- 체크 항목 ---------------- */
   const I = MV.items = {};
+  /* 예전에 담당으로 쓰던 낱말 — '@아내'·'@나' 같은 표시는 제목에서 빼기만 함 (빠른 추가·AI 비서 같은 규칙).
+     그 밖의 '@○○'(이메일·상호 등)는 제목 글로 둠 */
+  I.OLD_OWNER_WORDS = ['나', '내가', '아내', '와이프', '함께', '같이', '우리', '둘다', '둘이'];
+  I.isOwnerTag = (w) => {
+    w = String(w || '');
+    const head = w.charAt(0);
+    return (head === '@' || head === '＠') && I.OLD_OWNER_WORDS.indexOf(w.slice(1)) >= 0;
+  };
+  /** 제목에서 옛 담당 표시를 뺌 → { title, dropped: [뺀 낱말] } (뺀 것이 없으면 제목 그대로) */
+  I.stripOwnerTag = (title) => {
+    const t = String(title == null ? '' : title);
+    const words = t.split(/\s+/).filter(Boolean);
+    const dropped = words.filter(I.isOwnerTag);
+    if (!dropped.length) return { title: t, dropped };
+    return { title: words.filter((w) => !I.isOwnerTag(w)).join(' ').trim(), dropped };
+  };
   I.list = (filter) => {
     const all = S.get().items.slice();
     return filter ? all.filter(filter) : all;

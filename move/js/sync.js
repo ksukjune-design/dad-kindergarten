@@ -41,6 +41,10 @@
          받은 기록과 3-방향 합치기를 하고, 이 기기에서만 고친 것은 올립니다 (rejoin). 새로 열어도 이어지도록
          srv 는 localStorage 'mv:sync:base:v1' 에 줄여서 남김 — 문서마다 해시, 이 기기와 다른 문서만 내용
          (평면도 사진 내용은 빼고). 처음 붙는 기기(기준 없음)만 공유 기록으로 맞춥니다 (adopt).
+   처음 공유 시작(initFromLocal): 파이어베이스는 move/meta 를 '없을 때만' 먼저 써서(트랜잭션) 두 기기가 거의 같이 눌러도
+         한쪽 기록만 공유 기록이 되고, 늦은 쪽은 공유 기록으로 맞춤 (이 기기 기록은 BACKUP_KEY 에 따로 보관).
+         이미 공유가 시작됐으면(상태가 empty 가 아니면) 다시 올리지 않음.
+         활동 기록 중 key 가 있는 줄(새 버전 맞춤 'seed-v7-add' 등)은 두 기기가 같이 적어도 한 줄만 남김 (mergeActivity).
    ============================================================ */
 (function (global) {
   'use strict';
@@ -88,6 +92,7 @@
   let stuckDelay = STUCK_MIN;
   let retryingStuck = false;
   let resyncing = false;
+  let starting = false;         // 처음 공유 시작 중 (move/meta 를 '없을 때만' 쓰는 중)
   let deferred = [];            // 다시 읽는 동안 도착한 변경 (다 읽은 뒤 처리)
   let baseId = null;            // srv 가 어느 저장소의 내용인지 ('firebase:프로젝트/묶음') — 있을 때만 기준을 남기고 다시 붙을 때 합침
   let baseT = 0;
@@ -372,8 +377,10 @@
     return order.map((k) => keep.get(k));
   }
   function mergeActivity(b, l, r) {
-    const key = (a) => (a && a.at ? String(a.at) : '') + '\u0001' + (a && a.text ? String(a.text) : '');
-    const base = new Set(((b && b.list) || []).map(key));
+    const atText = (a) => (a && a.at ? String(a.at) : '') + '\u0001' + (a && a.text ? String(a.text) : '');
+    // key 가 있는 줄(예: 'seed-v7-add' 새 버전 맞춤)은 key 로 한 줄만 — 두 기기가 같이 적어도 한 번만 보임
+    const key = (a) => (a && typeof a.key === 'string' && a.key ? '\u0002' + a.key : atText(a));
+    const base = new Set(((b && b.list) || []).filter(Boolean).map(key));
     const ll = ((l && l.list) || []).filter(Boolean);
     const rl = ((r && r.list) || []).filter(Boolean);
     const inL = new Set(ll.map(key));
@@ -381,11 +388,13 @@
     const out = new Map();
     ll.concat(rl).forEach((a) => {
       const k = key(a);
-      if (out.has(k)) return;
       if (base.has(k) && !(inL.has(k) && inR.has(k))) return; // 한쪽에서 밀려난(오래된) 기록은 빼기
+      const had = out.get(k);
+      if (had && !(atText(a) < atText(had))) return;          // 같은 key 면 어느 기기에서 합쳐도 같은 줄(먼저 적힌 것)
       out.set(k, a);
     });
-    const list = Array.from(out.entries()).sort((x, y) => (x[0] < y[0] ? 1 : x[0] > y[0] ? -1 : 0)).map((e) => e[1]);
+    const sk = (a) => atText(a) + '\u0001' + (a && a.key ? String(a.key) : '');
+    const list = Array.from(out.values()).sort((x, y) => { const p = sk(x); const q = sk(y); return p < q ? 1 : p > q ? -1 : 0; });
     return { list: list.slice(0, 150) };
   }
   /** 문서 종류에 맞춰 합치기 */
@@ -593,6 +602,7 @@
     // 둘 다 고침 → 합치기
     const merged = mergeDoc(path, base === null ? undefined : JSON.parse(base), MV.clone(lu), data);
     last.set(path, j);
+    pending.delete(path);              // 줄 서 있던 내 예전 내용은 버림 — 합친 결과가 서버와 다르면 diffAndWrite 가 다시 줄 세움
     if (canon(merged) === lj) return 2; // 받은 내용이 이미 내 쪽에 다 들어 있음 → 내 것을 올리기만
     applyUnit(st, path, merged);
     return 1;
@@ -653,7 +663,8 @@
         if (data) changes.push({ id, data });
       });
       if (Y.empty) {
-        if (metaArrived) { Y.empty = false; resync(); }
+        // 공유 시작 중이면 move/meta 가 내 것인지 다른 기기 것인지는 initFromLocal 이 정함
+        if (metaArrived && !starting) { Y.empty = false; resync(); }
         return;
       }
       if (resyncing) { deferred.push([col, changes]); return; }
@@ -791,17 +802,57 @@
     baseId = rec.id;
   }
 
-  /** 공유 저장소가 비어 있을 때: 이 기기 기록으로 공유를 시작 */
+  /** 공유 저장소가 비어 있을 때: 이 기기 기록으로 공유를 시작 → Promise<true(시작함)|false(안 함)>
+      두 기기가 거의 같이 눌러도 한쪽만 시작하도록, 파이어베이스는 move/meta 를 '없을 때만' 먼저 씀.
+      이미 다른 기기가 시작했으면 공유 기록으로 맞춤 (이 기기 기록은 따로 보관 — ⋯ 메뉴에서 받기) */
   Y.initFromLocal = function initFromLocal() {
-    if (!db || Y.readOnly) return false;
-    Y.empty = false;
-    last.clear();
-    srv.clear();
-    hist.clear();
-    S.log('이 기기의 기록으로 공유를 시작했어요.', true);
-    S.persist();
-    S.emit('change', { source: 'local' });
-    return true;
+    const toast = (msg) => { if (MV.ui && MV.ui.toast) MV.ui.toast(msg, { ms: 6000 }); };
+    if (!db || Y.readOnly || Y.mode !== 'shared' || starting) return Promise.resolve(false);
+    if (!Y.empty || Y.status !== 'empty') {
+      toast('이미 공유가 시작됐어요 — 지금 보이는 것이 공유된 기록이에요.');
+      return Promise.resolve(false);
+    }
+    const conn = db;
+    const begin = () => {
+      try { if (!global.localStorage.getItem(BACKUP_KEY)) global.localStorage.setItem(BACKUP_KEY, JSON.stringify(S.get())); } catch (e) { /* 무시 */ }
+      Y.empty = false;
+      last.clear();
+      srv.clear();
+      hist.clear();
+      S.log('이 기기의 기록으로 공유를 시작했어요.', true);
+      S.persist();
+      S.emit('change', { source: 'local' });
+      return true;
+    };
+    let ref = null;
+    if (Y.backend === 'firebase') { try { ref = db.doc('move/meta'); } catch (e) { ref = null; } }
+    if (!ref || typeof ref.create !== 'function') return Promise.resolve(begin());
+    starting = true;
+    setStatus('saving');
+    const meta = unitsOf(S.get()).get('move/meta');
+    return Promise.resolve().then(() => ref.create(MV.clone(meta))).then((created) => {
+      starting = false;
+      if (conn !== db) return false;
+      if (created) return begin();
+      // 다른 기기가 조금 먼저 시작함 → 공유 기록으로 맞춤
+      Y.empty = false;
+      toast('다른 기기에서 조금 먼저 공유를 시작했어요 — 공유된 기록으로 맞췄어요. 이 기기 기록은 ⋯ 메뉴의 \'공유 전 이 기기 기록 받기\'로 받을 수 있어요.');
+      resync();
+      return false;
+    }, (e) => {
+      starting = false;
+      if (conn !== db) return false;
+      Y.lastError = e && e.code;
+      Y.lastFbCode = (e && e.fbCode) || null;
+      if (REVOKED.indexOf(Y.lastError) >= 0) {
+        stop('revoked');
+        toastOnce('revoked', '공유 권한이 없어져서 지금부터 바꾼 내용은 이 기기에만 저장돼요.');
+      } else {
+        if (Y.empty) setStatus('empty');
+        toast('공유를 시작하지 못했어요. 인터넷 연결을 확인하고 다시 눌러 주세요.');
+      }
+      return false;
+    });
   };
   /** 처음 연결 때 따로 둔 '이 기기 기록' 백업 */
   Y.localBackup = function localBackup() {
@@ -953,6 +1004,7 @@
     Y.readOnly = false;
     Y.empty = false;
     resyncing = false;
+    starting = false;
     backoff = 0;
     bumpedBatch = 0;
     stuckDelay = STUCK_MIN;

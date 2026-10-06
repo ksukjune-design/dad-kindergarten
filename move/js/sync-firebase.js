@@ -33,9 +33,18 @@
 
   const VER = '12.19.0';
   const SDK_FILES = ['firebase-app-compat.js', 'firebase-auth-compat.js', 'firebase-firestore-compat.js'];
+  /* 파일 무결성(SRI) 해시 — 해시는 npm firebase 꾸러미 파일로 구했어요 (jsdelivr 는 같은 파일, gstatic 은 같을 것으로 보지만 확인 못 함).
+     ⚠ VER 을 올리면 이 해시도 꼭 새 파일로 다시 구하세요 (안 맞으면 브라우저가 파일을 막아 함께 쓰기가 안 열려요):
+       openssl dgst -sha384 -binary firebase-app-compat.js | openssl base64 -A */
+  const SRI = {
+    'firebase-app-compat.js': 'sha384-aUtWR1iCiOCHS8pn1nKNXMZm3I/eDrV63IXWXgE+mHHqJfYTWYV+jGk0sCXz57+U',
+    'firebase-auth-compat.js': 'sha384-ZRqyA8Xkw0A6FmVya9A0Werzt9yjKKAp2TCzqVJjHK1O3oyb0z9jMxpkWPVoFtUm',
+    'firebase-firestore-compat.js': 'sha384-jxdN9nS+cvQavyzo/bNcMoHfxvk0kWtPAfPDRq3EQ/wvbCVLNheaVIphKWMD4/g0',
+  };
+  // jsdelivr 는 npm 꾸러미 파일을 그대로 내보내서 위 해시와 꼭 맞아요 → 먼저. gstatic 은 막히거나 다를 때를 대비한 두 번째
   const CDNS = [
-    (f) => 'https://www.gstatic.com/firebasejs/' + VER + '/' + f,
     (f) => 'https://cdn.jsdelivr.net/npm/firebase@' + VER + '/' + f,
+    (f) => 'https://www.gstatic.com/firebasejs/' + VER + '/' + f,
   ];
   const SDK_TIMEOUT = 20000;
   const READY_TIMEOUT = 20000;      // 첫 서버 스냅샷을 기다리는 시간
@@ -199,12 +208,13 @@
   let starting = null;
 
   /* ---------- SDK 늦게 불러오기 ---------- */
-  function loadScript(url) {
+  function loadScript(url, integrity) {
     return new Promise((resolve, reject) => {
       const s = document.createElement('script');
       s.src = url;
       s.async = false;
       s.crossOrigin = 'anonymous';
+      if (integrity) s.integrity = integrity;   // 파일이 바뀌었으면 브라우저가 실행하지 않음 (onerror)
       const t = setTimeout(() => { s.remove(); reject(new Error('시간 초과')); }, SDK_TIMEOUT);
       s.onload = () => { clearTimeout(t); resolve(); };
       s.onerror = () => { clearTimeout(t); s.remove(); reject(new Error('불러오기 실패')); };
@@ -223,7 +233,7 @@
       if (sdkHas(f)) continue;
       let ok = false;
       for (const cdn of CDNS) {
-        try { await loadScript(cdn(f)); } catch (e) { console.info('[함께 쓰기] SDK 불러오기 실패', cdn(f), e && e.message); continue; }
+        try { await loadScript(cdn(f), SRI[f]); } catch (e) { console.info('[함께 쓰기] SDK 불러오기 실패', cdn(f), e && e.message); continue; }
         if (sdkHas(f)) { ok = true; break; }
       }
       if (!ok) throw new Error('함께 쓰기 프로그램(파이어베이스)을 불러오지 못했어요. 인터넷 연결을 확인하고 다시 시도하세요. 회사·학교 인터넷이나 광고 차단 앱이 막고 있을 수도 있어요.');
@@ -379,6 +389,24 @@
             let p;
             try { p = ref.set({ j, sa, at: FV.serverTimestamp(), by: email || '' }); } catch (e) { p = Promise.reject(e); }
             return track(p);
+          },
+          /** 문서가 없을 때만 씀 (처음 공유 시작). 썼으면 true, 이미 있으면 false */
+          create(obj) {
+            if (closed) return Promise.reject(fail('unavailable'));
+            const body = Object.assign({}, obj);
+            delete body._sa;
+            let j;
+            try { j = JSON.stringify(body); } catch (e) { return Promise.reject(Object.assign(new Error('저장할 수 없는 내용'), { code: 'invalid_argument', fbCode: '' })); }
+            stats.writes++;
+            let p;
+            try {
+              p = fs.runTransaction((t) => t.get(ref).then((snap) => {
+                if (snap.exists) return false;
+                t.set(ref, { j, sa: [], at: FV.serverTimestamp(), by: email || '' });
+                return true;
+              }));
+            } catch (e) { p = Promise.reject(e); }
+            return Promise.resolve(p).then((r) => r === true, (e) => { throw mapErr(e, 'write'); });
           },
           delete() {
             if (closed) return Promise.reject(fail('unavailable'));

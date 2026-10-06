@@ -1703,9 +1703,9 @@
         mkTxt ? el('button', { type: 'button', class: 'es-stat es-statbtn', 'data-fk': 'maker-stat', title: '제조사 서비스로 따로 옮길 가전 — 눌러서 ‘가전 이전 비교’ 보기', onclick: () => goTab('lg') }, '🔧 ', el('b', mkTxt)) : null,
         assumed ? el('button', {
           type: 'button', class: 'es-fchip es-warnchip' + (mem.onlyAssumed ? ' is-on' : ''), 'aria-pressed': String(mem.onlyAssumed),
-          'data-fk': 'assumed-filter', title: '규격이 추정치인 짐만 보기',
+          'data-fk': 'assumed-filter', title: '크기가 추정치인 짐만 보기 (살 짐·버릴 짐도 포함 — 모델명 확인 대상은 아래 ‘규격 확인’ 줄의 숫자예요)',
           onclick: () => { mem.onlyAssumed = !mem.onlyAssumed; refreshNamed(['invsum', 'invlist']); },
-        }, '⚠ 규격 확인 필요 ', el('b', assumed + '개')) : null,
+        }, '⚠ 추정 크기 ', el('b', assumed + '개')) : null,
         blocked.length ? el('button', {
           type: 'button', class: 'es-fchip es-warnchip es-badchip', 'data-fk': 'lgfix-all',
           title: blocked.map(nm).join(', ') + ' — 제조사 서비스 표시가 켜져 있지만 맡길 수 없어요. 눌러서 이삿짐센터로 바꾸세요.',
