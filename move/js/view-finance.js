@@ -22,6 +22,9 @@
           finance.v 4 (2026-10-06 가전 결정): 줄 id 'lg' 는 호환 때문에 그대로 두고 '삼성 에어컨 이전설치 (이사 전)'
           (금액 = 짐·견적 MV.calc.moveEstimate().lgCost — 제조사 서비스 전체, 없으면 50만원), 인터넷 이전 2만 → 3.6만원.
           v3 기록도 안 고친 줄만 바꿈 (V3_LINES)
+          finance.v 5 (2026-10-06 HUG 보증료 개편 요율): HUG 2025-03-31 개편 요율(아파트·보증금 2억~5억·부채비율 70% 이하
+          연 0.107%) → 3.2억 × 0.107% × 2년 = 684,800원. v4 이하 기록은 안 고친 'hug' 줄만 새 기본값으로(V4_LINES),
+          보증료율(protect.hugRate)은 예전 선택지(0.115·0.122 → 0.107, 0.128 → 0.126)를 새 요율로 옮김
    이사 전 결제  LINE_META[].before — 결제일이 비어 있으면 '이사 전에 냄'(에어컨 이전설치), 결제일을 넣으면 그 날짜로 판단.
           묶음은 그대로(꼭 드는 비용)이고, 11/3 돈이 들어오기 전에 지금 통장에서 먼저 나간다고 따로 보여 줌
    계산   MV.calc.financeSummary(state) → { inflow, outflow, leftover, expensesTotal(아직 낼 이사비 전부),
@@ -30,8 +33,14 @@
           netEssential(= 남는 돈 − 꼭 드는 이사 비용: 11/3 전후 현금 여유/부족 — 머리 숫자),
           netWithPurchases(= 남는 돈 − 꼭 드는 비용 − 살림), rentPart(11/3에 함께 내는 월세),
           beforeMoveUnpaid(이사 전에 지금 통장에서 먼저 나갈 돈 — 위 합계에 이미 들어 있음), beforeMoveLabels,
-          warnings:[{text, level}] } — 순수 함수 (대시보드가 호출)
-   근거   리서치 검증본 finance_verified.json (2026-10-06). 규칙·요율 옆에 신뢰도와 짧은 근거,
+          warnings:[{id, text, level, href, headline?}] } — 순수 함수 (대시보드가 호출)
+          warnings 는 예전처럼 {text, level} 로 읽어도 되고, id 로 같은 알림을 거를 수 있어요.
+          id 'budget' (꼭 드는 비용 부족·여유 줄)은 대시보드 머리 숫자(netEssential)와 같은 말이라 level 'info' + headline: true
+          — 대시보드는 level 'info' 또는 headline 인 줄을 건너뛰면 됨. 순서는 bad → warn → info
+   인쇄   당일 시트의 '인쇄하기'는 GitHub Pages 에서만 — claude.ai 공유 버전(window.claude 있음)에서는 window.print() 가
+          동작하지 않아 버튼을 숨기고 '화면 캡처로 저장' 안내만 보여 줌
+   근거   리서치 검증본 finance_verified.json (2026-10-06) + 국내 자료 교차 확인(2026-10-06: HUG 개편 요율, 적정이자율 4.6% 유지,
+          소득세법 제52조 제4항, 지방세 열람, 국토부 전월세 실거래). 규칙·요율 옆에 신뢰도와 짧은 근거,
           신뢰도가 높지 않으면 '세무사·은행 확인 권장' 표시.
    다시 그리기
           값 변경 → 계산 결과만 갱신(live), 구조 변경 → 탭 내용만 다시 그림.
@@ -184,6 +193,8 @@
     hugCompare: { label: '주택금융공사·서울보증보험 보증료 비교', url: 'https://safehomes.kr/insights/kn-20260713-1608-hf-전세보증금반환보증-sgi서울보증과-보증료-비교/' },
     hug: { label: 'HUG 주택도시보증공사', url: 'https://www.khug.or.kr' },
     rtms: { label: '부동산거래관리시스템 (임대차 신고)', url: 'https://rtms.molit.go.kr' },
+    rt: { label: '국토부 실거래가 공개시스템 (전월세)', url: 'https://rt.molit.go.kr' },
+    lawIncome: { label: '소득세법 제52조', url: 'https://www.law.go.kr/법령/소득세법' },
     iros: { label: '인터넷등기소', url: 'https://www.iros.go.kr' },
     hometax: { label: '홈택스', url: 'https://www.hometax.go.kr' },
     lawLease: { label: '주택임대차보호법', url: 'https://www.law.go.kr/법령/주택임대차보호법' },
@@ -243,11 +254,20 @@
     [0.264, '26.4% (5,000만~8,800만원)'],
     [0.385, '38.5% (8,800만~1.5억원)'],
   ];
+  /* HUG 전세보증금반환보증 보증료율 — 2025-03-31 개편 요율 (아파트, 보증금 2억~5억 구간, 연 %).
+     우리 집은 보증금 3.2억 ÷ 시세 약 10억 ≈ 30%라 '부채비율 70% 이하' 구간 (추정·신청 화면에서 확인) */
+  const HUG_RATE_DEFAULT = 0.107;
+  const HUG_DISCOUNT = 0.4;   /* 신혼(혼인 7년 이내)·다자녀 등 사회배려대상자 할인 40% (무주택만) */
+  const HUG_RATE_HIGH = 0.124; /* 70% 이하 구간을 다르게 읽을 때의 위쪽 끝 (2년 793,600원) */
   const HUG_RATES = [
-    [0.115, '연 0.115% (부채비율 낮음)'],
-    [0.122, '연 0.122% (중간값)'],
-    [0.128, '연 0.128% (부채비율 높음)'],
+    /* 선택 상자 글은 좁은 칸에도 들어가게 짧게 — 구간 설명은 칸 이름·도움말에 */
+    [HUG_RATE_DEFAULT, '연 0.107% · 70% 이하 (예상)'],
+    [Math.round(HUG_RATE_DEFAULT * (1 - HUG_DISCOUNT) * 10000) / 10000, '연 0.064% · 신혼·다자녀 할인'],
+    [0.126, '연 0.126% · 70~80%'],
+    [0.154, '연 0.154% · 80% 초과'],
   ];
+  /* 예전(개편 전) 선택지 → 새 요율 (v4 이하 기록을 옮길 때) */
+  const HUG_OLD_RATE = { 0.115: HUG_RATE_DEFAULT, 0.122: HUG_RATE_DEFAULT, 0.128: 0.126 };
   /* 가전 결정(2026-10-06): 냉장고(LG)·건조기(삼성)는 이삿짐센터 견적에 포함, 삼성 2in1 에어컨만 삼성전자서비스가
      이사 전에 새 집에 설치. 제조사 서비스 금액은 짐·견적 계산(lgCost)을 쓰고, 그게 없을 때만 아래 가족 결정 금액 */
   const AC_MOVE_FALLBACK = 500000;
@@ -270,7 +290,8 @@
       basis: '단지마다 달라요 — 서울 평균 약 10.4만원(2019 서울시 조사, 84%가 받음), 무료부터 수십만원까지. 사다리차를 써도 사용료를 받는 단지가 많아요. 새 집(14층) 관리사무소에 금액·보양·예약 방법을 꼭 묻고, 지금 집 관리사무소에도 확인하세요' },
     internet: { low: 36000, high: 70000, conf: 'mid', check: '쓰는 통신사에 확인',
       basis: '통신사 이전설치비 — 평일 낮 인터넷만 약 3.6만원, TV까지 약 5.6만원(통신 3사 비슷, 2026 정리 기준). 주말·평일 18시 이후는 약 25% 더 붙어요 → 11/3(화)이나 11/4 평일 낮으로 예약' },
-    hug: { auto: 'hug', optional: true, low: 736000, high: 819200, conf: 'mid', basis: 'HUG 아파트 요율 연 약 0.115~0.128% × 2년 (3.2억이면 약 74만~82만원). 전입·확정일자 뒤 11월 중 가입할 때 내는 돈이라 11/3 당일 현금과는 따로예요. 2025~2026 개편 여부는 신청 화면에서 확인' },
+    hug: { auto: 'hug', optional: true, low: 410880, high: 793600, conf: 'mid', check: 'HUG 신청 화면의 실제 보증료로 확인',
+      basis: 'HUG 2025-03-31 개편 요율: 아파트·보증금 2억~5억·부채비율 70% 이하 연 약 0.107% → 3.2억 × 0.107% × 2년 = 684,800원 (추정). 신혼·다자녀 40% 할인이면 약 41만원, 요율 구간을 다르게 읽으면 최대 약 79만원. 6·12개월 무이자 분납 가능. 전입·확정일자 뒤 11월 중 가입할 때 내는 돈이라 11/3 당일 현금과는 따로예요' },
   };
   /* HUG 미가입 때 생길 수 있는 문제를 실제 숫자로 비교한 별첨 가이드 */
   const HUG_GUIDE = '#/guide/hug';
@@ -314,7 +335,7 @@
     { id: 'internet', label: '인터넷 이전설치', amount: 36000, group: 'essential' },
     { id: 'washer', label: '통돌이 세탁기 (이사 후 배송)', amount: 500000, group: 'purchase', memo: '11/4~11/6 배송으로 주문' },
     { id: 'wardrobe', label: '간이 옷장 (이사 후, 이케아 등)', amount: 200000, group: 'optional', memo: '이사 후 실측하고 구매' },
-    { id: 'hug', label: '전세보증금반환보증 보증료 (HUG 2년)', amount: 780800, group: 'optional' },
+    { id: 'hug', label: '전세보증금반환보증 보증료 (HUG 2년)', amount: 684800, group: 'optional' },
   ];
   function defaultLines() { return DEFAULT_LINES.map((l) => normLine(MV.clone(l))); }
   /* v2 이전 기본 줄 — 저장된 줄이 이 값 그대로면(사용자가 한 번도 안 고침) 새 기본값으로 바꿈 */
@@ -346,6 +367,11 @@
     lg: { label: 'LG 가전 이전설치', group: 'essential' },               /* → 삼성 에어컨 이전설치 (이사 전), 금액은 자동 */
     internet: { label: '인터넷 이전설치', amount: 20000, group: 'essential' }, /* → 36,000원 (평일 낮, 인터넷만) */
   };
+  /* v4 기본 줄 중 v5 에서 바뀐 것 — HUG 보증료(개편 전 780,800원 → 684,800원). 자동 계산 줄이라 금액은
+     보증료율에서 나오지만, 저장된 amount 도 예전 기본값 그대로일 때만(안 고친 줄) 새 기본값으로 */
+  const V4_LINES = {
+    hug: { label: '전세보증금반환보증 보증료 (HUG 2년)', amount: 780800, group: 'optional' },
+  };
   /* 줄 id 별로, 사용자가 안 고친 줄만 새 기본값으로 (고친 줄은 그대로 둠). table = 그 버전의 기본 줄.
      lines 는 저장된 줄의 얕은 복사본 (normLine 전 — 묶음이 새 GROUP_OF 로 채워지기 전에 비교) */
   function migrateLines(lines, table) {
@@ -366,7 +392,9 @@
       { id: 'hfFee', label: 'HF 보증료 미경과분 환급 (있으면)', amount: 0 },
     ].map(normRefund);
   }
-  const FIN_V = 4; /* 2: 임대차 신고 상태 ↔ 체크리스트 맞춤, 3: 예산 기본 줄 가족 결정 반영, 4: 삼성 에어컨 줄·인터넷 3.6만 */
+  /* 2: 임대차 신고 상태 ↔ 체크리스트 맞춤, 3: 예산 기본 줄 가족 결정 반영, 4: 삼성 에어컨 줄·인터넷 3.6만,
+     5: HUG 보증료 2025-03-31 개편 요율 (0.107%, 684,800원) */
+  const FIN_V = 5;
   function defaults() {
     return {
       v: FIN_V,
@@ -383,7 +411,7 @@
       budget: { lines: defaultLines(), refunds: defaultRefunds() },
       father: { principal: 300000000, actualRate: 0, properRate: 4.6, planRate: 1.3, startDate: '2024-11-18', priorGifts: 0, checks: {} },
       tax: { band: 'mid', marginal: 0.165, subscription: 0, checks: {} },
-      protect: { rentReport: 'unknown', checks: {}, hugRate: 0.122, hugYears: 2 },
+      protect: { rentReport: 'unknown', checks: {}, hugRate: HUG_RATE_DEFAULT, hugYears: 2 },
       links: {}, /* 화면의 할 일 → 체크리스트 항목 id (한 번 연결되면 고정) */
     };
   }
@@ -407,6 +435,14 @@
     let raw = (Array.isArray(f.budget.lines) ? f.budget.lines : []).filter((x) => x && typeof x === 'object').map((x) => Object.assign({}, x));
     if (rawV < 3) raw = migrateLines(raw, OLD_LINES);
     if (rawV < 4) raw = migrateLines(raw, V3_LINES);
+    if (rawV < 5) {
+      raw = migrateLines(raw, V4_LINES);
+      /* 보증료율: 개편 전 선택지(0.115·0.122·0.128)만 새 요율로 — 그 밖의 값은 그대로 */
+      if (f.protect && typeof f.protect === 'object') {
+        const r = num(f.protect.hugRate);
+        if (Object.prototype.hasOwnProperty.call(HUG_OLD_RATE, String(r))) f.protect = Object.assign({}, f.protect, { hugRate: HUG_OLD_RATE[String(r)] });
+      }
+    }
     f.budget.lines = raw.map(normLine);
     f.v = Math.max(rawV, FIN_V);
     f.budget.refunds = (Array.isArray(f.budget.refunds) ? f.budget.refunds : []).filter((x) => x && typeof x === 'object').map(normRefund);
@@ -565,14 +601,20 @@
     if (l && l.date && D.valid(l.date)) return D.diff(D.str(D.parse(l.date)), move) > 0 ? 'before' : 'after';
     return meta && meta.before ? 'before' : '';
   }
+  /* HUG 보증료 = 보증금 × 연 요율 × 기간 (10원 단위). 범위: 아래 = 고른 요율에 신혼·다자녀 40% 할인,
+     위 = 고른 요율과 '70% 이하 구간 위쪽 끝(0.124%)' 중 큰 쪽 → 기본 3.2억·2년이면 410,880 ~ 793,600원 */
   function hugPremium(f) {
     const dep = Math.max(0, num(f.newHome.deposit));
     const years = Math.max(0, num(f.protect.hugYears)) || 2;
-    const rate = num(f.protect.hugRate) || 0.122;
+    const rate = num(f.protect.hugRate) > 0 ? num(f.protect.hugRate) : HUG_RATE_DEFAULT;
+    const calc = (r) => Math.round(dep * r / 100 * years / 10) * 10;
+    const value = calc(rate);
+    const discounted = rate < HUG_RATE_DEFAULT * (1 - HUG_DISCOUNT) + 1e-9; /* 이미 할인 요율을 고름 */
     return {
-      value: Math.round(dep * rate / 100 * years / 100) * 100,
-      low: Math.round(dep * 0.00115 * years / 100) * 100,
-      high: Math.round(dep * 0.00128 * years / 100) * 100,
+      value,
+      low: discounted ? value : calc(rate * (1 - HUG_DISCOUNT)),
+      high: Math.max(value, calc(HUG_RATE_HIGH)),
+      monthly12: Math.round(value / 12 / 10) * 10,
       years, rate, dep,
     };
   }
@@ -618,7 +660,7 @@
     }
     if (kind === 'hug') {
       const h = hugPremium(f);
-      return { value: h.value, src: 'calc', note: '보증금 ' + eok(h.dep) + ' × ' + pctTxt(h.rate, 3) + ' × ' + h.years + '년 (보증금 지키기 탭에서 요율 변경)' };
+      return { value: h.value, src: 'calc', note: '보증금 ' + eok(h.dep) + ' × 연 ' + pctTxt(h.rate, 4) + ' × ' + h.years + '년 (2025-03-31 개편 요율, 추정 · 보증금 지키기 탭에서 요율 변경)' };
     }
     return null;
   }
@@ -800,11 +842,11 @@
     return [
       { key: 'report', part: 'admin', re: [/임대차\s*신고\s*(됐|되었|여부)|임대차\s*신고.*확인/], due: reportDue, conf: 'mid', urgent: true,
         title: '[긴급] 새 계약 주택임대차 신고 여부 확인 (신고필증)',
-        detail: '수도권에서 보증금 6천만원 초과 또는 월세 30만원 초과 계약은 계약일부터 30일 안에 신고해야 해요(' + eok(nn(f ? f.newHome.deposit : 320000000)) + '·월세 ' + krw(nn(f ? f.newHome.rent : 700000)) + ' → 대상). 한쪽이 양쪽 서명 계약서로 신고하면 공동신고로 보고 확정일자도 자동으로 붙어요.',
-        links: [LINK.rtms, LINK.lawReport] },
+        detail: '수도권에서 보증금 6천만원 초과 또는 월세 30만원 초과 계약은 계약일부터 30일 안에 신고해야 해요(' + eok(nn(f ? f.newHome.deposit : 320000000)) + '·월세 ' + krw(nn(f ? f.newHome.rent : 700000)) + ' → 대상). 국토부 전월세 실거래에 같은 거래(7/13·14층·3.2억/70만원)가 이미 보여 신고됐을 가능성이 높아요 — 실거래가 공개시스템(rt.molit.go.kr)과 중개사 신고필증으로 확인하세요. 한쪽이 양쪽 서명 계약서로 신고하면 공동신고로 보고 확정일자도 자동으로 붙어요.',
+        links: [LINK.rt, LINK.rtms, LINK.lawReport] },
       { key: 'tax', part: 'admin', re: [/납세\s*증명/, /미납\s*(국세|세금)/], anyDone: true, due: move, conf: 'mid',
-        title: '집주인 C 미납 국세·지방세 확인 (납세증명서 또는 세무서 열람)',
-        detail: '보증금 1천만원 초과 임차인은 임대차 시작일(' + D.fmt(move) + ')까지 C 동의 없이 세무서 민원실에서 미납 국세를 열람할 수 있어요(신분증·계약서). 더 쉬운 길: 주임법 제3조의7에 따라 C에게 납세증명서와 확정일자 부여현황을 보여 달라고 중개사를 통해 요청. 지방세는 강서구청에 확인.',
+        title: '집주인 C 미납 국세·지방세 확인 (납세증명서 또는 세무서·구청 열람)',
+        detail: '보증금 1천만원 초과 임차인은 임대차 시작일(' + D.fmt(move) + ')까지 C 동의 없이 미납 세금을 열람할 수 있어요(신분증·계약서). 국세는 전국 어느 세무서에서나, 지방세도 같은 기간에 전국 어느 시·군·구청 세무부서에서나 돼요. 온라인으로는 볼 수 없어 직접 가야 하고, 결과는 그 자리에서 눈으로만 보고 복사할 수 없어요. 열람하면 C에게 열람 사실이 통지되니 중개사를 통해 미리 알려 두세요. 더 쉬운 길: 주임법 제3조의7에 따라 C에게 납세증명서와 확정일자 부여현황을 보여 달라고 중개사를 통해 요청.',
         links: [LINK.lawCollect, LINK.lawLease] },
       { key: 'household', part: 'admin', re: [/전입\s*세대\s*확인/], due: D.add(move, -1), conf: 'mid',
         title: '전입세대확인서로 이전 거주자 전입이 빠졌는지 확인',
@@ -824,7 +866,7 @@
         links: [] },
       { key: 'hug', part: 'money', re: [/반환\s*보증/, /보증\s*보험/], due: '2026-11-20', conf: 'mid',
         title: 'HUG 전세보증금반환보증 가입',
-        detail: '전입·확정일자를 마친 뒤, 계약기간 1/2이 지나기 전까지 신청(11월 중 권장). 반전세는 보증금 부분만 보증해요.',
+        detail: '전입·확정일자를 마친 뒤, 계약기간 1/2이 지나기 전까지 신청(11월 중 권장). 반전세는 보증금 부분만 보증해요. 보증료는 2025-03-31 개편 요율로 ' + (f ? '약 ' + krw(hugPremium(f).value) + '(' + hugPremium(f).years + '년' : '2년 약 68.5만원(') + ', 추정 · 6·12개월 무이자 분납 가능)이에요.',
         links: [LINK.hug, LINK.hugCompare] },
       { key: 'jangsu', part: 'money', re: [/장기\s*수선.*(돌려|반환|청구)/], due: move, conf: 'mid',
         title: '구집 장기수선충당금 반환 청구 (A에게)',
@@ -917,7 +959,7 @@
       const dl = D.add(D.valid(f.newHome.contractDate) ? f.newHome.contractDate : '2026-07-13', 30);
       const over = D.diff(dl, today);
       A.push({ id: 'report', level: over > 0 ? 'bad' : 'warn', overdue: over > 0, tab: 'protect', anchor: 'fn-p-report',
-        text: '새 계약 임대차 신고 기한(' + D.fmt(dl) + ')' + (over > 0 ? '이 ' + over + '일 지났을 수 있어요 — 신고필증부터 확인하고, 안 됐으면 바로 신고하세요.' : '까지 신고 여부를 확인하세요.') });
+        text: '새 계약 임대차 신고 기한(' + D.fmt(dl) + ')' + (over > 0 ? '이 ' + over + '일 지났을 수 있어요 — 국토부 실거래에 이미 보여 신고됐을 가능성이 높아요. 실거래가 공개시스템·중개사 신고필증으로 확인하고, 안 됐으면 바로 신고하세요.' : '까지 신고 여부를 확인하세요 (국토부 실거래가 공개시스템·신고필증).') });
     } else if (rep && rep.reportState === 'checked') {
       A.push({ id: 'reportResult', level: 'info', tab: 'protect', anchor: 'fn-p-report',
         text: '임대차 신고를 확인했다면 결과(신고돼 있음 / 안 돼 있어서 지금 신고함)도 골라 주세요 — 안 돼 있었다면 바로 신고해야 해요.' });
@@ -947,7 +989,7 @@
     if (tx && !tx.done) {
       const dd = D.dday(c.move);
       A.push({ id: 'taxView', level: 'warn', tab: 'protect', anchor: 'fn-p-tax',
-        text: '집주인 C 미납 국세 단독 열람은 ' + D.fmt(c.move) + '까지예요' + (dd.n != null && dd.n >= 0 ? ' (' + dd.label + ')' : '') + ' — 또는 C에게 납세증명서를 요청하세요.' });
+        text: '집주인 C 미납 국세·지방세 단독 열람은 ' + D.fmt(c.move) + '까지예요' + (dd.n != null && dd.n >= 0 ? ' (' + dd.label + ')' : '') + ' — 세무서·구청 방문, 또는 C에게 납세증명서를 요청하세요.' });
     }
     if (!f.newHome.rentConfirmed) {
       A.push({ id: 'rent', level: 'warn', tab: 'flow', anchor: 'fn-rent',
@@ -1037,9 +1079,23 @@
       beforeMoveLabels: c.budget.before.labels.slice(),
       mode: c.flow.direct ? 'direct' : 'self',
       steps: c.flow.steps.map((s) => ({ id: s.id, kind: s.kind, title: stepTitle(s.id, c), amount: s.amount, time: s.time, done: s.done, balance: s.balance })),
-      warnings: c.alerts.filter((a) => a.level !== 'info').map((a) => ({ text: a.text, level: a.level })),
+      warnings: summaryWarnings(c.alerts),
     };
   };
+  /* 대시보드용 주의사항: 예전 모양({text, level})에 id·href 를 더함. 이 화면의 'info' 알림은 빼고,
+     '꼭 드는 비용 부족' 줄(id 'budget')은 대시보드 머리 숫자와 같은 말이라 level 'info' + headline 으로 맨 뒤에 둠 */
+  const HEADLINE_IDS = { budget: true };
+  function summaryWarnings(alerts) {
+    const rank = { bad: 0, warn: 1, info: 2 };
+    return (alerts || [])
+      .filter((a) => a.level !== 'info')
+      .map((a) => {
+        const w = { id: a.id, text: a.text, level: HEADLINE_IDS[a.id] ? 'info' : a.level, href: '#/money/' + (a.tab || 'flow') };
+        if (HEADLINE_IDS[a.id]) w.headline = true;
+        return w;
+      })
+      .sort((x, y) => rank[x.level] - rank[y.level]);
+  }
 
   /* ======================= 단계 문구 ======================= */
   const KIND_CHIP = { in: 'good', out: 'brand', ext: 'think', task: '' };
@@ -1178,7 +1234,9 @@ div.fn-alert { cursor: default; }
 .fn-basis { display: block; margin-top: 10px; font-size: .78rem; color: var(--ink-3); line-height: 1.6; }
 .fn-basis > * { margin-right: 6px; }
 .fn-basis .chip { font-size: .7rem; padding: 0 7px; line-height: 1.6; vertical-align: 1px; }
-.fn-src { font-weight: 650; white-space: nowrap; }
+.fn-src { font-weight: 650; white-space: nowrap; max-width: 100%; }
+/* 좁은 화면: 긴 출처 이름(예: '서울시 공동주택 통합정보마당 (단지별 승강기 사용료)')이 화면 밖으로 나가지 않게 줄바꿈 */
+@media (max-width: 640px) { .fn-src { white-space: normal; overflow-wrap: anywhere; } }
 .fn-verify { color: var(--warn); font-weight: 700; white-space: nowrap; }
 
 .fn-seg { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px; background: var(--bg-3); border-radius: 12px; }
@@ -1434,6 +1492,7 @@ div.fn-alert { cursor: default; }
 .fn-gcard-v { font-size: 1.3rem; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
 .fn-gcard-d { font-size: .8rem; color: var(--ink-2); line-height: 1.5; }
 .fn-gcard-items { font-size: .76rem; color: var(--ink-3); line-height: 1.45; }
+.fn-gcard-hug { align-self: flex-start; font-size: .8rem; font-weight: 650; line-height: 1.45; }
 .fn-gcard-go { align-self: flex-start; font-size: .82rem; font-weight: 700; min-height: 36px; display: inline-flex; align-items: center; margin-top: auto; }
 .fn-bgroup { margin-top: 14px; min-width: 0; }
 .fn-bgroup-h { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; padding: 8px 12px; border-radius: var(--radius-sm); background: var(--bg-3); border-left: 4px solid var(--line-2); }
@@ -1809,7 +1868,7 @@ div.fn-alert { cursor: default; }
           el('h1', '💰 자금흐름'),
           el('div', { class: 'sub' }, D.fmt(P.c.move) + ' 잔금·이사일 ', dd.n != null ? el('b', dd.label) : null, ' · 금액·시각은 눌러서 고칠 수 있어요')),
         el('div', { class: 'actions' },
-          el('button', { class: 'btn btn-primary', type: 'button', onclick: () => openSheet(P) }, '🖨 11/3 당일 시트'),
+          el('button', { class: 'btn btn-primary', type: 'button', onclick: () => openSheet(P) }, (canPrint() ? '🖨 ' : '📋 ') + D.fmt(P.c.move).replace(/\(.\)$/, '') + ' 당일 시트'),
           el('button', { class: 'btn', type: 'button', onclick: () => resetAll(P) }, '↺ 기본값으로 되돌리기'))),
       P.live('section', 'fn-hero', () => heroTiles(P)),
       P.live('section', 'fn-alerts', () => alertList(P)),
@@ -2545,6 +2604,7 @@ div.fn-alert { cursor: default; }
         el('div', { class: 'fn-gcard-h' }, el('i', { class: 'fn-sw fn-sw-' + g.id, 'aria-hidden': 'true' }), el('span', g.icon + ' ' + g.label)),
         el('b', { class: 'fn-gcard-v', title: won(s.unpaid) }, krw(s.unpaid)),
         el('span', { class: 'fn-gcard-d' }, g.desc),
+        g.id === 'optional' ? el('a', { class: 'fn-gcard-hug fn-hug-link', href: HUG_GUIDE }, '📎 HUG 보증: 가입할 때와 안 할 때 비교 →') : null,
         s.labels.length ? el('span', { class: 'fn-gcard-items' }, '지금 들어 있는 항목: ' + s.labels.join(' · ')) : el('span', { class: 'fn-gcard-items' }, '들어 있는 항목이 없어요'),
         el('a', { class: 'fn-gcard-go', href: '#/money/budget', onclick: P.tabLink('budget', 'fn-bg-' + g.id) }, '줄 보기 ↓'));
     };
@@ -2572,7 +2632,8 @@ div.fn-alert { cursor: default; }
         el('p', { class: 'mb-0' }, el('b', '남는 돈이 ' + krw(fl.leftover) + '인데 ' + krw(b.unpaid) + '이 다 필요한가요? '),
           '아니요. ' + krw(b.unpaid) + '은 예산 전부예요. 그중 ' + D.fmt(c.move) + ' 전후에 꼭 현금으로 나가는 건 "꼭 드는 이사 비용" ' + krw(ess) + '이에요. ' +
           '"새로 사는 살림" ' + krw(pur) + '은 이사비가 아니라 물건 값(통돌이 세탁기 등)이라 카드 할부로 나눠 낼 수 있고, ' +
-          '"선택·나중에" ' + krw(opt) + '은 이사 뒤에 정하거나 내는 돈(간이 옷장, HUG 보증료)이에요.'),
+          '"선택·나중에" ' + krw(opt) + '은 이사 뒤에 정하거나 내는 돈(간이 옷장, HUG 보증료)이에요. ',
+          el('a', { class: 'fn-hug-link', href: HUG_GUIDE }, 'HUG 별첨 보기 →')),
         el('p', { class: 'mb-0 mt-8 small' }, el('b', '가족이 정한 것: '), '냉장고·건조기는 이삿짐센터가 옮김(이사업체 견적에 포함) · 에어컨은 삼성전자서비스가 이사 전에 새 집에 설치 · 통돌이 약 50만원은 이사 후 배송 · 옷장은 이사 후 실측하고 간이 옷장으로 · 커튼·소품은 지금 것 가져감(0원) · 입주청소는 직접(0원) · 예비비는 따로 잡지 않음.')),
       el('div', { class: 'fn-cmp', role: 'img', 'aria-label': '같은 눈금 비교 — 그날 남는 돈 ' + krw(fl.leftover) + ', 앞으로 낼 돈 ' + krw(b.unpaid) + ' (꼭 드는 비용 ' + krw(ess) + ', 살림 구입 ' + krw(pur) + ', 선택·나중에 ' + krw(opt) + ')' },
         el('div', { class: 'fn-cmp-row' }, el('span', '그날 남는 돈'), el('div', { class: 'fn-cmp-track' }, el('i', { class: 'is-left', style: { width: w(Math.max(0, fl.leftover)) } })), el('b', krw(fl.leftover))),
@@ -2732,7 +2793,7 @@ div.fn-alert { cursor: default; }
       ]),
       sec(GROUP_BY_ID.optional, [
         li('간이 옷장은 이사 후 (약 20만원, 추정)', ' — 이사 전에는 사지 않아요. 이사 후 방을 실측하고 이케아 등에서 간이 옷장이나 행거를 사요. 키 큰 옷장을 고르면 그때 벽 고정이 필요한지 확인. ' + D.fmt(c.move) + ' 현금에는 넣지 않아요.'),
-        el('li', el('b', 'HUG 보증료'), ' — 전입·확정일자 뒤 11월 중 가입할 때 내요. ' + D.fmt(c.move) + ' 당일 현금이 아니에요. ', hugLink),
+        el('li', el('b', 'HUG 보증료 약 ' + krw(hugPremium(c.f).value)), ' — 2025-03-31 개편 요율(연 ' + pctTxt(hugPremium(c.f).rate, 4) + ') 기준 추정이에요. 전입·확정일자 뒤 11월 중 가입할 때 내고, 6·12개월 무이자 분납도 돼요. ' + D.fmt(c.move) + ' 당일 현금이 아니에요. ', hugLink),
       ]),
       el('h4', { class: 'fn-adv-h' }, '🧹 돈 안 드는 것 (가족이 정함)'),
       el('ul', { class: 'fn-ul small' },
@@ -2780,7 +2841,7 @@ div.fn-alert { cursor: default; }
         dateField('빌린 날 (2024)', g.startDate, setG('startDate'), { fk: 'g-start', hint: '이체내역의 날짜로 고치세요 (가정값)' }),
         moneyField('10년 안에 부모님께 받은 다른 증여', g.priorGifts, setG('priorGifts'), { fk: 'g-prior', hint: '성년 자녀 공제 5천만원에서 빠져요' })),
       P.live('div', 'fn-calc-out', () => giftOut(P)),
-      basis('mid', '적정이자율 4.6%로 계산한 이자와 실제 이자의 차액이 연 1천만원 이상이면 차액 전체가 증여재산, 1천만원 미만이면 과세하지 않아요. 기간이 정해지지 않았으면 1년 단위로 매년 다시 계산해요. 4.6%는 2016년 이후 같은 값이며 2026년 변경 여부는 원문으로 다시 확인하지 못했어요.', [LINK.taxlyRate, LINK.transtax, LINK.lawGift], '세무사 확인 권장'));
+      basis('high', '적정이자율 4.6%로 계산한 이자와 실제 이자의 차액이 연 1천만원 이상이면 차액 전체가 증여재산, 1천만원 미만이면 과세하지 않아요. 기간이 정해지지 않았으면 1년 단위로 매년 다시 계산해요. 2026년 10월에 다시 확인했어요: 4.6%는 2016년 이후 같은 값이고 2025·2026 세제개편안에도 변경이 없어요(3억이면 최소 연 1.27%, 월 317,500원).', [LINK.taxlyRate, LINK.transtax, LINK.lawGift]));
     const plan = el('section', { class: 'card' },
       el('div', { class: 'fn-card-h' }, el('h3', '💸 아버지께 드릴 이자 계획')),
       el('div', { class: 'fn-fields' },
@@ -2794,7 +2855,7 @@ div.fn-alert { cursor: default; }
       el('div', { class: 'grid grid-2' }, calc, el('div', null, plan, worst)),
       docs,
       el('div', { class: 'callout' },
-        el('p', el('b', '세무사 확인 권장 — '), '이 계산은 법령 지식(2025년 기준)으로 점검한 참고용이에요. 실제 신고·이자 처리는 세무사와 정하세요. ',
+        el('p', el('b', '세무사 확인 권장 — '), '이 계산은 2026년 10월 기준으로 다시 확인한 참고용이에요(적정이자율 4.6%, 성년 자녀 공제 5,000만원, 세율 10~50%, 무신고가산세 20%는 그대로). 실제 신고·이자 처리는 세무사와 정하세요. ',
           el('a', { href: '#/guide/money/father' }, '가이드: 아버지 차용금 정리 →'))));
   }
 
@@ -2871,13 +2932,14 @@ div.fn-alert { cursor: default; }
         el('span', { class: 'k' }, '과세표준 (원금 − 공제 ' + krw(g.deduction) + ')'), el('span', { class: 'v' }, won(g.base)),
         el('span', { class: 'k' }, '증여세 (1억까지 10%, 초과분 20% …)'), el('span', { class: 'v' }, won(g.tax)),
         el('span', { class: 'k' }, '무신고가산세 20%'), el('span', { class: 'v' }, won(g.noReport)),
-        el('span', { class: 'k' }, g.start && !g.startFuture ? '납부지연가산세 (하루 0.022% × ' + g.lateDays + '일)' : '납부지연가산세 (빌린 날을 넣으면 계산)'), el('span', { class: 'v' }, g.start && !g.startFuture ? won(g.lateFee) : '-'),
+        el('span', { class: 'k' }, g.start && !g.startFuture ? '납부지연가산세 (하루 0.022% × ' + g.lateDays + '일, 근사)' : '납부지연가산세 (빌린 날을 넣으면 계산)'), el('span', { class: 'v' }, g.start && !g.startFuture ? won(g.lateFee) : '-'),
         el('span', { class: 'sep' }),
         el('span', { class: 'k strong' }, '합계 (오늘 기준)'), el('span', { class: 'v is-bad' }, won(g.worst))),
       el('p', { class: 'small mt-8 mb-0' }, g.start && !g.startFuture
         ? '신고기한 ' + D.fmtLong(g.deadline) + ' (빌린 날이 속한 달 말일부터 3개월) 기준. 차용 약정서·이자 이체·상환 기록이 이 위험을 막는 핵심이에요.'
         : '아버지 차용금 계산기에 빌린 날(2024년 이체 날짜)을 넣으면 신고기한과 가산세를 계산해요. 차용 약정서·이자 이체·상환 기록이 이 위험을 막는 핵심이에요.'),
-      basis('mid', '과세표준 2.5억 → 4,000만원, 무신고가산세 800만원, 납부지연가산세 약 500만원대 → 약 5,300만원(리서치 재계산).', [LINK.lawGift], '세무사 확인 권장'),
+      el('p', { class: 'small muted mt-8 mb-0' }, '납부지연가산세는 2026-07-01부터 "하루 0.022%"에서 "1개월마다 0.67%" 방식으로 바뀌었어요. 비율이 거의 같아서(0.022% × 30.4일 ≈ 0.67%) 여기서는 하루 단위로 근사했어요. 바뀌기 전후 기간을 어떻게 나눠 계산하는지는 세무사에게 확인하세요.'),
+      basis('mid', '과세표준 2.5억 → 4,000만원, 무신고가산세 800만원, 납부지연가산세 약 500만원대 → 약 5,300만원(리서치 재계산). 납부지연가산세는 2026-07-01부터 월 0.67%(국세기본법 개정).', [LINK.lawGift], '세무사 확인 권장'),
     ];
   }
 
@@ -2928,9 +2990,9 @@ div.fn-alert { cursor: default; }
         { key: 'transfer', text: '월세는 계좌이체로, 메모 "월세" (C 본인 계좌)' },
         { key: 'copy', text: '임대차계약서 사본 보관' },
       ]),
-      basis('mid', '조특법 제95조의2 (2024 귀속 이후): 총급여 5,500만원 이하 17%, 8,000만원 이하 15%, 월세 한도 연 1,000만원.', [LINK.lawSpecial], '연말정산 전 세법 개정 확인'));
+      basis('mid', '조특법 제95조의2 (2024 귀속 이후): 총급여 5,500만원 이하 17%, 8,000만원 이하 15%, 월세 한도 연 1,000만원. 2026-08 세제개편안(국회 통과 필요)은 2027년분부터 한도를 1,200만원으로 올리지만, 우리 월세(연 840만원)에는 영향이 없어요.', [LINK.lawSpecial], '연말정산 전 세법 개정 확인'));
     const housing = el('section', { class: 'card' },
-      el('div', { class: 'fn-card-h' }, el('h3', '🏦 주택임차차입금 원리금 소득공제 (2026년이 마지막 해)'), guideLink('tax-loan')),
+      el('div', { class: 'fn-card-h' }, el('h3', '🏦 주택임차차입금 원리금 소득공제 (우리 대출을 다 갚아 2026년분이 마지막)'), guideLink('tax-loan')),
       el('div', { class: 'fn-fields' },
         moneyField('같은 해 주택청약 소득공제액 (있으면)', f.tax.subscription, (v) => upd((fin) => { fin.tax.subscription = v; }), { fk: 't-sub', hint: '둘을 합쳐 400만원 한도' }),
         selectField('한계세율 (지방세 포함)', String(f.tax.marginal), MARGINAL.map(([v, l]) => [String(v), l]), (v) => upd((fin) => { fin.tax.marginal = +v; }), { fk: 't-marginal' })),
@@ -2940,7 +3002,7 @@ div.fn-alert { cursor: default; }
         { key: 'loanDirect', text: '대출금이 임대인(A) 계좌로 직접 입금됐음' },
         { key: 'certificate', text: '우리은행 "주택자금 상환증명서" 받기 (2,200만원 중도상환분 포함)' },
       ]),
-      basis('mid', '상환액의 40%, 주택청약 공제와 합산 연 400만원 한도. 대출을 다 갚는 2026년이 마지막 공제 해예요. 월세 세액공제와 함께 받을 수 있어요.', [LINK.lawSpecial], '연말정산 전 확인'));
+      basis('mid', '소득세법 제52조 제4항(특별소득공제, 조세특례제한법이 아니에요): 상환액의 40%, 주택청약 공제와 합산 연 400만원 한도. 제도가 끝나는 게 아니라 우리 대출을 2026년에 다 갚아서 2026년분이 마지막이에요. 월세 세액공제와 함께 받을 수 있어요.', [LINK.lawIncome], '연말정산 전 확인'));
     return el('div', { class: 'fn-panel' },
       broker,
       el('div', { class: 'grid grid-2' }, rent, housing),
@@ -3055,7 +3117,7 @@ div.fn-alert { cursor: default; }
       r.linked ? itemLink(r.linked, r.linkedCount) : el('button', { class: 'btn btn-sm fn-mini-btn', type: 'button', 'data-fk': 'prot-add-' + r.key, onclick: () => addToChecklist(P, r) }, '+ 체크리스트에 추가'),
       r.key === 'report' && r.follow ? itemLink(r.follow, 1) : null,
       PROT_STEP[r.key] ? el('a', { href: '#/money/flow', onclick: P.tabLink('flow', 'fn-step-' + PROT_STEP[r.key]) }, '🗓 11/3 돈 흐름 단계 →') : null));
-    body.appendChild(basis(r.conf, r.key === 'report' ? '부동산거래신고법 제6조의2·제6조의5, 과태료는 2025-06-01 이후 기준(구간표 원문 미확인).' : r.key === 'hug' ? 'HUG 요건(2023-05 개편): 수도권 보증금 7억 이하, (보증금+선순위채권) ≤ 주택가격의 90%.' : r.key === 'tax' ? '국세징수법 제109조(2023-04-01), 주임법 제3조의7(2023-04-18).' : '리서치 검증본.', r.links,
+    body.appendChild(basis(r.conf, r.key === 'report' ? '부동산거래신고법 제6조의2·제6조의5, 과태료는 2025-06-01 이후 계약부터(구간표 원문 미확인, 금액은 추정). 국토부 전월세 실거래는 임대차 신고·확정일자 자료로 만들어요.' : r.key === 'hug' ? 'HUG 요건(2023-05 개편): 수도권 보증금 7억 이하, (보증금+선순위채권) ≤ 주택가격의 90%. 보증료는 2025-03-31 개편 요율(아파트·보증금 2억~5억·부채비율 70% 이하 연 0.107%) 기준 추정.' : r.key === 'tax' ? '국세징수법 제109조(2023-04-01), 지방세 미납 열람(2023-04-01부터 같은 조건), 주임법 제3조의7(2023-04-18).' : '리서치 검증본.', r.links,
       r.key === 'hug' ? 'HUG에 확인' : r.key === 'tax' || r.key === 'report' ? '주민센터·세무서에 확인' : '주민센터·관리사무소에 확인'));
     box.append(el('label', { class: 'fn-prot-cb', title: r.title }, cb),
       el('div', { class: 'fn-prot-title' }, el('label', { for: cbId }, r.title),
@@ -3094,17 +3156,21 @@ div.fn-alert { cursor: default; }
         return [
           el('span', { class: 'k' }, '계약일 → 법정 신고기한'), el('span', { class: 'v' }, D.fmt(x.contractDate) + ' → ' + D.fmt(x.deadline)),
           el('span', { class: 'k' }, '오늘 기준'), el('span', { class: 'v ' + (over > 0 && !x.done ? 'is-bad' : '') }, over > 0 ? over + '일 지남' : over === 0 ? '오늘까지' : 'D-' + (-over)),
-          el('span', { class: 'k' }, '과태료 (지연신고)'), el('span', { class: 'v' }, '약 2만~30만원'),
+          el('span', { class: 'k' }, '과태료 (지연신고, 추정)'), el('span', { class: 'v' }, '약 2만~30만원'),
           el('span', { class: 'k' }, '거짓신고'), el('span', { class: 'v' }, '100만원'),
         ];
       }),
+      el('div', { class: 'callout good fn-rt-tip' },
+        el('p', { class: 'mb-0' }, el('b', '먼저 1분 확인: '),
+          el('a', { href: LINK.rt.url, target: '_blank', rel: 'noopener noreferrer' }, '실거래가 공개시스템 ↗'),
+          ' → 아파트 전월세 → 강서구 등촌동 → 새 집 단지에서 2026년 7월 14층 거래(보증금 3.2억·월세 70만원)를 찾아보세요. 이미 올라와 있어서 신고(또는 확정일자)됐을 가능성이 높아요. 실거래 자료는 임대차 신고·확정일자로 만들어요. 최종 확인은 중개사에게 받는 신고필증으로 하세요.')),
       el('div', { class: 'fn-fields' },
         dateField('새 집 계약일', f.newHome.contractDate, (v) => upd((fin) => { fin.newHome.contractDate = D.valid(v) ? v : '2026-07-13'; }), { fk: 'p-contract-date', hint: '계약서의 계약일 — 신고기한(30일)이 여기서 계산돼요' }),
         state),
       el('ul', { class: 'fn-ul small' },
         el('li', '확인: 중개사와 C에게 신고필증 사본을 요청 (신고됐다면 확정일자 부여일도)'),
         el('li', '안 됐으면: 주민센터나 부동산거래관리시스템 누리집에서 양쪽 서명 계약서를 첨부해 바로 신고 — 지연기간이 짧을수록 과태료가 낮아요'),
-        el('li', '과태료는 임대인·임차인 모두에게 나올 수 있으니 C와 함께 정리'),
+        P.live('li', null, () => '과태료는 추정이에요: 우리 계약은 신고기한 뒤 3개월(' + D.fmt(addMonths(cur().deadline || '2026-08-12', 3)) + ')까지 신고하면 1인당 약 4만~5만원, 그 뒤 약 8만~12만원 (구간표가 출처마다 달라요). 임대인·임차인 각각 나올 수 있으니 C와 함께 정리'),
         el('li', '전입신고 때 계약서를 내면 신고로 간주되지만, 그때까지 지연기간만 길어져요')),
       guideLink('report', '임대차 신고 가이드'));
   }
@@ -3112,17 +3178,24 @@ div.fn-alert { cursor: default; }
   function hugExtra(P) {
     const f = P.c.f;
     const hugLine = f.budget.lines.find((l) => l.id === 'hug');
+    /* 저장된 요율이 선택지에 없으면(직접 바꾼 예전 값 등) 그 값도 보여 줌 — 보이는 값과 계산이 어긋나지 않게 */
+    const curRate = num(f.protect.hugRate) > 0 ? num(f.protect.hugRate) : HUG_RATE_DEFAULT;
+    const rateOpts = HUG_RATES.map(([v, l]) => [String(v), l]);
+    if (!HUG_RATES.some(([v]) => v === curRate)) rateOpts.push([String(curRate), '연 ' + pctTxt(curRate, 4) + ' (예전에 고른 값)']);
     return el('div', { class: 'fn-step-body' },
       el('div', { class: 'fn-fields' },
-        selectField('보증료율 (아파트)', String(f.protect.hugRate), HUG_RATES.map(([v, l]) => [String(v), l]), (v) => upd((fin) => { fin.protect.hugRate = +v; }), { fk: 'p-hug-rate' }),
+        selectField('보증료율 · 부채비율 구간 (아파트 2억~5억, 2025-03-31 개편)', String(curRate), rateOpts, (v) => upd((fin) => { fin.protect.hugRate = +v; }), { fk: 'p-hug-rate', hint: '부채비율 = (보증금 + 앞선 채권) ÷ 집값. 3.2억 ÷ 시세 약 10억 ≈ 30% → 70% 이하 구간 (추정)' }),
         numField('보증 기간', f.protect.hugYears, (v) => upd((fin) => { fin.protect.hugYears = v; }), { suffix: '년', min: 1, max: 4, fk: 'p-hug-years' })),
       P.live('div', 'fn-total', () => {
         const h = hugPremium(P.c.f);
-        return [el('span', '예상 보증료'), el('b', won(h.value)), el('span', { class: 'fn-formula' }, '범위 ' + won(h.low) + ' ~ ' + won(h.high))];
+        return [el('span', '예상 보증료 (추정)'), el('b', won(h.value)),
+          el('span', { class: 'fn-formula' }, eok(h.dep) + ' × 연 ' + pctTxt(h.rate, 4) + ' × ' + h.years + '년'),
+          el('span', { class: 'fn-formula' }, '범위 ' + won(h.low) + '(신혼·다자녀 40% 할인) ~ ' + won(h.high) + ' · 12개월 무이자 분납이면 월 약 ' + won(h.monthly12))];
       }),
       hugLine ? checkbox('가입 예정 — 예산에 보증료 넣기', hugLine.on !== false, (v) => upd((fin) => { const x = fin.budget.lines.find((l) => l.id === 'hug'); if (x) { x.on = v; x.edited = true; } }), { fk: 'p-hug-on' }) : null,
       el('ul', { class: 'fn-ul small' },
         el('li', '요건: 수도권 보증금 7억 이하, (보증금 + 선순위채권)이 시세의 90% 이하 — 59㎡ 아파트·보증금 3.2억이면 큰 근저당만 없으면 가능성이 높아요'),
+        el('li', '보증료는 2025-03-31에 바뀐 요율로 계산했어요(보증금 구간 × 부채비율 구간). 신혼(혼인 7년 이내)·다자녀 할인은 무주택일 때만이에요. 실제 금액은 HUG 신청 화면에서 확인하세요'),
         el('li', '가입하면 HUG가 임대인 C에게 보증금 반환채권 양도를 통지해요. 동의는 필요 없지만, 멀리 사는 C가 놀라지 않게 중개사를 통해 미리 알려 두세요'),
         el('li', 'HF 전세지킴보증, 서울보증보험 상품과 보증료·조건을 비교해 보세요')),
       el('a', { class: 'fn-cl-link fn-hug-link', href: HUG_GUIDE }, '📎 별첨: 가입하지 않으면 생길 수 있는 문제 (실제 금액 비교) →'));
@@ -3154,23 +3227,28 @@ div.fn-alert { cursor: default; }
     document.body.classList.toggle('fn-print-mode', !!on);
     document.documentElement.classList.toggle('fn-print-mode', !!on);
   }
+  /* claude.ai 공유 버전(window.claude 가 있음)에서는 window.print() 가 아무것도 하지 않아요 → 인쇄 버튼을 숨김.
+     GitHub Pages 등 보통 브라우저에서는 그대로 인쇄 */
+  function canPrint() {
+    try { return typeof window.claude === 'undefined' && typeof window.print === 'function'; } catch (e) { return false; }
+  }
   function openSheet(P) {
     if (P.sheet) { try { P.sheet.close(); } catch (e) { /* 무시 */ } }
     P.c = compute(MV.store.get()); // 조용히 저장된 메모·연락처까지 반영
+    const printable = canPrint();
     printMode(true);
-    const body = el('div', { class: 'fn-sheet' }, sheetContent(P));
+    const body = el('div', { class: 'fn-sheet' }, sheetContent(P, printable));
+    const actions = [{ label: '닫기', kind: printable ? 'ghost' : 'primary' }];
+    if (printable) actions.push({ label: '🖨 인쇄하기', kind: 'primary', onClick: () => { try { window.print(); } catch (e) { /* 무시 */ } return false; } });
     P.sheet = MV.ui.modal({
       title: D.fmtLong(P.c.move) + ' 당일 시트',
       body, wide: true,
-      actions: [
-        { label: '닫기', kind: 'ghost' },
-        { label: '🖨 인쇄하기', kind: 'primary', onClick: () => { try { window.print(); } catch (e) { /* 무시 */ } return false; } },
-      ],
+      actions,
       onClose: () => { printMode(false); P.sheet = null; },
     });
   }
 
-  function sheetContent(P) {
+  function sheetContent(P, printable) {
     const c = P.c, fl = c.flow, f = c.f;
     const memo = f.flow.memo || {};
     const rows = fl.steps.map((s) => {
@@ -3196,7 +3274,9 @@ div.fn-alert { cursor: default; }
     const ct = f.contacts || {};
     const CT = [['A', '구집 임대인 A'], ['C', '새 집 임대인 C'], ['broker', '새 집 중개사'], ['oldBroker', '구집 중개사'], ['bank', '우리은행'], ['mover', '이사업체']];
     return [
-      el('p', { class: 'small muted fn-no-print' }, '체크하면 자금흐름 화면에도 바로 반영돼요. "인쇄하기"로 종이에 뽑아 들고 다니세요.'),
+      el('p', { class: 'small muted fn-no-print' }, printable
+        ? '체크하면 자금흐름 화면에도 바로 반영돼요. "인쇄하기"로 종이에 뽑아 들고 다니세요.'
+        : '체크하면 자금흐름 화면에도 바로 반영돼요. 이 공유 화면에서는 인쇄가 안 돼요 — 휴대폰으로 화면을 캡처해 두거나 종이에 옮겨 적어 들고 다니세요.'),
       el('div', { class: 'fn-sheet-sum' },
         el('div', null, el('span', '받을 돈'), el('b', won(fl.inflow))),
         el('div', null, el('span', '보낼 돈'), el('b', won(fl.outflow))),

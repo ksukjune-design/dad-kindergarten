@@ -129,15 +129,67 @@
     if (['low', '여유', '낮음'].indexOf(s) >= 0) return 'low';
     throw new Error('우선순위는 high(중요)·mid(보통)·low(여유) 중 하나로 주세요: ' + clip(v, 20));
   }
+  /* 한국어 금액 글 → 원. '32만원'·'5만 5천원'·'3백만원'·'1억 2천만원'·'1.2억'·'320,000' 을 읽고,
+     범위('3-4만원', '30~40만')·모르는 단위('12k', '삼십만')·애매한 글('1억 5천')은 Error(한국어)로 돌려보냄 */
+  const BIG_UNIT = { '조': 1e12, '억': 1e8, '만': 1e4 };
+  const SMALL_UNIT = { '천': 1e3, '백': 1e2, '십': 10 };
+  function parseKoMoney(input, label) {
+    const name = label || '금액';
+    const raw = String(input == null ? '' : input);
+    let s = raw.replace(/[０-９．，～－]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
+      .replace(/\([^)]*\)|（[^）]*）|\[[^\]]*\]/g, ' ')                 // (VAT 별도) 같은 덧말
+      .replace(/(부가세|부가가치세|VAT)\s*(포함|별도|제외|미포함)?/gi, ' ')
+      .replace(/₩|KRW|won/gi, ' ')
+      .trim();
+    s = s.replace(/^(약|대략|대충|총|합계|모두|전부|견적|금액)\s*[:：]?\s*/, '').replace(/\s*(정도|쯤|가량|내외|선|안팎|언저리)\s*$/, '').trim();
+    if (!s) throw new Error(name + '이 비어 있어요.');
+    const ask = ' — 숫자 하나로 주세요 (예: 320000 또는 "32만원", "5만 5천원").';
+    if (/\d\s*(~|〜|∼|-|–|—|에서|부터)\s*\d/.test(s) || /[~〜∼]/.test(s) || /\d\s*(만|천|백|억)?\s*(원)?\s*(~|-|–|—)/.test(s.slice(1))) {
+      throw new Error(name + '이 범위예요: ' + clip(raw, 30) + ' — 범위가 아니라 금액 하나(확정 금액이나 가운데 값)로 주세요 (예: "35만원").');
+    }
+    let neg = false;
+    if (/^[-−]/.test(s)) { neg = true; s = s.slice(1).trim(); }
+    s = s.replace(/[,\s]/g, '').replace(/원$/, '');
+    if (!/^[\d.조억만천백십]+$/.test(s) || !/\d|[조억만천]/.test(s)) throw new Error(name + '을 읽을 수 없어요: ' + clip(raw, 30) + ask);
+    const re = /(\d+(?:\.\d+)?)|([조억만])|([천백십])|(.)/g;
+    let total = 0; let section = 0; let cur = null; let lastBig = Infinity; let lastSmall = Infinity; let usedBig = 0; let m;
+    while ((m = re.exec(s))) {
+      if (m[4] != null) throw new Error(name + '을 읽을 수 없어요: ' + clip(raw, 30) + ask);
+      if (m[1] != null) {
+        if (cur !== null) throw new Error(name + '을 읽을 수 없어요: ' + clip(raw, 30) + ask);
+        cur = parseFloat(m[1]);
+        if (!isFinite(cur)) throw new Error(name + '을 읽을 수 없어요: ' + clip(raw, 30) + ask);
+      } else if (m[3] != null) {
+        const u = SMALL_UNIT[m[3]];
+        if (u >= lastSmall) throw new Error(name + '의 단위 순서가 이상해요: ' + clip(raw, 30) + ask);
+        section += (cur === null ? 1 : cur) * u; cur = null; lastSmall = u;
+      } else {
+        const u = BIG_UNIT[m[2]];
+        if (u >= lastBig) throw new Error(name + '의 단위 순서가 이상해요: ' + clip(raw, 30) + ask);
+        section += cur === null ? 0 : cur;
+        if (!section) section = 1;   // '만원' = 1만원
+        total += section * u; section = 0; cur = null; lastSmall = Infinity; lastBig = u; usedBig = u;
+      }
+    }
+    const tail = section + (cur === null ? 0 : cur);
+    // '1억 5천'·'2억 9,500' 은 1억 5천만원인지 1억 5천원인지 애매함
+    if (usedBig >= 1e8 && tail > 0) throw new Error(name + '이 애매해요: ' + clip(raw, 30) + ' — "1억 5천만원"처럼 만 단위를 붙이거나 원 단위 숫자로 주세요.');
+    total += tail;
+    return Math.round(neg ? -total : total);
+  }
+  /** 금액을 정확히 보여 줌 — '5.5만원'처럼 줄여도 같은 값이면 줄이고, 아니면 '50,005원' */
+  function amt(n) {
+    const v = Math.round(num(n));
+    const k = krw(v);
+    let back = NaN;
+    try { back = MV.parseMoney(String(k).replace('−', '-')); } catch (e) { back = NaN; }
+    return back === v ? k : won(v);
+  }
   function parseAmount(v, label, o) {
     o = o || {};
     let n;
     if (typeof v === 'number') n = v;
-    else {
-      const s = String(v == null ? '' : v).replace(/[０-９．，]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0)).trim();
-      if (!s) throw new Error((label || '금액') + '이 비어 있어요.');
-      n = MV.parseMoney(s);
-    }
+    else n = parseKoMoney(v, label);
     if (typeof n !== 'number' || !isFinite(n)) throw new Error((label || '금액') + '을 숫자로 읽을 수 없어요: ' + clip(v, 30) + ' (예: 320000 또는 "32만원")');
     if (n < 0) throw new Error((label || '금액') + '은 0원보다 작을 수 없어요.');
     if (n > (o.max || 1e10)) throw new Error((label || '금액') + '이 너무 커요: ' + krw(n) + ' — 단위를 확인해 주세요.');
@@ -174,6 +226,9 @@
     limits: undefined,   // 확인된 limits (null = 확인 실패)
     mine: new Set(),     // 이 창에서 만들거나 고친 메시지 id (다른 탭과 합칠 때 이 창 것이 이김)
     removed: new Set(),  // 이 창에서 지운 메시지 id (다른 탭 기록과 합칠 때 다시 살아나지 않게)
+    rescued: new Set(),  // 다른 탭이 지웠지만 이 창에서 답하는 중이라 남긴 메시지 id
+    dirty: new Set(),    // 다른 탭에서 내용만 바뀐 메시지 id (그것만 다시 그림)
+    dirtyAll: false,     // 다른 탭 때문에 목록 자체(추가·삭제·순서)가 바뀜
     chat: { msgs: [] },
     active: null,        // 진행 중인 요청
     undos: new Map(),    // 답 id → { pre, fp, foreign } — 그 답에서 AI가 고친 것들의 고치기 전 값 (답마다 따로 되돌림)
@@ -193,41 +248,63 @@
     } catch (e) { /* 무시 */ }
     return { msgs: [], removed: [] };
   }
+  const tms = (m) => { const t = Date.parse(m && m.at); return isFinite(t) ? t : 0; };
+  /* 답하는 창은 BEAT_MS 마다 답에 '살아 있음'(hb) 시각을 저장. ORPHAN_MS 넘게 소식이 없으면 다른 창의 답은 끊긴 것으로 봄 */
+  const BEAT_MS = 10000;
+  const ORPHAN_MS = 45000;
+  const beatOf = (m) => num(m && m.hb) || tms(m);
+  const isLiveHere = (m) => !!R.active && !!m && R.active.msgId === m.id;
+  /** 다른 창에서 아직 답하는 중인 답 */
+  const foreignLive = (m) => !!m && m.role === 'assistant' && m.status === 'pending' && !isLiveHere(m) && Date.now() - beatOf(m) <= ORPHAN_MS;
+  function markOrphan(c) {
+    c.status = 'stopped'; c.code = 'orphan'; c.actions = [];
+    c.note = '다른 창에서 답하던 중에 끊겼어요 (그 창을 닫았거나 새로고침했어요).';
+  }
+  /** 살아 있음 표시(hb)만 바뀐 것은 '바뀜'으로 치지 않음 (다른 창이 답하는 동안 10초마다 다시 그리지 않게) */
+  const rawOf = (s) => { if (!s || s.hb === undefined) return JSON.stringify(s); const c = Object.assign({}, s); delete c.hb; return JSON.stringify(c); };
   /** 다른 탭(또는 지난번 창)이 저장한 메시지를 이 창에서 보여 줄 모양으로 */
-  function viewCopy(m, first) {
+  function viewCopy(m) {
     const c = MV.clone(m);
     if (!Array.isArray(c.changes)) c.changes = [];
-    if (first && c.status === 'pending') { c.status = 'stopped'; c.note = '창을 닫거나 새로고침해서 답이 끊겼어요.'; c.actions = []; }
+    // 답하는 중이던 답: 소식이 끊긴 지 오래면 끊긴 것으로 (최근 소식이 있으면 다른 창에서 답하는 중)
+    if (c.status === 'pending' && Date.now() - beatOf(c) > ORPHAN_MS) markOrphan(c);
     // 되돌리기 정보는 답을 받은 창에만 있음 (답하는 중에 새로고침한 경우 포함)
     if (c.changes.length && (c.undo === 'avail' || !c.undo)) c.undo = 'gone';
     return c;
   }
-  const tms = (m) => { const t = Date.parse(m && m.at); return isFinite(t) ? t : 0; };
   /** 저장된 기록 + 이 창의 기록 → { mem: 이 창에서 보여 줄 목록, store: 저장할 목록, changed: 다른 탭 것이 바뀜 } */
   function mergeChat(stored, first) {
     const removed = new Set(stored.removed);
     R.removed.forEach((id) => removed.add(id));
+    // 이 창에서 지금 답하는 질문·답은 다른 창이 대화를 지워도 남김 (답이 이미 바꾼 것의 변경 목록·되돌리기를 잃지 않게)
+    if (R.active) [R.active.msgId, R.active.userId].forEach((id) => { if (id && removed.has(id) && !R.removed.has(id)) R.rescued.add(id); });
+    R.rescued.forEach((id) => removed.delete(id));
     const sById = new Map(stored.msgs.map((m) => [m.id, m]));
     const memById = new Map(R.chat.msgs.map((m) => [m.id, m]));
     const rows = [];
     let changed = false;
     R.chat.msgs.forEach((m, k) => {
-      if (removed.has(m.id)) { changed = true; return; }
+      if (removed.has(m.id)) { changed = true; R.dirtyAll = true; return; }
       if (R.mine.has(m.id)) { rows.push({ k, m, s: m }); return; }
       const s = sById.get(m.id);
-      if (!s) { changed = true; return; }           // 다른 탭에서 지웠거나 오래돼 밀려남
-      if (JSON.stringify(s) !== m._raw) { changed = true; const c = viewCopy(s, false); c._raw = JSON.stringify(s); rows.push({ k, m: c, s }); return; }
+      if (!s) { changed = true; R.dirtyAll = true; return; }           // 다른 탭에서 지웠거나 오래돼 밀려남
+      const raw = rawOf(s);
+      // 끊긴 것으로 봤던 다른 창의 답이 다시 소식을 보내면 되살림
+      const revive = m.code === 'orphan' && s.status === 'pending' && Date.now() - beatOf(s) <= ORPHAN_MS;
+      if (raw !== m._raw || revive) { changed = true; R.dirty.add(m.id); const c = viewCopy(s); c._raw = raw; rows.push({ k, m: c, s }); return; }
+      if (s.hb !== undefined) m.hb = s.hb;
       rows.push({ k, m, s });
     });
     stored.msgs.forEach((s, i) => {
       if (memById.has(s.id) || removed.has(s.id)) return;
-      const c = viewCopy(s, first);
-      c._raw = JSON.stringify(s);
+      const c = viewCopy(s);
+      c._raw = rawOf(s);
       rows.push({ k: 100000 + i, m: c, s });
-      if (!first) changed = true;
+      if (!first) { changed = true; R.dirtyAll = true; }
     });
     rows.sort((a, b) => (tms(a.m) - tms(b.m)) || (a.k - b.k));
     const keep = rows.slice(-KEEP_MSGS);
+    if (keep.length < rows.length) R.dirtyAll = true;
     return { mem: keep.map((r) => r.m), store: keep.map((r) => r.s), removed, changed };
   }
   function loadChat() {
@@ -243,10 +320,48 @@
   /** 이 창이 메시지를 고쳤음 — 다른 탭 기록과 합칠 때 이 창 것을 씀 */
   const own = (m) => { if (m && m.id) { R.mine.add(m.id); delete m._raw; } return m; };
   let repaintTimer = null;
+  /** 다른 탭 때문에 바뀐 것만 다시 그림 (목록이 그대로면 바뀐 말풍선만 — 읽던 자리·선택을 지키게) */
   function repaintSoon() {
     if (repaintTimer) return;
-    repaintTimer = setTimeout(() => { repaintTimer = null; paintAll(false); updateComposer(); }, 0);
+    repaintTimer = setTimeout(() => {
+      repaintTimer = null;
+      const v = R.view;
+      const ids = Array.from(R.dirty);
+      const all = R.dirtyAll;
+      R.dirty.clear(); R.dirtyAll = false;
+      if (v && v.log && v.log.isConnected) {
+        const shown = MV.$$('.ag-msg', v.log).map((n) => n.getAttribute('data-id'));
+        const same = shown.length === R.chat.msgs.length && R.chat.msgs.every((m, i) => shown[i] === m.id);
+        if (all || !same) paintAll(false); else refreshMsgs(ids);
+      }
+      updateComposer();
+    }, 0);
   }
+  /** 다른 창에서 답하던 중 오래 소식이 없는 답 → 끊긴 것으로 (그 창을 닫았거나 멈춤). 다음 질문에도 '끊김'으로 보냄 */
+  function checkOrphans() {
+    let dirty = false;
+    R.chat.msgs.forEach((m) => {
+      if (m.role !== 'assistant' || m.status !== 'pending' || isLiveHere(m)) return;
+      if (Date.now() - beatOf(m) <= ORPHAN_MS) return;
+      markOrphan(m);
+      R.dirty.add(m.id);
+      dirty = true;
+    });
+    if (dirty) repaintSoon();
+  }
+  setInterval(checkOrphans, 15000);
+  /* 답하는 중에 창을 닫거나 새로고침하면 그 답을 '끊김'으로 저장 (다른 창이 계속 '답하는 중'으로 보지 않게) */
+  window.addEventListener('pagehide', () => {
+    const c = R.active;
+    if (!c) return;
+    const bot = findMsg(c.msgId);
+    if (!bot || bot.status !== 'pending') return;
+    bot.status = 'stopped'; bot.code = 'closed'; bot.actions = [];
+    bot.note = '창을 닫거나 새로고침해서 답이 끊겼어요.';
+    bot.changes = c.changes.slice();
+    delete bot.hb;
+    saveChat();
+  });
   window.addEventListener('storage', (e) => {
     if (e.key !== CHAT_KEY) return;
     const r = mergeChat(readStored(), false);
@@ -581,6 +696,7 @@
       '7. 앱 화면 링크를 마크다운으로 붙일 수 있어요: [할 일](#/checklist/<partId>/<itemId>), [지금 할 일](#/checklist/~focus), [예산](#/money/budget), [' + D.fmt(move) + ' 돈 흐름](#/money/flow), [업체 견적](#/stuff/quotes), [이사 견적](#/stuff/estimate), [짐 목록](#/stuff/inventory), [대시보드](#/dashboard), [가이드](#/guide/<partId>).',
       '8. 예산·부족을 물으면 예산 화면(#/money/budget)과 같은 순서로 답하세요: ① 꼭 드는 이사 비용 기준 ' + D.fmt(move) + ' 전후 현금 여유/부족(머리 숫자 — finance.cashVsEssential) ② 새로 사는 살림까지 ③ 선택·나중에까지 전부. "부족"을 한 숫자로 뭉뚱그리지 마세요. 중개보수·잔금·대출 상환·월세는 예산이 아니라 돈 흐름에 이미 들어 있어요.',
       '9. 지난 답에 "(이 답에서 앱에 이미 반영한 변경: …)"이 붙어 있으면 그 변경은 이미 저장됐어요 — 같은 변경을 다시 하지 마세요.',
+      '10. 대화의 마지막 사용자 메시지에만 답하세요. 지난 질문 뒤에 "(사용자가 이 요청을 중지했어요…)", "(…처리하지 못했어요…)", "(…끊겼어요…)" 같은 표시가 있으면 그 요청은 끝난 것이니 실행하거나 이어서 하지 마세요 — 사용자가 마지막 메시지에서 다시 해 달라고 할 때만 하세요.',
     ];
     return [
       '[역할]',
@@ -617,8 +733,10 @@
     paintMsg(ctx.call.msgId);
   }
   /* ---- 되돌리기용 기록: AI가 고친 것만 (할 일·짐은 하나씩, 예산·견적은 통째로) ----
-     touch = { items: [id...] } | { inventory: [id...] } | { section: 'finance' | 'estimate' }
-     pre   = { items: {id: 고치기 전 값 | null(새로 만듦)}, inventory: {...}, sections: {key: 값 | null(없었음)} } */
+     touch = { items: [id...] } | { inventory: [id...] } | { section: 'finance.budget' | 'estimate.quotes' }
+       (section 은 AI 도구가 실제로 고치는 부분만 — 견적·자금흐름 화면이 처음 열릴 때 조용히 채우는 기본값
+        (estimate.coef/inputs…)이 되돌리기를 막지 않게)
+     pre   = { items: {id: 고치기 전 값 | null(새로 만듦)}, inventory: {...}, sections: {path: 값 | null(없었음)} } */
   const NONE = null;
   function entityNow(kind, id) {
     const st = MV.store.get();
@@ -626,7 +744,39 @@
     const x = list.find((y) => y && y.id === id);
     return x === undefined ? NONE : x;
   }
-  function sectionNow(key) { const v = MV.store.get()[key]; return v === undefined ? NONE : v; }
+  function pathGet(st, path) {
+    let v = st;
+    for (const k of String(path).split('.')) {
+      if (!v || typeof v !== 'object') return NONE;
+      v = v[k];
+    }
+    return v === undefined ? NONE : v;
+  }
+  /** path 에 고치기 전 값을 되돌려 놓음 (NONE = 원래 없었음 → 지우고, 그래서 빈 상위 객체도 지움) */
+  function pathRestore(st, path, val) {
+    const keys = String(path).split('.');
+    if (val === NONE) {
+      const chain = [st];
+      for (let i = 0; i < keys.length - 1; i++) {
+        const nx = chain[i][keys[i]];
+        if (!nx || typeof nx !== 'object') return;
+        chain.push(nx);
+      }
+      delete chain[keys.length - 1][keys[keys.length - 1]];
+      for (let i = keys.length - 1; i > 0; i--) {
+        if (Object.keys(chain[i]).length) break;
+        delete chain[i - 1][keys[i - 1]];
+      }
+      return;
+    }
+    let o = st;
+    for (let i = 0; i < keys.length - 1; i++) {
+      if (!o[keys[i]] || typeof o[keys[i]] !== 'object' || Array.isArray(o[keys[i]])) o[keys[i]] = {};
+      o = o[keys[i]];
+    }
+    o[keys[keys.length - 1]] = MV.clone(val);
+  }
+  function sectionNow(path) { return pathGet(MV.store.get(), path); }
   function touchKeys(touch) {
     const out = [];
     if (touch.items) touch.items.forEach((id) => out.push(['items', id]));
@@ -741,7 +891,7 @@
     const v = lineValue(st, l);
     const g = groupOf(l);
     return {
-      id: l.id, label: l.label, amount: v, amountTxt: krw(v),
+      id: l.id, label: l.label, amount: v, amountTxt: amt(v),
       group: g, groupLabel: GROUP_LABEL[g],
       mode: AUTO_BUDGET.has(l.id) ? (l.auto !== false ? 'auto' : 'manual') : 'manual',
       included: l.on !== false, paid: !!l.paid, date: l.date || '', memo: clip(l.memo, 120),
@@ -798,7 +948,7 @@
   function quoteView(q, est) {
     const sb = sameBasis(q, est);
     const out = {
-      id: q.id, company: q.company || '', amount: num(q.amount) || null, amountTxt: num(q.amount) > 0 ? krw(q.amount) : '금액 없음',
+      id: q.id, company: q.company || '', amount: num(q.amount) || null, amountTxt: num(q.amount) > 0 ? amt(q.amount) : '금액 없음',
       vatIncluded: q.vatIncluded !== false,
       includes: { ladder: !!q.ladder, aircon: !!q.aircon, waste: !!q.waste, arrange: !!q.arrange },
       tons: q.tons == null ? null : num(q.tons), crew: q.crew == null ? null : num(q.crew), deposit: q.deposit == null ? null : num(q.deposit),
@@ -840,13 +990,13 @@
     const yes = (b) => (b ? '포함' : '미포함');
     const ok = (b) => (b ? '확인' : '미확인');
     if (has(input, 'company')) { const c = str(input.company, 60); if (!c) throw new Error('업체 이름이 비어 있어요.'); set('company', c, '업체'); }
-    if (has(input, 'amount')) set('amount', parseAmount(input.amount, '견적 금액', { min: 100000, max: 1e9 }), '금액', (v) => (v ? krw(v) : '-'));
+    if (has(input, 'amount')) set('amount', parseAmount(input.amount, '견적 금액', { min: 100000, max: 1e9 }), '금액', (v) => (v ? amt(v) : '-'));
     if (has(input, 'vatIncluded')) set('vatIncluded', toBool(input.vatIncluded), '부가세', (b) => (b === false ? '별도' : '포함'));
     [['ladder', '사다리차'], ['aircon', '에어컨 이전'], ['waste', '폐기물'], ['arrange', '정리 인력']].forEach(([k, l]) => { if (has(input, k)) set(k, toBool(input[k]), l, yes); });
     [['visitDone', '방문견적'], ['licenseChecked', '허가증'], ['insuranceChecked', '보험증권']].forEach(([k, l]) => { if (has(input, k)) set(k, toBool(input[k]), l, ok); });
     if (has(input, 'tons')) { const t = input.tons === null ? null : num(input.tons); if (t != null && (t <= 0 || t > 30)) throw new Error('차량 톤수는 0~30 사이로 주세요.'); set('tons', t, '차량', (v) => (v == null ? '-' : v + '톤')); }
     if (has(input, 'crew')) { const c = input.crew === null ? null : parseInt0(input.crew, '인원', 30); set('crew', c, '인원', (v) => (v == null ? '-' : v + '명')); }
-    if (has(input, 'deposit')) { const d = input.deposit === null ? null : parseAmount(input.deposit, '계약금', { max: 1e8 }); set('deposit', d, '계약금', (v) => (v == null ? '-' : krw(v))); }
+    if (has(input, 'deposit')) { const d = input.deposit === null ? null : parseAmount(input.deposit, '계약금', { max: 1e8 }); set('deposit', d, '계약금', (v) => (v == null ? '-' : amt(v))); }
     if (has(input, 'date')) { const d = parseDate(input.date, '견적 날짜'); set('date', d || '', '날짜', (v) => (v ? D.fmt(v) : '-')); }
     if (has(input, 'note')) set('note', str(input.note, 500), '메모', (v) => clip(v || '-', 30));
     return { p, diffs };
@@ -1083,7 +1233,7 @@
         const st = MV.store.get();
         return {
           lines: fin.budget.lines.filter((x) => x && typeof x === 'object').map((l) => lineView(st, l)),
-          refunds: (fin.budget.refunds || []).filter((x) => x && typeof x === 'object').map((r) => ({ id: r.id, label: r.label, amount: Math.round(num(r.amount)), amountTxt: krw(r.amount), received: !!r.got, memo: clip(r.memo, 120) })),
+          refunds: (fin.budget.refunds || []).filter((x) => x && typeof x === 'object').map((r) => ({ id: r.id, label: r.label, amount: Math.round(num(r.amount)), amountTxt: amt(r.amount), received: !!r.got, memo: clip(r.memo, 120) })),
           summary: budgetSummary(),
           note: '중개보수·잔금·보증금·대출 상환·11월 월세는 예산이 아니라 ' + D.fmt(D.moveDate()) + ' 돈 흐름(#/money/flow)에 들어 있어요 (leftoverAfterMoveDay 에 이미 반영).',
           link: '#/money/budget',
@@ -1114,12 +1264,12 @@
         if (has(a, 'amount') && has(a, 'auto') && toBool(a.auto)) throw new Error('amount 와 auto:true 는 함께 쓸 수 없어요.');
         if (has(a, 'amount')) {
           const v = parseAmount(a.amount, '금액');
-          if (wasAuto) { patch.auto = false; patch.amount = v; diffs.push('금액 ' + krw(before) + '(자동) → ' + krw(v) + '(직접 입력)'); }
-          else if (v !== Math.round(num(L.amount))) { patch.amount = v; diffs.push('금액 ' + krw(L.amount) + ' → ' + krw(v)); }
+          if (wasAuto) { patch.auto = false; patch.amount = v; diffs.push('금액 ' + amt(before) + '(자동) → ' + amt(v) + '(직접 입력)'); }
+          else if (v !== Math.round(num(L.amount))) { patch.amount = v; diffs.push('금액 ' + amt(L.amount) + ' → ' + amt(v)); }
         } else if (has(a, 'auto')) {
           if (found.refund || !AUTO_BUDGET.has(L.id)) throw new Error('“' + L.label + '”은(는) 자동 계산이 없는 항목이에요.');
           if (toBool(a.auto)) { if (L.auto === false) { patch.auto = true; diffs.push('자동 계산으로 되돌림'); } }
-          else if (wasAuto) { patch.auto = false; patch.amount = before; diffs.push('자동 → 직접 입력 (' + krw(before) + ' 그대로)'); }
+          else if (wasAuto) { patch.auto = false; patch.amount = before; diffs.push('자동 → 직접 입력 (' + amt(before) + ' 그대로)'); }
         }
         if (has(a, 'paid')) {
           const p = toBool(a.paid);
@@ -1151,7 +1301,7 @@
           const list = found.refund ? st.finance.budget.refunds : st.finance.budget.lines;
           const x = list.find((y) => y && y.id === id);
           if (x) Object.assign(x, patch);
-        }, { log: '🤖 예산 수정: ' + (patch.label || L.label) + ' (' + diffs.join(', ') + ')' }), { section: 'finance' });
+        }, { log: '🤖 예산 수정: ' + (patch.label || L.label) + ' (' + diffs.join(', ') + ')' }), { section: 'finance.budget' });
         const st1 = MV.store.get();
         const L1 = (found.refund ? st1.finance.budget.refunds : st1.finance.budget.lines).find((y) => y && y.id === id) || L;
         const after = found.refund ? Math.round(num(L1.amount)) : lineValue(st1, L1);
@@ -1188,9 +1338,9 @@
         mutate(ctx, () => MV.store.update((st) => {
           if (refund) { if (!Array.isArray(st.finance.budget.refunds)) st.finance.budget.refunds = []; st.finance.budget.refunds.push(line); }
           else st.finance.budget.lines.push(line);
-        }, { log: '🤖 예산 ' + (refund ? '들어올 돈' : '항목') + ' 추가: ' + label + ' ' + krw(amount) }), { section: 'finance' });
+        }, { log: '🤖 예산 ' + (refund ? '들어올 돈' : '항목') + ' 추가: ' + label + ' ' + amt(amount) }), { section: 'finance.budget' });
         const sum = budgetSummary();
-        record(ctx, '💰 예산 ' + (refund ? '들어올 돈' : '항목') + ' 추가: “' + clip(label, 30) + '” ' + krw(amount) + (group ? ' · ' + GROUP_LABEL[group] : '') + (paid ? (refund ? ' (받음)' : ' (냄)') : '') + (sum ? ' · 지금 꼭 드는 비용 기준 ' + verdict(sum.netEssential) : ''), '#/money/budget');
+        record(ctx, '💰 예산 ' + (refund ? '들어올 돈' : '항목') + ' 추가: “' + clip(label, 30) + '” ' + amt(amount) + (group ? ' · ' + GROUP_LABEL[group] : '') + (paid ? (refund ? ' (받음)' : ' (냄)') : '') + (sum ? ' · 지금 꼭 드는 비용 기준 ' + verdict(sum.netEssential) : ''), '#/money/budget');
         return { id: line.id, label, amount, kind: refund ? '들어올 돈' : '지출', group: group || undefined, groupLabel: group ? GROUP_LABEL[group] : undefined, summary: sum };
       },
     },
@@ -1228,11 +1378,11 @@
           if (!st.estimate || typeof st.estimate !== 'object' || Array.isArray(st.estimate)) st.estimate = {};
           if (!Array.isArray(st.estimate.quotes)) st.estimate.quotes = [];
           st.estimate.quotes.push(q);
-        }, { log: '🤖 업체 견적 추가: ' + q.company + ' ' + krw(q.amount) }), { section: 'estimate' });
+        }, { log: '🤖 업체 견적 추가: ' + q.company + ' ' + amt(q.amount) }), { section: 'estimate.quotes' });
         const est = modelEstimate();
         const v = quoteView(q, est);
         const inc = [['ladder', '사다리차'], ['aircon', '에어컨'], ['waste', '폐기물'], ['arrange', '정리']].filter(([k]) => q[k]).map(([, l]) => l);
-        record(ctx, '🚚 견적 추가: ' + q.company + ' ' + krw(q.amount) + (q.vatIncluded ? '' : ' (부가세 별도)') + (inc.length ? ' · ' + inc.join('·') + ' 포함' : '') + (v.vsModel ? ' · 모델 대비 ' + v.vsModel : ''), '#/stuff/quotes');
+        record(ctx, '🚚 견적 추가: ' + q.company + ' ' + amt(q.amount) + (q.vatIncluded ? '' : ' (부가세 별도)') + (inc.length ? ' · ' + inc.join('·') + ' 포함' : '') + (v.vsModel ? ' · 모델 대비 ' + v.vsModel : ''), '#/stuff/quotes');
         const n = quotesOf(MV.store.get()).filter((x) => num(x.amount) > 0).length;
         return { id: q.id, quote: v, model: modelView(est), quotesCount: n, hint: n >= 3 ? '견적이 3곳 이상이에요 — 업체 견적 화면에서 "견적으로 보정"을 누르면 모델과 예산이 맞춰져요.' : '방문견적 3곳을 받으면 비교가 정확해져요.' };
       },
@@ -1259,7 +1409,7 @@
         mutate(ctx, () => MV.store.update((st) => {
           const q = quotesOf(st).find((x) => x.id === q0.id);
           if (q) Object.assign(q, p);
-        }, { log: '🤖 업체 견적 수정: ' + (p.company || q0.company) + ' (' + diffs.join(', ') + ')' }), { section: 'estimate' });
+        }, { log: '🤖 업체 견적 수정: ' + (p.company || q0.company) + ' (' + diffs.join(', ') + ')' }), { section: 'estimate.quotes' });
         const q1 = quotesOf(MV.store.get()).find((x) => x.id === q0.id) || q0;
         const v = quoteView(q1, modelEstimate());
         record(ctx, '🚚 견적 “' + clip(q1.company, 24) + '” — ' + diffs.join(', '), '#/stuff/quotes');
@@ -1465,16 +1615,33 @@
   /** 대화의 마지막 메시지인지 ('다시 보내기'는 마지막 답에만 — 옛 요청을 다시 실행하지 않게) */
   function isLatest(m) { const l = R.chat.msgs[R.chat.msgs.length - 1]; return !!l && !!m && l.id === m.id; }
   const hasBody = (m) => !!(String(m.text || '').trim() || (m.changes && m.changes.length));
-  function turnText(m) {
+  /** 끊긴 답 뒤에 붙이는 표시 — 모델이 끊긴 요청을 다음 질문 때 이어서 하지 않게 (cont: 지금 그 답을 이어서 하라는 경우) */
+  function cutNote(m, cont) {
+    if (cont) return '(이 답은 여기서 끊겼어요)';
+    if (m.status === 'stopped' && m.code === 'cancelled') return '(사용자가 여기서 답을 중지했어요 — 남은 일은 하지 않았어요. 사용자가 다시 요청하기 전에는 이 요청을 이어서 하지 마세요.)';
+    if (m.status === 'stopped') return '(답이 여기서 끊겼어요(창을 닫았거나 새로고침) — 남은 일은 하지 않았어요. 사용자가 다시 요청하기 전에는 이 요청을 이어서 하지 마세요.)';
+    return '(이 답은 오류로 여기서 끊겼어요 — 남은 일은 하지 않았어요. 사용자가 다시 요청하기 전에는 이 요청을 이어서 하지 마세요.)';
+  }
+  function turnText(m, cont) {
     let t = String(m.text || '').trim();
-    if (m.role === 'assistant' && (m.status === 'error' || m.status === 'stopped')) t += (t ? '\n\n' : '') + '(이 답은 여기서 끊겼어요)';
+    if (m.role === 'assistant' && (m.status === 'error' || m.status === 'stopped')) t += (t ? '\n\n' : '') + cutNote(m, cont);
     if (m.role === 'assistant' && m.changes && m.changes.length) {
       t += '\n\n(이 답에서 앱에 이미 반영한 변경: ' + m.changes.map((c) => c.t).join(' / ') + (m.undo === 'used' ? ' — 이후 사용자가 이 변경을 모두 되돌림' : '') + ')';
     }
     if (t.length > TURN_CHARS) t = t.slice(0, TURN_CHARS) + '…(이하 생략)';
     return t;
   }
-  /** 같은 역할이 이어지면 한 턴으로 (끊긴 답 + 다시 보낸 답) */
+  /** 글도 변경도 없이 끝난(중지·오류·답 없음) 지난 질문 뒤에 넣는 답 자리 — 다음 질문과 한 덩어리로 합쳐져 실행되지 않게 */
+  function missingNote(replies) {
+    if (replies.some((m) => m.status === 'pending')) return '(이 질문은 다른 창에서 답하는 중이었어요 — 여기서는 결과를 몰라요. 이 요청은 실행하지 말고, 필요하면 도구로 지금 상태만 확인하세요.)';
+    const stopped = replies.find((m) => m.status === 'stopped');
+    if (stopped && stopped.code === 'cancelled') return '(사용자가 이 요청을 중지했어요 — 실행하지 않았고 앱 데이터도 바꾸지 않았어요. 사용자가 다시 요청하기 전에는 실행하지 마세요.)';
+    if (stopped) return '(이 요청은 답하는 중에 끊겨(창을 닫았거나 새로고침) 처리하지 않았고 앱 데이터도 바꾸지 않았어요. 사용자가 다시 요청하기 전에는 실행하지 마세요.)';
+    const err = replies.find((m) => m.status === 'error');
+    if (err) return '(이 요청은 오류로 처리하지 못했고 앱 데이터도 바꾸지 않았어요. 사용자가 다시 요청하기 전에는 실행하지 마세요.)';
+    return '(이 요청에는 답하지 않았어요 — 사용자가 다시 요청하기 전에는 실행하지 마세요.)';
+  }
+  /** 같은 역할이 이어지면 한 턴으로 (끊긴 답 + 다시 보낸 답) — 사용자 턴은 질문마다 답 자리가 있어 이어지지 않음 */
   function mergeTurns(turns) {
     const out = [];
     turns.forEach((t) => {
@@ -1485,13 +1652,29 @@
     return out;
   }
   const CONTINUE = '(앞 답이 중간에 끊겼어요. 위에 적힌 "앱에 이미 반영한 변경"은 저장돼 있으니 같은 변경을 다시 하지 마세요 — 필요하면 도구로 지금 상태를 확인하고, 남은 일만 한 뒤 처음 질문에 대한 답을 처음부터 끝까지 다시 써 주세요.)';
-  /** 보낼 턴: [지시 턴] + 최근 대화 (cont: 끊긴 답을 이어서 다시 묻는 경우 그 질문에 대한 앞선 답들) */
+  /** 보낼 턴: [지시 턴] + 최근 대화 (cont: 끊긴 답을 이어서 다시 묻는 경우 그 질문에 대한 앞선 답들)
+      지난 대화는 질문마다 묶어서: 질문 → 그 질문의 답(글·변경이 있는 것) 또는 '중지·오류로 처리 안 함' 표시.
+      (답 없이 끝난 질문이 다음 질문과 한 턴으로 합쳐져 중지한 요청이 실행되는 일을 막음) */
   function buildInput(userId, withTools, budget, cont) {
     const idx = R.chat.msgs.findIndex((m) => m.id === userId);
-    const hist = R.chat.msgs.slice(0, idx + 1).filter((m) => m.status !== 'pending' && hasBody(m));
-    let turns = hist.map((m) => ({ role: m.role, content: turnText(m) }));
+    const upto = R.chat.msgs.slice(0, idx + 1);
+    const groups = [];
+    let cur = null;
+    upto.forEach((m) => {
+      if (m.role === 'user') { cur = { q: m, a: [] }; groups.push(cur); return; }
+      const g = (m.replyTo && groups.find((x) => x.q.id === m.replyTo)) || (m.replyTo ? null : cur);
+      if (g) g.a.push(m);
+    });
+    let turns = [];
+    groups.forEach((g) => {
+      turns.push({ role: 'user', content: turnText(g.q) || '(빈 질문)' });
+      if (g.q.id === userId) return;   // 지금 질문 (이어서 묻기면 아래에서 앞선 답을 붙임)
+      const body = g.a.filter((m) => m.status !== 'pending' && hasBody(m));
+      if (body.length) body.forEach((m) => turns.push({ role: 'assistant', content: turnText(m) }));
+      else turns.push({ role: 'assistant', content: missingNote(g.a) });
+    });
     if (cont && cont.length) {
-      turns = turns.concat(cont.map((m) => ({ role: 'assistant', content: turnText(m) })), [{ role: 'user', content: CONTINUE }]);
+      turns = turns.concat(cont.map((m) => ({ role: 'assistant', content: turnText(m, true) })), [{ role: 'user', content: CONTINUE }]);
     }
     let tail = mergeTurns(turns).slice(-SEND_TURNS);
     const trimHead = () => { while (tail.length > 1 && tail[0].role !== 'user') tail.shift(); };
@@ -1519,7 +1702,7 @@
       userMsg = { id: MV.uid('am'), role: 'user', text, at: MV.nowISO() };
       pushMsg(userMsg);
     }
-    const bot = { id: MV.uid('am'), role: 'assistant', text: '', at: MV.nowISO(), status: 'pending', replyTo: userMsg.id, changes: [] };
+    const bot = { id: MV.uid('am'), role: 'assistant', text: '', at: MV.nowISO(), status: 'pending', replyTo: userMsg.id, changes: [], hb: Date.now() };
     if (opts.noTools || R.toolsOff) bot.noTools = true;
     if (opts.retryOf) {
       // 그 질문에 대한 앞선 답들 바로 뒤에 붙임 (실패한 빈 답은 이미 지웠음)
@@ -1531,10 +1714,12 @@
       if (R.chat.msgs.length > KEEP_MSGS) R.chat.msgs.splice(0, R.chat.msgs.length - KEEP_MSGS);
     } else pushMsg(bot);
     const call = {
-      id: MV.uid('call'), ctl: new AbortController(), msgId: bot.id, changes: bot.changes, tools: [], foreign: false,
-      pre: { items: {}, inventory: {}, sections: {} }, post: {}, status: null, gotText: false,
+      id: MV.uid('call'), ctl: new AbortController(), msgId: bot.id, userId: userMsg.id, changes: bot.changes, tools: [], foreign: false,
+      pre: { items: {}, inventory: {}, sections: {} }, post: {}, status: null, gotText: false, beat: null,
     };
     R.active = call;
+    // 다른 창이 이 답을 '답하는 중'으로 알 수 있게 살아 있음 표시를 저장 (끊기면 그 창이 '끊김'으로 바꿈)
+    call.beat = setInterval(() => { if (R.active !== call) return; bot.hb = Date.now(); saveChat(); }, BEAT_MS);
     saveChat();
     if (opts.retryOf) paintAll(true); else appendMsgs([userMsg, bot]);
     updateComposer();
@@ -1626,6 +1811,8 @@
 
   function finalize(call, bot, finished) {
     if (R.active === call) R.active = null;
+    if (call.beat) { clearInterval(call.beat); call.beat = null; }
+    delete bot.hb;
     call.status = null;
     bot.changes = call.changes.slice();
     bot.tools = call.tools.slice();
@@ -1723,10 +1910,7 @@
             else list.push(MV.clone(old));
           });
         });
-        Object.keys(pre.sections || {}).forEach((key) => {
-          const old = pre.sections[key];
-          if (old === NONE) delete st[key]; else st[key] = MV.clone(old);
-        });
+        Object.keys(pre.sections || {}).forEach((path) => pathRestore(st, path, pre.sections[path]));
       }, { log: '🤖 AI 변경 되돌리기 (' + n + '건)' });
       return true;
     } catch (e) { console.error('[agent] undo', e); return false; }
@@ -1770,12 +1954,18 @@
       const bot = c && c.changes.length ? findMsg(c.msgId) : null;
       return bot ? [bot.replyTo, bot.id] : [];
     };
+    /* 다른 창에서 지금 답하는 중인 질문과 답은 그 창에서 끝날 수 있게 남겨 둠 (그 창의 변경 목록·되돌리기를 지키게) */
+    const elsewhere = () => {
+      const ids = [];
+      R.chat.msgs.forEach((m) => { if (foreignLive(m)) { ids.push(m.id); if (m.replyTo) ids.push(m.replyTo); } });
+      return ids;
+    };
     const keepAtAsk = liveKeep();   // 확인 창이 떠 있는 동안 답이 끝나도 약속대로 남김
     const run = () => {
-      const keep = new Set(liveKeep().concat(keepAtAsk));
       stop();
       saveChat();   // 다른 탭에서 온 메시지까지 합친 뒤 지움
-      R.chat.msgs.forEach((m) => { if (!keep.has(m.id)) R.removed.add(m.id); });
+      const keep = new Set(liveKeep().concat(keepAtAsk, elsewhere()));
+      R.chat.msgs.forEach((m) => { if (!keep.has(m.id)) { R.removed.add(m.id); R.rescued.delete(m.id); } });
       R.chat.msgs = R.chat.msgs.filter((m) => keep.has(m.id));
       Array.from(R.undos.keys()).forEach((id) => { if (!keep.has(id)) R.undos.delete(id); });
       saveChat();
@@ -1787,19 +1977,26 @@
     let extra = '';
     if (call) extra = call.changes.length ? ' 지금 답하는 중인 질문은 멈춰요. 그 답이 이미 바꾼 ' + call.changes.length + '건은 되돌릴 수 있게 그 질문과 답만 남겨 둬요.' : ' 지금 답하는 중인 질문도 멈춰요.';
     else if (R.undos.size) extra = ' 답 아래 ‘변경 되돌리기’도 더는 할 수 없어요 (바뀐 데이터는 그대로예요).';
+    if (elsewhere().length) extra += ' 다른 창에서 지금 답하는 중인 질문과 답은 그 창에서 끝날 수 있게 남겨 둬요.';
     MV.ui.confirm('대화 기록을 모두 지울까요? 앱 데이터(체크·예산·견적)는 그대로예요.' + extra, { okLabel: '대화 지우기', danger: true }).then((ok) => { if (ok) run(); });
   }
 
   /* ======================= 안전한 마크다운 ======================= */
   const LIST_RE = /^(\s*)([-*•+]|\d{1,3}[.)])\s+(.*)$/;
   /* **굵게**(안에 *기울임* 가능) · `코드` · [글](주소 — 괄호 한 겹 허용) · 맨 주소 · #/앱 링크 · ~~취소~~ · *기울임* */
-  const INLINE_RE = /\*\*((?:[^*\n]|\*(?!\*))+?)\*\*|`([^`\n]+)`|\[([^\]\n]+)\]\(\s*((?:[^()\s]|\([^()\s]*\))+)\s*\)|(https?:\/\/[^\s<>"'`]+)|(#\/[A-Za-z0-9_~%\-/.]+)|~~([^~\n]+)~~|\*([^*\s][^*\n]*?)\*/g;
+  /* 맨 주소는 한글·한자·전각 문자에서 끝남 ('https://www.gov.kr에서' → 주소는 https://www.gov.kr) */
+  const INLINE_RE = /\*\*((?:[^*\n]|\*(?!\*))+?)\*\*|`([^`\n]+)`|\[([^\]\n]+)\]\(\s*((?:[^()\s]|\([^()\s]*\))+)\s*\)|(https?:\/\/[^\s<>"'`\u1100-\u11FF\u2E80-\u303F\u3130-\u318F\u3200-\u9FFF\uA960-\uA97F\uAC00-\uD7FF\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFFEF]+)|(#\/[A-Za-z0-9_~%\-/.]+)|~~([^~\n]+)~~|\*([^*\s][^*\n]*?)\*/g;
   /* '11. 3.(화) 이사 당일' 같은 날짜 줄은 번호 목록이 아님 */
   const DATE_LINE = /^\s*(1[0-2]|0?[1-9])\.\s*([12]\d|3[01]|0?[1-9])\.(?!\d)/;
   const isListLine = (line) => LIST_RE.test(line) && !/^\s*\*\*/.test(line) && !DATE_LINE.test(line);
-  /** 맨 주소 끝의 문장부호는 빼고, 닫는 괄호는 짝이 맞을 때만 주소에 포함 */
+  /** 맨 주소 끝의 문장부호는 빼고, 닫는 괄호는 짝이 맞을 때만 주소에 포함 ('정부24(https://www.gov.kr)에서' → 짝 없는 ')' 앞에서 끊음) */
   function trimUrl(u) {
     let s = u;
+    let depth = 0;
+    for (let i = 0; i < s.length; i++) {
+      if (s[i] === '(') depth++;
+      else if (s[i] === ')') { if (depth === 0) { s = s.slice(0, i); break; } depth--; }
+    }
     for (;;) {
       const ch = s.slice(-1);
       if (/[.,;:!?'"。、\]}]/.test(ch)) { s = s.slice(0, -1); continue; }
@@ -1941,6 +2138,7 @@
       const start = m.index;
       let node = null;
       let consumed = m[0];
+      let lead = 0;   // 앞에서 같이 지울 글자 수 ('<주소>' 의 '<')
       if (m[1] != null) {
         node = el('strong');
         if (depth < 2) inline(node, m[1], depth + 1); else node.textContent = m[1];
@@ -1949,7 +2147,9 @@
       else if (m[5] != null) {
         const url = trimUrl(m[5]);
         consumed = url;
-        re.lastIndex = start + url.length;
+        // '<https://…>' 는 꺾쇠까지 링크 표시로 봄
+        if (start > last && s[start - 1] === '<' && s[start + url.length] === '>') { lead = 1; consumed = url + '>'; }
+        re.lastIndex = start + consumed.length;
         node = linkNode(url.length > 64 ? url.slice(0, 61) + '…' : url, url);
       } else if (m[6] != null) {
         const prev = start ? s[start - 1] : '';
@@ -1966,7 +2166,7 @@
         if (depth < 2) inline(node, m[8], depth + 1); else node.textContent = m[8];
       }
       if (!node) continue;
-      if (start > last) parent.appendChild(document.createTextNode(s.slice(last, start)));
+      if (start - lead > last) parent.appendChild(document.createTextNode(s.slice(last, start - lead)));
       parent.appendChild(node);
       last = start + consumed.length;
     }
@@ -2035,7 +2235,7 @@
     if (bubble.childNodes.length) node.appendChild(bubble);
     if (pending) {
       const call = R.active && R.active.msgId === m.id ? R.active : null;
-      node.appendChild(el('div', { class: 'ag-status', 'aria-live': 'polite' }, call && call.status ? '🔧 ' + call.status : (call && call.gotText ? '✍️ 쓰는 중…' : '')));
+      node.appendChild(el('div', { class: 'ag-status', 'aria-live': 'polite' }, call ? (call.status ? '🔧 ' + call.status : (call.gotText ? '✍️ 쓰는 중…' : '')) : '🖥 다른 창에서 답하는 중…'));
     }
     if (m.note && m.status !== 'pending') {
       const bad = m.status === 'error' && (m.code === 'refused' || HIDE_CODES.has(m.code) || m.code === 'session_expired');
@@ -2296,6 +2496,9 @@
     };
     window.addEventListener('resize', onResize, { passive: true });
     ctx.onCleanup(() => { window.removeEventListener('scroll', track); window.removeEventListener('resize', onResize); });
+    // 다른 화면에서 (change 이벤트 없이) 바뀐 것이 있을 수 있으니 되돌리기·끊긴 답 상태를 먼저 다시 확인
+    checkUndo();
+    checkOrphans();
     paintAll(true);
     if (!blocked) {
       updateComposer();
@@ -2342,16 +2545,17 @@
   /* ======================= 스타일 ======================= */
   const STYLE = `
 .view[data-view="agent"] { padding-bottom: 16px; }
+.ag, .ag-off { --ag-mute: color-mix(in srgb, var(--ink-3) 76%, var(--ink)); }
 .ag { --ag-h: calc(100vh - var(--topbar-h) - 36px); height: var(--ag-h); min-height: 460px; max-width: 960px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 @supports (height: 100dvh) { .ag { --ag-h: calc(100dvh - var(--topbar-h) - 36px); } }
 .ag-head { display: flex; align-items: center; gap: 4px 10px; flex-wrap: wrap; flex: none; }
 .ag-title { display: flex; align-items: baseline; gap: 4px 12px; flex-wrap: wrap; min-width: 0; flex: 1 1 auto; }
 .ag-title h1 { margin: 0; font-size: 1.45rem; white-space: nowrap; }
-.ag-sub { color: var(--ink-3); font-size: .88rem; }
+.ag-sub { color: var(--ag-mute); font-size: .88rem; }
 .ag-tools { display: flex; gap: 4px; flex: none; margin-left: auto; }
 .ag-tools .btn { min-height: 36px; }
 .ag-quick.ag-on { background: var(--think-bg); color: var(--think); border-color: color-mix(in srgb, var(--think) 30%, transparent); }
-.ag-note { flex-basis: 100%; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: .76rem; color: var(--ink-3); }
+.ag-note { flex-basis: 100%; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: .76rem; color: var(--ag-mute); }
 .ag-log { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
   display: flex; flex-direction: column; gap: 14px; padding: 16px; background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius); }
 .ag-log:focus-visible { outline-offset: -3px; }
@@ -2361,7 +2565,7 @@
 .ag-bubble { padding: 10px 14px; border-radius: 18px; line-height: 1.62; font-size: .95rem; min-width: 0; overflow-wrap: anywhere; }
 .ag-user .ag-bubble { background: var(--brand-bg); color: var(--ink); border: 1px solid color-mix(in srgb, var(--brand) 22%, var(--line)); border-bottom-right-radius: 6px; white-space: pre-wrap; }
 .ag-bot .ag-bubble { background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-bottom-left-radius: 6px; }
-.ag-meta { display: flex; gap: 4px; flex-wrap: wrap; padding: 0 8px; font-size: .72rem; color: var(--ink-3); }
+.ag-meta { display: flex; gap: 4px; flex-wrap: wrap; padding: 0 8px; font-size: .72rem; color: var(--ag-mute); }
 .ag-md > :first-child { margin-top: 0; }
 .ag-md > :last-child { margin-bottom: 0; }
 .ag-md p { margin: 0 0 .6em; }
@@ -2386,7 +2590,7 @@
 .ag-table table.tbl { font-size: .84rem; width: auto; min-width: 100%; }
 .ag-table table.tbl th, .ag-table table.tbl td { padding: 6px 9px; overflow-wrap: normal; word-break: keep-all; }
 .ag-table table.tbl td:first-child { min-width: 4.5em; }
-.ag-thinking { display: inline-flex; align-items: center; gap: 8px; color: var(--ink-3); font-size: .92rem; }
+.ag-thinking { display: inline-flex; align-items: center; gap: 8px; color: var(--ag-mute); font-size: .92rem; }
 .ag-dots { display: inline-flex; gap: 3px; }
 .ag-dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--ink-3); animation: ag-blink 1.2s infinite ease-in-out both; }
 .ag-dots i:nth-child(2) { animation-delay: .15s; }
@@ -2400,7 +2604,8 @@
 .ag-acts { margin-top: 8px; }
 .ag-acts .btn { min-height: 36px; }
 .ag-changes { border: 1px solid color-mix(in srgb, var(--good) 35%, var(--line)); background: var(--good-bg); border-radius: 14px; padding: 9px 12px; font-size: .86rem; }
-.ag-changes-h { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-weight: 800; color: var(--good); }
+.ag-changes-h { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-weight: 800; color: color-mix(in srgb, var(--good) 76%, var(--ink)); }
+.ag-changes .muted { color: var(--ag-mute); }
 .ag-changes ul { margin: 4px 0 0; padding-left: 1.2em; color: var(--ink); }
 .ag-changes li + li { margin-top: 2px; }
 .ag-changes .ag-undo { margin-top: 8px; min-height: 36px; }
@@ -2430,10 +2635,10 @@ body:has(.ag-composer) .toast-wrap { bottom: calc(var(--bottom-h) + 104px + env(
 .ag-composer { flex: none; position: sticky; bottom: calc(var(--bottom-h) + 8px + env(safe-area-inset-bottom)); z-index: 5; display: flex; align-items: flex-end; gap: 8px; padding: 6px 6px 6px 14px; border: 1px solid var(--line-2); border-radius: 18px; background: var(--bg-2); box-shadow: var(--shadow); }
 .ag-composer:focus-within { border-color: var(--brand); box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 18%, transparent); }
 .ag-input { flex: 1 1 auto; min-width: 0; min-height: 42px; max-height: 168px; padding: 9px 0; border: 0; outline: none; resize: none; background: transparent; color: var(--ink); font: inherit; font-size: 1rem; line-height: 1.5; }
-.ag-input::placeholder { color: var(--ink-3); }
+.ag-input::placeholder { color: var(--ag-mute); }
 .ag-send { flex: none; min-height: 42px; min-width: 76px; border-radius: 13px; }
 .ag-send.ag-stop { background: var(--bad); border-color: var(--bad); color: var(--on-bad); }
-.ag-hint { flex: none; margin-top: -6px; text-align: right; font-size: .72rem; color: var(--ink-3); }
+.ag-hint { flex: none; margin-top: -6px; text-align: right; font-size: .72rem; color: var(--ag-mute); }
 .ag-blockcard { flex: none; margin: 0; }
 .ag-blockcard h3 { margin-bottom: 4px; }
 .ag-off { max-width: 760px; margin: 0 auto; }
