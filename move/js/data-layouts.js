@@ -9,8 +9,11 @@
    - 처음 여는 기기: core.js freshState 가 MV.seedLayouts 를 그대로 씀.
    - 이미 쓰던 기록: 이 파일 끝에서 MV.seed.migrations 에 { to: 8, layouts } 를 더함 (core migrateSeed 의 layouts 규칙)
        · move: 그 배치가 아직 v7 기본 자리(from)에 있을 때만 새 자리(set)로 — 사용자가 옮긴 배치는 그대로
+       · move 도 새 자리에 다른 배치가 있으면 옮기지 않고 활동 기록에 남겨요
        · add: 같은 id 배치가 없고, 그 짐의 배치 수가 개수(qty)보다 적고, 다른 배치와 겹치지 않을 때만
               + clear(그 짐의 쓰임 공간 앞, 방 안으로 자름)에 다른 짐이 없고, 이미 있는 초안 배치의 clear 를 막지 않을 때만
+              + needs(의자 → 식탁): 함께 놓일 배치가 초안 자리에 있을 때만
+       · fixFront: v8 전 배치의 rot 0·90 은 '돌렸나'만 뜻했어요 → 아래 벽에 등을 댄 0 은 180, 왼쪽 벽에 등을 댄 90 은 270 으로
        · ifInv: 짐 크기가 v8 기본값일 때만 (사용자가 크기를 고친 짐은 좌표가 안 맞아 건드리지 않음)
        배치 id 가 고정이라 두 기기가 같이 올려도 같은 배치가 두 번 생기지 않아요.
    - invId 는 짐 목록(data-seed.js inventory)의 id, 크기·쓰임 공간(use)도 짐 목록(version 8)을 따릅니다.
@@ -129,15 +132,19 @@
     const r1 = (v) => Math.round(v * 10) / 10;
     return { x: r1(z.x), y: r1(z.y), w: r1(z.w), h: r1(z.h) };
   }
+  /* 함께 놓여야 하는 배치: 의자는 식탁(pl-new-dining)이 초안 자리에 있을 때만 더해요 (식탁 없이 의자만 거실에 떠 있지 않게) */
+  const NEEDS = { 'pl-new-chair-1': 'pl-new-dining', 'pl-new-chair-2': 'pl-new-dining', 'pl-new-chair-3': 'pl-new-dining', 'pl-new-chair-4': 'pl-new-dining' };
   function rules(list, key) {
-    const out = { add: [], move: {} };
+    // fixFront: v8 전에 놓은 배치(초안이 옮기지 않은 것)의 rot 0·90 을 등을 댄 벽을 보고 정면으로 한 번 정해요 (core frontFromWall)
+    const out = { add: [], move: {}, fixFront: true };
     list.forEach(([p, size]) => {
       const was = V7_AT[key][p.id];
+      const clear = clearOf(p, size, key);
       if (was) {
-        if (was.x !== p.x || was.y !== p.y || was.rot !== p.rot) out.move[p.id] = { from: was, set: { x: p.x, y: p.y, rot: p.rot }, ifInv: size || undefined };
+        // move 도 새 자리에 다른 배치가 있으면 옮기지 않아요 (core). clear 는 뒤에 더하는 초안이 이 짐의 앞을 막지 않게 하는 데 써요
+        if (was.x !== p.x || was.y !== p.y || was.rot !== p.rot) out.move[p.id] = Object.assign({ from: was, set: { x: p.x, y: p.y, rot: p.rot }, ifInv: size || undefined }, clear ? { clear } : {});
       } else if (key === 'new') {
-        const clear = clearOf(p, size, key);
-        out.add.push(Object.assign({}, p, size ? { ifInv: size } : {}, clear ? { clear } : {}));
+        out.add.push(Object.assign({}, p, size ? { ifInv: size } : {}, clear ? { clear } : {}, NEEDS[p.id] ? { needs: NEEDS[p.id] } : {}));
       }
     });
     return out;

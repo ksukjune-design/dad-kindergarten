@@ -1241,6 +1241,7 @@
       net: c.net,
       netWithRefunds: c.net + c.budget.refundsPending,   // 받기 전 들어올 돈까지 (받은 돈은 net 에 이미 들어 있음)
       refundsGot: c.budget.refundsGot,
+      refundsPending: c.budget.refundsPending,         // 아직 받기 전인 들어올 돈 (남는 돈 계산에 안 들어 있음)
       essentialUnpaid: c.budget.groups.essential.unpaid,
       purchaseUnpaid: c.budget.groups.purchase.unpaid,
       optionalUnpaid: c.budget.groups.optional.unpaid,

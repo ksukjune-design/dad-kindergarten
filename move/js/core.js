@@ -335,10 +335,52 @@
     const h = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
     return w > 1 && h > 1;
   }
+  /** 이 짐(invId)의 배치가 개수(qty)보다 많으면 남는 것을 모든 도면에서 빼요 → 뺀 수.
+      v7 기본 배치(pl-new-*·pl-old-*)가 아닌 것부터, 나중에 놓은 것(배열 뒤)부터 */
+  function trimPlacements(state, iid, qty) {
+    if (!state.layouts || typeof state.layouts !== 'object') return 0;
+    let cut = 0;
+    Object.keys(state.layouts).forEach((lk) => {
+      const L = state.layouts[lk];
+      if (!L || !Array.isArray(L.placements)) return;
+      const mine = L.placements.filter((p) => p && p.invId === iid);
+      let extra = mine.length - Math.max(0, qty);
+      if (extra <= 0) return;
+      const isSeedPl = (p) => /^pl-(new|old)-/.test(String(p.id || ''));
+      const order = mine.slice().reverse().sort((a, b) => (isSeedPl(a) ? 1 : 0) - (isSeedPl(b) ? 1 : 0));
+      const drop = new Set();
+      order.forEach((p) => { if (extra > 0) { drop.add(p); extra--; } });
+      L.placements = L.placements.filter((p) => !drop.has(p));
+      cut += drop.size;
+    });
+    return cut;
+  }
+  /** 정면(rot) 뜻이 생기기 전(v8 전) 배치: 등을 댄 벽을 보고 정면을 한 번만 정해요 (0↔180, 90↔270 — 바닥 크기·좌표는 그대로).
+      v7 까지 rot 0·90 은 '돌렸나'만 뜻했어요. v8 은 0 = 정면 아래 · 90 = 왼쪽이라, 아래 벽에 등을 댄 0 이나
+      왼쪽 벽에 등을 댄 90 은 '정면이 벽을 본다'로 잘못 읽혀요 → 그 벽에서 15cm 안이고 맞은편 벽은 더 멀면(20cm 넘게) 뒤집어요 */
+  function frontFromWall(p, it, rooms) {
+    const rot = plRot(p.rot);
+    if (rot !== 0 && rot !== 90) return false;
+    const r = rectOfPl(p, it);
+    if (!r || !Array.isArray(rooms)) return false;
+    const ok = (m) => m && isFinite(+m.x) && isFinite(+m.y) && +m.w > 0 && +m.h > 0;
+    const inside = (m) => r.x >= m.x - 1 && r.y >= m.y - 1 && r.x + r.w <= m.x + m.w + 1 && r.y + r.h <= m.y + m.h + 1;
+    const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
+    const rm = rooms.find((m) => ok(m) && inside(m)) || rooms.find((m) => ok(m) && cx >= m.x && cx <= m.x + m.w && cy >= m.y && cy <= m.y + m.h);
+    if (!rm) return false;
+    const gT = r.y - rm.y, gB = rm.y + rm.h - r.y - r.h, gL = r.x - rm.x, gR = rm.x + rm.w - r.x - r.w;
+    // 15cm: v8 에서 크기가 줄어든 짐(예: 퀸 침대 210 → 라지킹 200)은 왼쪽 위 기준이라 벽에서 조금 떨어져 보여요
+    if (rot === 0 && gB <= 15 && gT > gB + 20) { p.rot = 180; return true; }
+    if (rot === 90 && gL <= 15 && gR > gL + 20) { p.rot = 270; return true; }
+    return false;
+  }
   // 예전 버전 기록을 새 기본값에 맞추기 (data-seed.js 의 MV.seed.migrations)
   function migrateSeed(state, seed) {
     const from = state.seedVersion || 0;
     let n = 0;
+    // 활동 기록에 한 번만 남길 안내 (key 로 두 기기가 같이 맞춰도 한 줄 — sync.js mergeActivity)
+    const notes = [];
+    const noteOnce = (key, text) => { if (!state.activity.some((a) => a && a.key === key) && !notes.some((x) => x.key === key)) notes.push({ at: MV.nowISO(), key, text }); };
     // 직전 버전 기본 글의 지문 (migrations 의 itemsFrom: { id: 지문 }) — 담당만 바꾼 항목도 '글은 그대로'로 봄
     const prev = new Map();
     (seed.migrations || []).forEach((m) => {
@@ -436,7 +478,16 @@
         const set = (rule.set && typeof rule.set === 'object') ? rule.set : null;
         const prevV = (rule.prev && typeof rule.prev === 'object') ? rule.prev : null;
         const keys = Object.keys(f);
-        if (!it || !sp || !keys.length || !keys.every((k) => JSON.stringify(cur(it, k)) === JSON.stringify(f[k]))) return;
+        if (!it || !sp || !keys.length) return;
+        if (!keys.every((k) => JSON.stringify(cur(it, k)) === JSON.stringify(f[k]))) {
+          // 사용자가 고쳐서 바꾸지 않은 짐: keptNote 가 있으면 메모 앞에 한 번만 (예: 짐을 둘로 나눠 새 짐이 더해진 경우 — 두 번 세지 않게 안내)
+          const kn = typeof rule.keptNote === 'string' ? rule.keptNote : '';
+          const note = String(it.note || '');
+          // (이미 새 값인 짐 — 이 버전으로 맞춘 뒤 다시 돌 때 등 — 은 빼요)
+          const isNew = keys.every((k) => sameVal(cur(it, k), set && Object.prototype.hasOwnProperty.call(set, k) ? set[k] : (sp[k] === undefined ? invDef[k] : sp[k])));
+          if (kn && it.seed && !isNew && note.indexOf(kn.trim()) < 0) { it.note = kn + note; n++; }
+          return;
+        }
         const target = {};
         keys.forEach((k) => { target[k] = sp[k] === undefined ? invDef[k] : sp[k]; });
         if (set) {
@@ -449,8 +500,18 @@
         }
         const tk = Object.keys(target);
         if (tk.every((k) => JSON.stringify(cur(it, k)) === JSON.stringify(target[k]))) return;
+        const qty0 = Math.round(+cur(it, 'qty') || 0);
         tk.forEach((k) => { it[k] = MV.clone(target[k]); });
         n++;
+        // 개수를 줄였으면(예: 책장 5단 3 → 1) 도면에 남는 배치도 빼요 — 없는 책장이 그려지거나 '수량보다 많이 놓였어요'가 뜨지 않게
+        const qty1 = Math.round(+it.qty || 0);
+        if (qty1 < qty0) {
+          const cut = trimPlacements(state, iid, qty1);
+          if (cut) {
+            n += cut;
+            noteOnce('seed-v' + m.to + '-trim-' + iid, '「' + String(it.name || iid).slice(0, 30) + '」 개수를 ' + qty0 + '개 → ' + qty1 + '개로 맞추며 도면에서 남는 배치 ' + cut + '개를 뺐어요.');
+          }
+        }
       });
       // 도면 기본 배치가 바뀐 경우: { layouts: { new: { add: [placement…], move: { 배치id: { from:{x,y,rot}, set:{x,y,rot}, ifInv? } } } } }
       //  · rot 는 정면 방향 0·90·180·270 (그 밖의 값은 0)
@@ -474,18 +535,59 @@
         const same = (p, f) => ['x', 'y', 'rot'].every((k) => f[k] === undefined || Math.abs((+p[k] || 0) - (+f[k] || 0)) < 0.05);
         const clearAt = {};
         (rule.add || []).forEach((pl) => { if (pl && pl.id && pl.clear) clearAt[pl.id] = { at: { x: pl.x, y: pl.y, rot: pl.rot }, clear: pl.clear }; });
+        Object.keys(rule.move || {}).forEach((pid) => { const mv = rule.move[pid]; if (mv && mv.clear && mv.set) clearAt[pid] = { at: mv.set, clear: mv.clear }; });
+        const addIds = new Set((rule.add || []).map((pl) => pl && pl.id).filter(Boolean));
+        const before = new Set(pls.filter((x) => x && x.id).map((x) => x.id));   // 이 버전으로 맞추기 전부터 있던 배치
+        const moved = new Set();
+        const kept = [];
+        // move: 옮길 후보(아직 v7 기본 자리)를 먼저 모두 고르고, 후보끼리는 '옮긴 뒤 자리'로 비교해요 (순서와 상관없이 같은 답)
+        let cand = [];
         Object.keys(rule.move || {}).forEach((pid) => {
           const mv = rule.move[pid] || {};
           const p = pls.find((x) => x && x.id === pid);
           const it = p && invOf(p.invId);
-          if (!p || !it || !mv.from || !mv.set || !same(p, mv.from) || same(p, mv.set) || !sizeOk(it, mv.ifInv)) return;
+          if (!p || !it || !mv.from || !mv.set || !same(p, mv.from) || !sizeOk(it, mv.ifInv)) return;
+          if (same(p, mv.set)) { moved.add(pid); return; }
+          const np = { x: mv.set.x !== undefined ? mv.set.x : p.x, y: mv.set.y !== undefined ? mv.set.y : p.y, rot: mv.set.rot !== undefined ? mv.set.rot : p.rot };
+          cand.push({ p, it, mv, np });
+        });
+        // 새 자리에 다른 배치가 있으면(사용자가 그 자리에 짐을 놓음) 옮기지 않아요 (쓰임 공간 앞은 보지 않음 — 옛 자리가 더 나쁠 수 있어서,
+        // 그 경우는 도면 점검이 알려요).
+        // 못 옮긴 후보는 제자리에 남으니, 남은 후보를 다시 봐요 (바뀌는 것이 없을 때까지)
+        for (let round = 0; round < 8; round++) {
+          const at = new Map(cand.map((c) => [c.p, c.np]));
+          const rectNow = (x) => rectOfPl(at.get(x) || x, invOf(x.invId));
+          const stuck = cand.filter((c) => {
+            const r = rectOfPl(c.np, c.it);
+            const others = pls.filter((x) => x && x !== c.p);
+            return !!r && others.some((x) => { const o = rectNow(x); return o && rectHit(r, o); });
+          });
+          if (!stuck.length) break;
+          stuck.forEach((c) => kept.push(String(c.it.name || c.p.invId).slice(0, 24)));
+          cand = cand.filter((c) => stuck.indexOf(c) < 0);
+        }
+        cand.forEach(({ p, mv }) => {
           ['x', 'y', 'rot'].forEach((k) => { if (mv.set[k] !== undefined) p[k] = k === 'rot' ? plRot(mv.set[k]) : mv.set[k]; });
+          moved.add(p.id);
           n++;
         });
+        if (kept.length) noteOnce('seed-v' + m.to + '-keep-' + key, '도면 초안 자리에 다른 짐이 있어 옮기지 않았어요(지금 자리 그대로): ' + kept.join(', ') + '.');
+        // 정면 뜻이 생기기 전에 놓은 배치(초안이 옮기지 않은 것)는 등을 댄 벽을 보고 정면을 한 번 정해요
+        if (rule.fixFront) {
+          const plan = MV.plans && MV.plans[key];
+          const rooms = plan && Array.isArray(plan.rooms) ? plan.rooms : null;
+          if (rooms) pls.forEach((p) => { if (p && before.has(p.id) && !moved.has(p.id) && !addIds.has(p.id) && frontFromWall(p, invOf(p.invId), rooms)) n++; });
+        }
         (rule.add || []).forEach((pl) => {
           if (!pl || !pl.id || pls.some((x) => x && x.id === pl.id)) return;
           const it = invOf(pl.invId);
           if (!it || !sizeOk(it, pl.ifInv)) return;
+          // needs: 함께 놓이는 배치(예: 의자 → 식탁)가 그 초안 자리에 있을 때만 (식탁 없이 의자만 떠 있지 않게)
+          if (pl.needs) {
+            const t = pls.find((x) => x && x.id === pl.needs);
+            const at = (rule.add || []).find((x) => x && x.id === pl.needs);
+            if (!t || (at && !same(t, at))) return;
+          }
           const qty = Math.max(0, Math.round(+it.qty || 0));
           if (pls.filter((x) => x && x.invId === pl.invId).length >= qty) return;
           const np = { id: pl.id, invId: pl.invId, x: pl.x, y: pl.y, rot: plRot(pl.rot) };
@@ -509,6 +611,7 @@
         });
       }
     });
+    notes.reverse().forEach((a) => state.activity.unshift(a));
     return n;
   }
   /* 옛 기록(편집 창에 담당 칸이 있던 때)의 '👤 담당 변경: …' 활동 줄은 지움 — 할 일을 사람에게 나누지 않으므로

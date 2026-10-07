@@ -99,7 +99,8 @@
   const shortName = (s, n) => { const a = Array.from(String(s || '')); n = n || 16; return a.length > n ? a.slice(0, n - 1).join('') + '…' : a.join(''); };
   const qtyOf = (it) => Math.max(0, Math.round(num(it && it.qty, 1)));
   const fateOf = (it) => (MV.inv.FATES.some((f) => f.id === (it && it.fate)) ? it.fate : 'undecided');
-  const eligible = (key, it) => !!it && FATES_FOR[key].includes(fateOf(it));
+  /** 도면에 놓을 짐: 처리(가져감·새로 삼 등)가 그 집에 맞고, 바닥에 안 놓는 짐(floor: false — 옷장·책장 위 간이박스 등)이 아닌 것 */
+  const eligible = (key, it) => !!it && it.floor !== false && FATES_FOR[key].includes(fateOf(it));
   const roomField = (key) => (key === 'new' ? 'roomNew' : 'room');
   const wallMounted = (it) => !!it && it.cat === 'aircon' && it.ac === 'wall';
   const nameNote = (it) => String((it && it.name) || '') + ' ' + String((it && it.note) || '');
@@ -676,7 +677,8 @@
     const dirs = { front: rot, left: (rot + 90) % 360, right: (rot + 270) % 360, back: (rot + 180) % 360 };
     return USE_SIDES.filter((s) => u[s] > 0.5).map((s) => ({ side: s, dir: dirs[s], depth: u[s], rect: sideBand(r, dirs[s], u[s]) }));
   }
-  const cmR = (v) => Math.max(1, Math.round(v));
+  /** 쓰임 공간·여유 cm 표시: 소수 한 자리까지 (가이드 크리티컬 포인트 표·MV.calc.planUse 의 값과 같은 숫자 — 3.5·47.6) */
+  const cmR = (v) => String(Math.max(0.1, Math.round(num(v, 0) * 10) / 10));
   /** 쓰임 공간 한 줄 요약: '서랍 · 앞 50 · 뒤 10 · 위 145cm' */
   function useSummary(u) {
     if (!u) return '';
@@ -939,7 +941,7 @@
    * m = 오차 여유(cm): 벽·다른 짐·고정물·문 열림 범위에서 이만큼 띄움 (의자 ↔ 식탁은 빼고, 싱크대 옆은 붙여도 됨)
    * 돌려주는 rot 는 정면 방향 — 등을 댄 벽의 반대쪽을 보게 (위 벽 → 0, 오른쪽 벽 → 90, 아래 벽 → 180, 왼쪽 벽 → 270)
    */
-  function findSpot(plan, it, region, mode, occupied, stat, m, useZ) {
+  function findSpot(plan, it, region, mode, occupied, stat, m, useZ, hardUse) {
     m = Math.max(0, num(m, 0));
     useZ = useZ || [];
     const wm = wallMounted(it);
@@ -976,6 +978,8 @@
           if (!wm && occP.some((o) => hit(r, o, 0.5))) continue;
           if (statP.some((o) => hit(r, o.r, 0.5))) continue;
           if (ogs.some((o) => hit(r, o.g.zone, 0.5) && openingFree(o.g, o.obs.concat([r])) < o.need)) continue;
+          // hardUse: 이미 놓은 짐의 쓰임 공간(서랍·문 앞, 앉는 자리 등) 안 자리는 아예 고르지 않음
+          if (hardUse && !wm && useZ.some((z) => hit(r, z, 0.5) && !((chair && z.dining) || (dining && z.chair)))) continue;
           let score, front = rot;
           if (mode === 'wall') {
             const L = Math.abs(x - inner.x) < 1 && wallFrac(gaps.L, y, y + f.h) >= 0.5;
@@ -987,6 +991,13 @@
             // 긴 쪽(가로 w)이 벽을 따라가게: 바닥이 안 돌아갔으면(0·180) 위·아래 벽, 돌아갔으면(90·270) 왼쪽·오른쪽 벽에 등
             const back = rot === 0 ? (T ? 'T' : B ? 'B' : null) : (L ? 'L' : R ? 'R' : null);
             if (back) front = ROT_FROM_BACK[back];
+            // hardUse: 이 짐의 정면 쓰임 공간이 다른 짐 몸체·방문 열림 범위·벽에 막히는 자리도 고르지 않음
+            if (hardUse && mustWall && !back) continue;   // 긴 쪽(등)이 벽에 붙지 않은 자리 — 정면이 어디인지 애매해서
+            if (hardUse && back && !wm && fdep > 0.5) {
+              const fr = sideBand(r, front, fdep);
+              if (!within(fr, region, 1) || occupied.some((o) => hit(fr, o, 0.5) && !((chair && o.dining) || (dining && o.chair)))
+                || stat.some((o) => o.type === 'door' && hit(fr, o.r, 0.5))) continue;
+            }
             const cx = x + f.w / 2, cy = y + f.h / 2;
             let dd = 400;
             doorPts.forEach(([px, py]) => { dd = Math.min(dd, Math.hypot(cx - px, cy - py)); });
@@ -1009,10 +1020,17 @@
     });
     return best;
   }
-  /** 오차 여유를 지키는 자리를 먼저, 없으면 여유 없이 */
-  function findSpotM(plan, it, region, mode, occupied, stat, m, useZ) {
+  /** 자리 찾기 순서: ① 오차 여유 + 다른 짐의 쓰임 공간 지킴 → ② 쓰임 공간만 지킴(여유 0)
+      → (strict 가 아닐 때만) ③ 여유만 → ④ 둘 다 없음. strict(자동 배치)는 ①② 에 없으면 null — 결과 창에 '안 들어가는 짐'으로 알림
+      (문 앞·서랍 앞을 막거나 벽에 딱 붙은 자리를 자동으로 고르지 않게) */
+  function findSpotM(plan, it, region, mode, occupied, stat, m, useZ, strict) {
     if (isChairIt(it)) { const c = chairSpot(plan, it, region, occupied, stat, m); if (c) return c; }
-    return (m > 0 && findSpot(plan, it, region, mode, occupied, stat, m, useZ)) || findSpot(plan, it, region, mode, occupied, stat, 0, useZ);
+    const tiers = (m > 0 ? [[m, true], [0, true]] : [[0, true]]).concat(strict ? [] : (m > 0 ? [[m, false], [0, false]] : [[0, false]]));
+    for (const [mm, hard] of tiers) {
+      const sp = findSpot(plan, it, region, mode, occupied, stat, mm, useZ, hard);
+      if (sp) return sp;
+    }
+    return null;
   }
   /**
    * 의자: 같은 방의 식탁 둘레에 식탁을 보게 (긴 변 먼저, 한 변에 의자 폭이 들어가는 만큼).
@@ -1122,7 +1140,7 @@
     todo.forEach((it) => {
       const room = findRoom(plan, it[roomField(key)]);
       if (!room) { res.noRoom.push({ it }); return; }
-      const spot = findSpotM(plan, it, room, floatable(it) ? 'center' : 'wall', occ, stat, m, uz);
+      const spot = findSpotM(plan, it, room, floatable(it) ? 'center' : 'wall', occ, stat, m, uz, true);
       if (!spot) { res.noFit.push({ it, room }); return; }
       const pl = { id: MV.uid('pl'), invId: it.id, x: r1(spot.x), y: r1(spot.y), rot: rotOf(spot) };
       res.newPls.push(pl);
@@ -1317,7 +1335,7 @@
     const L = list.filter((o) => !o.out && !wallMounted(o.it));
     const say = (name, gap, ...pids) => {
       pids.forEach((id) => short.add(id));
-      add(level, '여유 부족: ' + name + ' 사이 ' + Math.max(0, Math.round(gap)) + 'cm' + tail, ...pids).kind = 'margin';
+      add(level, '여유 부족: ' + name + ' 사이 ' + Math.max(0, Math.round(gap * 10) / 10) + 'cm' + tail, ...pids).kind = 'margin';
     };
     // 벽 너머(다른 방)의 것은 보지 않음: 짐이 든 방과 조금이라도 겹치는 것만 (방 밖에 걸친 짐은 모두 봄)
     const sameRoom = (rm, x) => !rm || !!inter(rm, x);
@@ -1932,14 +1950,26 @@
     const mg = Math.max(0, num(o.margin, 0));
     if (!o.compact && (o.useView || mg > 0)) {
       const gU = svg('g', { class: 'fp-uses', 'aria-hidden': 'true' });
+      // 점검(useChecks)처럼 띠를 그 짐이 든 방의 벽까지만 그림 — 벽 너머(옆 방·발코니)에 쓸 자리가 있는 것처럼 보이지 않게
+      const uRooms = validRooms(plan);
+      const uGaps = new Map();
+      const gapsU = (rm) => { if (!uGaps.has(rm.id)) uGaps.set(rm.id, edgeGaps(plan, rm)); return uGaps.get(rm.id); };
       (o.items || []).forEach(({ p, it, r }) => {
         if (wallMounted(it)) return;
         const g = svg('g', { class: 'fp-use', 'data-upid': p.id, transform: 'translate(' + r1(r.x) + ' ' + r1(r.y) + ')' });
         if (o.useView) {
-          useZones({ x: 0, y: 0, w: r.w, h: r.h }, rotOf(p), useOf(it)).forEach((z) => {
+          const rmU = homeRoom(uRooms, r);
+          useZones(r, rotOf(p), useOf(it)).forEach((z) => {
             const bad = !!(o.useBlocked && o.useBlocked.has(p.id + '|' + z.side));
-            g.appendChild(svg('rect', Object.assign({ class: 'fp-usez' + (bad ? ' is-blocked' : ''), x: r1(z.rect.x), y: r1(z.rect.y), width: r1(z.rect.w), height: r1(z.rect.h),
-              fill: 'url(#' + uid + (bad ? 'ub' : 'u') + ')', stroke: bad ? 'var(--warn)' : 'var(--kid)', 'stroke-width': 1, 'stroke-opacity': 0.75, 'stroke-dasharray': '4 3' }, NS)));
+            const ex = rmU ? wallExcess(gapsU(rmU), rmU, z.rect, z.dir) : 0;
+            const depth = ex ? Math.max(0, z.depth - ex) : z.depth;
+            if (depth < 0.5) return;                    // 벽에 바로 막힘 — 그릴 띠 없음
+            const zr = sideBand({ x: 0, y: 0, w: r.w, h: r.h }, z.dir, depth);
+            // 벽에 잘렸지만 막힘으로 치지 않는 쪽(침대 옆 — 다른 쪽을 쓰면 됨)은 연한 회색 테두리만
+            const walled = !!ex && !bad;
+            g.appendChild(svg('rect', Object.assign({ class: 'fp-usez' + (bad ? ' is-blocked' : walled ? ' is-walled' : ''), x: r1(zr.x), y: r1(zr.y), width: r1(zr.w), height: r1(zr.h),
+              fill: walled ? 'none' : 'url(#' + uid + (bad ? 'ub' : 'u') + ')', stroke: bad ? 'var(--warn)' : walled ? 'var(--ink-3)' : 'var(--kid)', 'stroke-width': 1,
+              'stroke-opacity': walled ? 0.55 : 0.75, 'stroke-dasharray': '4 3' }, NS), walled ? svg('title', '이쪽은 벽에 막혀 ' + Math.round(depth) + 'cm만 있어요 — 다른 쪽을 써요') : null));
           });
         }
         if (mg > 0) {
@@ -2558,7 +2588,7 @@
     const hint = el('p', { class: 'fp-hint' }, coarse
       ? '짐을 손가락으로 끌어 옮기고, 톡 누르면 정면 돌리기·빼기 메뉴가 나와요. 짐의 작은 삼각형이 정면(문·서랍·앉는 쪽)이에요. 냉장고 자리·배관구 같은 설비 자리를 누르면 설명이 나와요. 빈 곳을 끌면 화면이 움직이고, 두 손가락으로 벌리면 도면이 커져요.'
       // 키보드 안내는 마우스·키보드가 있는 화면에서만 (터치 기기에선 숨김)
-      : '짐을 끌어서 옮기고, 눌러서 선택하면 정면 돌리기·빼기를 할 수 있어요. 짐의 작은 삼각형이 정면(문·서랍·앉는 쪽)이에요. 냉장고 자리·배관구 같은 설비 자리를 누르면 설명이 나와요. 키보드(도면 위에서): 방향키: 1cm씩 · 쉬프트+방향키: 10cm씩 · 알 키(ㄱ): 정면 돌리기(90°) · 딜리트: 빼기 · 이스케이프: 해제 · 컨트롤+휠: 확대');
+      : '짐을 끌어서 옮기고, 눌러서 선택하면 정면 돌리기·빼기를 할 수 있어요. 짐의 작은 삼각형이 정면(문·서랍·앉는 쪽)이에요. 냉장고 자리·배관구 같은 설비 자리를 누르면 설명이 나와요. 키보드(도면 위에서): 방향키: 1cm씩 · 쉬프트+방향키: 10cm씩 · 알 키(ㄱ): 정면 돌리기(90°) · 쉬프트+알 키: 정면 반대로(180°) · 딜리트: 빼기 · 이스케이프: 해제 · 컨트롤+휠: 확대');
     const planErr = el('div', { class: 'fp-errwrap', hidden: true });   // 도면을 그리다 오류가 나면 여기에 안내
     const planCard = el('section', { class: 'card fp-plan', 'aria-label': PLAN_LABEL[key] + ' 도면' }, chips, bgBar, wizBar, editBar, planErr, scroll, legend(), hint, fileIn);
     const side = el('aside', { class: 'card fp-side', 'aria-label': '배치할 짐 목록' });
@@ -2659,7 +2689,8 @@
           el('span', { class: 'muted num' }, ' · ' + Math.round(o.r.w) + '×' + Math.round(o.r.h) + 'cm' + (out ? ' · 도면 밖' : room ? ' · ' + room.name : ' · 방 밖'))),
         el('div', { class: 'fp-selbtns' },
           out ? sb('in', '↩', '도면 안으로', () => fixPlacement(o.p.id, 'in'), { class: 'btn btn-primary', short: '안으로', title: '도면 안으로 가져오기' }) : null,
-          sb('rot', '↻', '정면 돌리기 (90°, 지금 ' + FRONT_WORD[rotOf(o.p)] + ')', rotateSel, { short: '정면 90°', title: coarse ? '정면 돌리기 — 90°씩 4방향' : '정면 돌리기 — 90°씩 4방향 (알 키)' }),
+          sb('rot', '↻', '정면 돌리기 (90°, 지금 ' + FRONT_WORD[rotOf(o.p)] + ')', () => rotateSel(90), { short: '정면 90°', title: coarse ? '정면 돌리기 — 90°씩 4방향' : '정면 돌리기 — 90°씩 4방향 (알 키)' }),
+          sb('flip', '⇅', '정면 반대로 (180°, 지금 ' + FRONT_WORD[rotOf(o.p)] + ')', () => rotateSel(180), { short: '반대로', title: '정면만 반대로 — 자리는 그대로' }),
           sb('spec', '✎', '규격 수정', () => editSpec(o.it.id), { short: '규격', title: '가로·깊이·높이 고치기' }),
           sb('del', '🗑', '도면에서 빼기', removeSel, { class: 'btn btn-danger', short: '빼기', title: coarse ? '도면에서 빼기' : '도면에서 빼기 (딜리트 키)' }),
           el('button', { type: 'button', class: 'btn btn-ghost btn-icon', 'data-act': 'close', onclick: () => { sel = null; refresh(); }, 'aria-label': '선택 해제' }, '✕')),
@@ -3684,16 +3715,28 @@
         if (room) it[roomField(key)] = room.name;
       });
     }
-    /** 정면 돌리기: 시계 방향으로 90°씩 (아래 → 왼쪽 → 위 → 오른쪽), 가운데는 그대로 */
-    function rotateSel() {
+    /** 정면 돌리기: step 90 = 시계 방향으로 90°씩 (아래 → 왼쪽 → 위 → 오른쪽) · 180 = 정면만 반대로.
+        가운데는 그대로 (눈금 맞춤 없음 — 네 번 돌리면 제자리, 초안의 10cm 여유가 깨지지 않게).
+        바닥 크기가 같은 회전(0↔180, 90↔270)은 자리를 바꾸지 않아요. 도면 경계에 밀려 자리가 바뀌었으면
+        돌리기 전 가운데를 기억해 두었다가 다음 돌리기는 그 가운데를 기준으로 (밀린 만큼 쌓이지 않게) */
+    let rotMemo = null;
+    function rotateSel(step) {
       const o = curSel();
       if (!o) return;
-      const nr = (rotOf(o.p) + 90) % 360;
+      const r0 = rotOf(o.p);
+      const nr = (r0 + (step === 180 ? 180 : 90)) % 360;
       const f = foot(o.it, nr);
-      let x = o.r.x + o.r.w / 2 - f.w / 2, y = o.r.y + o.r.h / 2 - f.h / 2;
-      if (prefs().snap) { x = Math.round(x / SNAP) * SNAP; y = Math.round(y / SNAP) * SNAP; }
-      ({ x, y } = clampInto({ x, y, w: f.w, h: f.h }, cur.plan.bounds));
-      mutatePl(o.p.id, (p) => { p.rot = nr; p.x = r1(x); p.y = r1(y); });
+      const m = rotMemo;
+      const same = m && m.pid === o.p.id && m.rot === r0 && Math.abs(m.x - o.r.x) < 0.05 && Math.abs(m.y - o.r.y) < 0.05;
+      const cx = same ? m.cx : o.r.x + o.r.w / 2, cy = same ? m.cy : o.r.y + o.r.h / 2;
+      let x, y;
+      if (turned(nr) === turned(r0) && !same) { x = o.r.x; y = o.r.y; }
+      else {
+        ({ x, y } = clampInto({ x: cx - f.w / 2, y: cy - f.h / 2, w: f.w, h: f.h }, cur.plan.bounds));
+      }
+      x = r1(x); y = r1(y);
+      rotMemo = { pid: o.p.id, rot: nr, x, y, cx, cy };
+      mutatePl(o.p.id, (p) => { p.rot = nr; p.x = x; p.y = y; });
     }
     function nearestRoom(plan, r) {
       const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
@@ -4736,7 +4779,7 @@
         case 'ArrowDown': nudge(0, st); break;
         case 'Delete': case 'Backspace': removeSel(); break;
         default:
-          if (e.code === 'KeyR' || e.key === 'r' || e.key === 'R' || e.key === 'ㄱ') { rotateSel(); break; }
+          if (e.code === 'KeyR' || e.key === 'r' || e.key === 'R' || e.key === 'ㄱ') { rotateSel(e.shiftKey ? 180 : 90); break; }
           return;
       }
       e.preventDefault();

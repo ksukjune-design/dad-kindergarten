@@ -41,6 +41,9 @@
          받은 기록과 3-방향 합치기를 하고, 이 기기에서만 고친 것은 올립니다 (rejoin). 새로 열어도 이어지도록
          srv 는 localStorage 'mv:sync:base:v1' 에 줄여서 남김 — 문서마다 해시, 이 기기와 다른 문서만 내용
          (평면도 사진 내용은 빼고). 처음 붙는 기기(기준 없음)만 공유 기록으로 맞춥니다 (adopt).
+         새 기본값 버전(data-seed version)을 늦게 여는 기기: 열 때 돌린 이전 규칙이 바꾼 문서(맞추기 전·뒤)를
+         'mv:sync:seedpre:v1' 에 남기고, 다시 붙을 때 서버가 이미 그 버전 이상이면 합치기 전에 되돌려요(undoSeed) —
+         먼저 올린 기기와 그 뒤 사용자가 고친 것을 '이 기기에서 고친 것'으로 덮거나 섞지 않게.
    처음 공유 시작(initFromLocal): 파이어베이스는 move/meta 를 '없을 때만' 먼저 써서(트랜잭션) 두 기기가 거의 같이 눌러도
          한쪽 기록만 공유 기록이 되고, 늦은 쪽은 공유 기록으로 맞춤 (이 기기 기록은 BACKUP_KEY 에 따로 보관).
          이미 공유가 시작됐으면(상태가 empty 가 아니면) 다시 올리지 않음.
@@ -65,6 +68,7 @@
   const MAX_DOC = 250 * 1024;
   const BACKUP_KEY = 'mv:state:v1:before-share';
   const BASE_KEY = 'mv:sync:base:v1';   // 다시 연결할 때 합치기 기준 (파이어베이스만)
+  const SEEDPRE_KEY = 'mv:sync:seedpre:v1';   // 이 기기가 새 기본값 버전으로 맞추며 바꾼 문서 (맞추기 전·뒤) — rejoin 이 되돌릴 때 씀
   const BACKOFF_MIN = 1000;     // 쓰기 실패 뒤 첫 재시도 (한 묶음에 한 번만 늘림)
   const BACKOFF_MAX = 4000;
   const STUCK_MIN = 15000;      // 공유 저장소가 가득 찼을 때 다시 올려 보는 간격
@@ -94,6 +98,7 @@
   let resyncing = false;
   let starting = false;         // 처음 공유 시작 중 (move/meta 를 '없을 때만' 쓰는 중)
   let deferred = [];            // 다시 읽는 동안 도착한 변경 (다 읽은 뒤 처리)
+  let seedPre = null;           // { id, to, u: { 경로: [맞추기 전 내용|null, 맞춘 뒤 내용|null] } } — 아래 rejoin·undoSeed 참고
   let baseId = null;            // srv 가 어느 저장소의 내용인지 ('firebase:프로젝트/묶음') — 있을 때만 기준을 남기고 다시 붙을 때 합침
   let baseT = 0;
   const toasted = new Set();
@@ -710,6 +715,7 @@
       srv.set(path, j);
       pushHist(path, j);
     });
+    clearSeedPre();           // 공유 기록으로 맞추니 되돌릴 것 없음
     S.mergeSeed(st);          // 새 기본 항목이 생겼으면 추가 (지운 항목은 그대로 지운 채)
     S.persist();              // → diffAndWrite: 이 기기에만 있던 부분(예: 평면도 사진)과 새 기본 항목을 올림
     S.emit('change', { source: 'remote', reset: true });
@@ -739,9 +745,67 @@
     }
   }
 
+  /* ---------- 새 기본값 버전으로 맞춘 것 되돌리기 (늦게 여는 기기) ----------
+     두 기기가 v8 을 다른 때에 열면: 먼저 연 기기(A)가 공유 기록을 v8 로 올리고 사용자가 그 뒤에 고칠 수 있어요.
+     나중에 여는 기기(B)는 열 때 이 기기 기록(v7)에 이전 규칙을 먼저 돌리는데, 그 결과를 'B 에서 고친 것'으로 합치면
+     A 사용자가 그 뒤 고친 것과 '둘 다 고침'이 되어 섞이거나 되돌려지고, A 가 지운 배치가 되살아나요.
+     그래서 서버가 이미 이 버전 이상이면, 합치기 전에 이전 규칙이 바꾼 문서를 맞추기 전 내용으로 되돌려요.
+     (B 가 맞춘 뒤 이 기기에서 더 고친 것은 남겨요: 맞춘 뒤 내용을 기준으로 3-방향 합치기) → 서버의 v8 결과를 그대로 받음 */
+  function saveSeedPre() {
+    try {
+      if (seedPre) global.localStorage.setItem(SEEDPRE_KEY, JSON.stringify(seedPre));
+      else global.localStorage.removeItem(SEEDPRE_KEY);
+    } catch (e) { /* 가득 참 등 — 이번 열기 동안은 메모리에 있음 */ }
+  }
+  function clearSeedPre() {
+    if (S.preSeedState) S.preSeedState = null;
+    if (!seedPre) return;
+    seedPre = null;
+    saveSeedPre();
+  }
+  function undoSeed(st) {
+    let undone = 0;
+    Object.keys(seedPre.u).forEach((path) => {
+      const pair = seedPre.u[path];
+      if (!Array.isArray(pair)) return;
+      const preJ = typeof pair[0] === 'string' ? pair[0] : null;
+      const postJ = typeof pair[1] === 'string' ? pair[1] : null;
+      const lu = unitOf(st, path);
+      const curJ = lu === undefined ? null : canon(lu);
+      let target;
+      if (curJ === postJ) target = preJ;                              // 맞춘 뒤 이 기기에서 안 고침
+      else if (lu === undefined) return;                              // 맞춘 뒤 이 기기에서 지움 → 지운 채로
+      else if (path === 'move/activity') {
+        const post = new Set(((postJ ? JSON.parse(postJ) : {}).list || []).map(canon));
+        const pre = (preJ ? JSON.parse(preJ) : {}).list || [];
+        target = canon({ list: (lu.list || []).filter((a) => !post.has(canon(a))).concat(pre).slice(0, 150) });
+      } else {
+        const m = merge3(postJ === null ? undefined : JSON.parse(postJ), MV.clone(lu), preJ === null ? undefined : JSON.parse(preJ));
+        target = m === undefined ? null : canon(m);
+      }
+      if (target === curJ) return;
+      if (target === null) {
+        if (isItemPath(path)) { applyUnit(st, path, null); undone++; }
+        return;
+      }
+      const body = JSON.parse(target);
+      applyUnit(st, path, body);
+      if (path === 'move/meta') st.seedVersion = +body.seedVersion || 0;
+      undone++;
+    });
+    return undone;
+  }
+
   /** 같은 저장소에 다시 붙음: 마지막으로 안 서버 내용(srv)을 기준으로 받은 기록과 합침 (이 기기에서만 고친 것은 올림) */
   function rejoin(remote) {
     const st = S.get();
+    // 서버가 이미 이 기본값 버전 이상이면, 이 기기가 열 때 돌린 이전 규칙의 결과를 되돌린 뒤 합쳐요 (서버의 결과·그 뒤 고친 것이 이김)
+    const sv = (MV.seed && MV.seed.version) || 0;
+    const rMeta = strip(remote.get('move/meta'));
+    if (seedPre && seedPre.id === baseId && seedPre.to === sv && isObj(rMeta) && (+rMeta.seedVersion || 0) >= sv) {
+      try { undoSeed(st); } catch (e) { console.error('[sync] undoSeed', e); }
+    }
+    clearSeedPre();
     const units = unitsOf(st);
     let edits = 0;
     units.forEach((u, path) => {
@@ -782,6 +846,7 @@
     clearTimeout(baseT);
     baseT = 0;
     try { global.localStorage.removeItem(BASE_KEY); } catch (e) { /* 무시 */ }
+    clearSeedPre();
   }
   /** 페이지를 열 때(아직 아무것도 고치기 전): 남겨 둔 기준을 되살림. 해시가 같은 문서는 지금 이 기기 내용이 곧 기준 */
   function loadBase() {
@@ -809,6 +874,26 @@
       if (hash(pj) === rec.h[path]) srv.set(path, pj);
     });
     baseId = rec.id;
+    // 이 기기가 지금 새 기본값 버전으로 맞췄으면: 바뀐 문서의 맞추기 전·뒤 내용을 남겨 둬요 (다시 붙을 때 서버가 이미 새 버전이면
+    // rejoin 이 되돌림). 맞춘 뒤 연결 전에 창을 닫아도 다음에 열 때 쓰도록 localStorage 에도.
+    const sv = (MV.seed && MV.seed.version) || 0;
+    if (pre) {
+      const u = {};
+      const paths = new Set(Array.from(pre.keys()).concat(Array.from(units.keys())));
+      paths.forEach((path) => {
+        if (path.startsWith('planbg/')) return;
+        const a = pre.get(path), b = units.get(path);
+        const aj = a === undefined ? null : canon(a), bj = b === undefined ? null : canon(b);
+        if (aj !== bj) u[path] = [aj, bj];
+      });
+      seedPre = { id: rec.id, to: sv, u };
+      saveSeedPre();
+    } else {
+      let sp = null;
+      try { sp = JSON.parse(global.localStorage.getItem(SEEDPRE_KEY) || 'null'); } catch (e) { sp = null; }
+      if (isObj(sp) && sp.id === rec.id && sp.to === sv && isObj(sp.u)) seedPre = sp;
+      else if (sp) { try { global.localStorage.removeItem(SEEDPRE_KEY); } catch (e) { /* 무시 */ } }
+    }
   }
 
   /** 공유 저장소가 비어 있을 때: 이 기기 기록으로 공유를 시작 → Promise<true(시작함)|false(안 함)>
@@ -1085,7 +1170,7 @@
   S.on('sync', saveBaseSoon);         // 서버 내용(srv)이 바뀐 뒤 (쓰기 확인·받은 변경)
   // 연결 안 된 동안 '처음부터 다시'·백업 복원(이 기기만이라고 안내함) → 다시 연결되면 합치지 않고 공유 기록으로 맞춤
   S.on('change', (e) => {
-    if (e && e.reset && (e.log === 'reset' || e.log === 'import') && Y.mode !== 'shared' && baseId) { srv.clear(); hist.clear(); saveBaseSoon(); }
+    if (e && e.reset && (e.log === 'reset' || e.log === 'import') && Y.mode !== 'shared' && baseId) { srv.clear(); hist.clear(); clearSeedPre(); saveBaseSoon(); }
   });
   global.addEventListener('pagehide', () => { if (baseT) saveBase(); });
   global.document.addEventListener('visibilitychange', () => { if (global.document.visibilityState === 'hidden' && baseT) saveBase(); });
