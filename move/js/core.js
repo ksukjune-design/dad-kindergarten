@@ -392,6 +392,40 @@
         tk.forEach((k) => { it[k] = MV.clone(target[k]); });
         n++;
       });
+      // 도면 기본 배치가 바뀐 경우: { layouts: { new: { add: [placement…], move: { 배치id: { from:{x,y,rot}, set:{x,y,rot}, ifInv? } } } } }
+      //  · move: 그 배치가 지금 from 과 같을 때만(사용자가 옮기지 않았을 때만) set 으로
+      //  · add: 같은 id 배치가 없고, 그 짐이 있고, 그 짐의 배치 수가 짐 개수(qty)보다 적을 때만 넣어요
+      //         (사용자가 이미 놓은 짐은 건드리지 않음 · 배치 id 가 고정이라 두 기기가 같이 올려도 겹치지 않음)
+      //  · ifInv { w, d }: 짐의 가로·깊이가 이 값일 때만 (사용자가 크기를 고친 짐은 좌표가 안 맞아 건드리지 않음)
+      Object.keys(m.layouts || {}).forEach((key) => {
+        const rule = m.layouts[key];
+        if (!rule || typeof rule !== 'object') return;
+        if (!state.layouts || typeof state.layouts !== 'object' || Array.isArray(state.layouts)) state.layouts = {};
+        let L = state.layouts[key];
+        if (!L || typeof L !== 'object' || Array.isArray(L)) L = state.layouts[key] = { placements: [] };
+        if (!Array.isArray(L.placements)) L.placements = [];
+        const pls = L.placements;
+        const invOf = (iid) => state.inventory.find((x) => x && x.id === iid);
+        const sizeOk = (it, w) => !w || ['w', 'd'].every((k) => w[k] === undefined || Math.abs((+it[k] || 0) - w[k]) < 0.05);
+        const same = (p, f) => ['x', 'y', 'rot'].every((k) => f[k] === undefined || Math.abs((+p[k] || 0) - (+f[k] || 0)) < 0.05);
+        Object.keys(rule.move || {}).forEach((pid) => {
+          const mv = rule.move[pid] || {};
+          const p = pls.find((x) => x && x.id === pid);
+          const it = p && invOf(p.invId);
+          if (!p || !it || !mv.from || !mv.set || !same(p, mv.from) || same(p, mv.set) || !sizeOk(it, mv.ifInv)) return;
+          ['x', 'y', 'rot'].forEach((k) => { if (mv.set[k] !== undefined) p[k] = mv.set[k]; });
+          n++;
+        });
+        (rule.add || []).forEach((pl) => {
+          if (!pl || !pl.id || pls.some((x) => x && x.id === pl.id)) return;
+          const it = invOf(pl.invId);
+          if (!it || !sizeOk(it, pl.ifInv)) return;
+          const qty = Math.max(0, Math.round(+it.qty || 0));
+          if (pls.filter((x) => x && x.invId === pl.invId).length >= qty) return;
+          pls.push({ id: pl.id, invId: pl.invId, x: pl.x, y: pl.y, rot: pl.rot === 90 ? 90 : 0 });
+          n++;
+        });
+      });
       // 묶음 이름이 바뀐 경우: 사용자가 만들거나 이름을 고친 파트도 같은 새 묶음으로 옮겨요
       Object.keys(m.renameGroups || {}).forEach((og) => {
         state.parts.forEach((p) => { if (p.group === og) { p.group = m.renameGroups[og]; n++; } });
@@ -439,7 +473,7 @@
     const hasKey = (k) => state.activity.some((a) => a && a.key === k);
     const kFix = 'seed-v' + seed.version + '-fix';
     const kAdd = 'seed-v' + seed.version + '-add';
-    if (migrated && !hasKey(kFix)) state.activity.unshift({ at: MV.nowISO(), key: kFix, text: '기본 파트·항목을 새 버전에 맞췄습니다 (' + migrated + '곳, 고친 내용·완료·메모는 그대로).' });
+    if (migrated && !hasKey(kFix)) state.activity.unshift({ at: MV.nowISO(), key: kFix, text: '기본 파트·항목·짐 목록·도면 배치를 새 버전에 맞췄습니다 (' + migrated + '곳, 고친 내용·완료·메모·직접 옮긴 배치는 그대로).' });
     if (added && !hasKey(kAdd)) state.activity.unshift({ at: MV.nowISO(), key: kAdd, text: '새 기본 항목 ' + added + '개를 추가했습니다 (기존 메모·완료 표시는 그대로).' });
     return true;
   }
