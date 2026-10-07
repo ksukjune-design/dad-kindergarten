@@ -706,7 +706,7 @@ button.db-wk-head:hover { background:var(--bg-3); }
   ];
   // 짐 목록에서 이삿짐센터가 옮기는 에어컨 수 (자금 모듈과 같은 규칙: 견적은 있는데 제조사 서비스가 없으면 에어컨 이전설치 0원)
   const moverAircons = () => MV.inv.list().filter((x) => x && (x.cat === 'aircon' || x.tag === 'aircon') && x.fate === 'move').length;
-  const MOVER_FALLBACK = 2500000;              // 견적 계산이 없을 때만: 10/6 이사 견적 화면 값 (6톤·5명, 부가세 포함 약 250만원, 추정)
+  const MOVER_FALLBACK = 2110000;              // 견적 계산이 없을 때만: 10/7 이사 견적 화면 값 (5톤·4~5명, 부가세 포함 약 211만원, 추정)
   const ELEV_FALLBACK = 200000;                // 견적 계산이 없을 때만: 두 단지 각 약 10만원 (서울 평균 약 10.4만원)
   /* 엘리베이터 사용료가 이사 견적(moveEstimate)에 이미 들어 있는지 — 자금 모듈(autoAmount 'elevator')과 같은 규칙:
      견적 줄에 '엘리베이터 사용료'(key elevFee)가 있으면 들어 있음, 짐·견적에 양쪽 0원으로 넣었으면 0원 */

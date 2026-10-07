@@ -252,8 +252,12 @@
                  notes: [{ id, text, at }], links: [{label,url}], guide, order, seed, createdAt, updatedAt }],
                  // owner: 옛 기록 호환용으로만 남김 (기본 ''). 할 일은 사람에게 나눠 배정하지 않으므로
                  //        화면·거르기·정렬·검색·복사 글·AI 비서 어디에도 쓰지 않음
-       inventory: [{ id, name, cat, fate, qty, w, d, h, url, room, roomNew, brand, model, lg, ac, tag, note, assumed, seed }],
+       inventory: [{ id, name, cat, fate, qty, w, d, h, url, room, roomNew, brand, model, lg, ac, tag, note, assumed, seed, use? }],
                  // model: 명판·라벨에 적힌 모델명 (규격 확인용, 없으면 '')
+                 // use: 쓰임 공간(선택, normInv 기본값 없음 — 없으면 화면이 태그·종류별 기본값을 씀)
+                 //      { kind: 'drawer'|'hinged'|'sliding'|'lid'|'front-door'|'seat'|'bed'|'open'|'airflow'|'table',
+                 //        front, left, right, back, top (cm), note } — 자세한 뜻은 data-seed.js 머리말.
+                 //      정면 방향은 도면 배치 placement.rot (0 남 · 90 서 · 180 북 · 270 동, data-layouts.js 머리말)
                  // tag: 'fridge'|'washer'|'dryer'|'wardrobe'|'bed'|'sofa'|'tv'|'desk'|'table'|'shelf'|'aircon'|'' (의미 검색용)
        activity: [{ at, text }],
        ...모듈 하위 상태 (ensure 로 생성): layouts, planEdits, estimate, finance, ui
@@ -315,12 +319,15 @@
       layouts: MV.seedLayouts ? MV.clone(MV.seedLayouts) : undefined,
     };
   }
-  /* 도면 배치가 바닥에서 차지하는 사각형 (view-floorplan 의 foot·rectOf 와 같은 규칙, 벽걸이 에어컨은 null) */
+  /* 도면 배치가 바닥에서 차지하는 사각형 (view-floorplan 의 foot·rectOf 와 같은 규칙, 벽걸이 에어컨은 null)
+     rot = 정면 방향 0 남 · 90 서 · 180 북 · 270 동 — 바닥 크기는 0·180 이 w×d, 90·270 이 d×w */
+  const PL_ROTS = [0, 90, 180, 270];
+  const plRot = (v) => (PL_ROTS.indexOf(+v) >= 0 ? +v : 0);
   function rectOfPl(p, it) {
     if (!p || !it || (it.cat === 'aircon' && it.ac === 'wall')) return null;
     const nv = (v, d) => { const x = parseFloat(v); return isFinite(x) ? x : d; };
     const w = Math.max(5, nv(it.w, 60)), d = Math.max(5, nv(it.d, 60));
-    const rot = p.rot === 90;
+    const rot = plRot(p.rot) === 90 || plRot(p.rot) === 270;
     return { x: nv(p.x, 0), y: nv(p.y, 0), w: rot ? d : w, h: rot ? w : d };
   }
   function rectHit(a, b) {
@@ -446,11 +453,13 @@
         n++;
       });
       // 도면 기본 배치가 바뀐 경우: { layouts: { new: { add: [placement…], move: { 배치id: { from:{x,y,rot}, set:{x,y,rot}, ifInv? } } } } }
+      //  · rot 는 정면 방향 0·90·180·270 (그 밖의 값은 0)
       //  · move: 그 배치가 지금 from 과 같을 때만(사용자가 옮기지 않았을 때만) set 으로
       //  · add: 같은 id 배치가 없고, 그 짐이 있고, 그 짐의 배치 수가 짐 개수(qty)보다 적을 때만 넣어요
       //         (사용자가 이미 놓은 짐은 건드리지 않음 · 배치 id 가 고정이라 두 기기가 같이 올려도 겹치지 않음)
       //  · ifInv { w, d }: 짐의 가로·깊이가 이 값일 때만 (사용자가 크기를 고친 짐은 좌표가 안 맞아 건드리지 않음)
       //  · add 는 그 도면에 이미 있는 다른 배치와 1cm 넘게 겹치면 넣지 않아요 (사용자가 그 자리에 다른 짐을 놓았을 때)
+      //  · add 의 clear {x,y,w,h}(쓰임 공간 앞): 그 안에 다른 짐이 있거나, 새 짐이 이미 놓인 초안 배치의 clear 를 막으면 넣지 않아요
       //    — 벽걸이 에어컨처럼 바닥을 차지하지 않는 짐은 겹침으로 보지 않음 (view-floorplan 과 같은 규칙)
       Object.keys(m.layouts || {}).forEach((key) => {
         const rule = m.layouts[key];
@@ -463,12 +472,14 @@
         const invOf = (iid) => state.inventory.find((x) => x && x.id === iid);
         const sizeOk = (it, w) => !w || ['w', 'd'].every((k) => w[k] === undefined || Math.abs((+it[k] || 0) - w[k]) < 0.05);
         const same = (p, f) => ['x', 'y', 'rot'].every((k) => f[k] === undefined || Math.abs((+p[k] || 0) - (+f[k] || 0)) < 0.05);
+        const clearAt = {};
+        (rule.add || []).forEach((pl) => { if (pl && pl.id && pl.clear) clearAt[pl.id] = { at: { x: pl.x, y: pl.y, rot: pl.rot }, clear: pl.clear }; });
         Object.keys(rule.move || {}).forEach((pid) => {
           const mv = rule.move[pid] || {};
           const p = pls.find((x) => x && x.id === pid);
           const it = p && invOf(p.invId);
           if (!p || !it || !mv.from || !mv.set || !same(p, mv.from) || same(p, mv.set) || !sizeOk(it, mv.ifInv)) return;
-          ['x', 'y', 'rot'].forEach((k) => { if (mv.set[k] !== undefined) p[k] = mv.set[k]; });
+          ['x', 'y', 'rot'].forEach((k) => { if (mv.set[k] !== undefined) p[k] = k === 'rot' ? plRot(mv.set[k]) : mv.set[k]; });
           n++;
         });
         (rule.add || []).forEach((pl) => {
@@ -477,9 +488,12 @@
           if (!it || !sizeOk(it, pl.ifInv)) return;
           const qty = Math.max(0, Math.round(+it.qty || 0));
           if (pls.filter((x) => x && x.invId === pl.invId).length >= qty) return;
-          const np = { id: pl.id, invId: pl.invId, x: pl.x, y: pl.y, rot: pl.rot === 90 ? 90 : 0 };
+          const np = { id: pl.id, invId: pl.invId, x: pl.x, y: pl.y, rot: plRot(pl.rot) };
           const r = rectOfPl(np, it);
           if (r && pls.some((x) => { const o = x && rectOfPl(x, invOf(x.invId)); return o && rectHit(r, o); })) return;
+          // clear: 이 짐의 쓰임 공간 앞(서랍·문 앞 등)에 다른 짐이 있으면 넣지 않음 + 이미 놓인 초안 배치의 쓰임 공간 앞을 막지 않음
+          if (pl.clear && pls.some((x) => { const o = x && rectOfPl(x, invOf(x.invId)); return o && rectHit(pl.clear, o); })) return;
+          if (r && pls.some((x) => { const c = x && clearAt[x.id]; return c && same(x, c.at) && rectHit(r, c.clear); })) return;
           pls.push(np);
           n++;
         });
