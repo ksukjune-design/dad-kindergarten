@@ -558,6 +558,9 @@
     st.inventory = st.inventory || [];
     st.activity = st.activity || [];
     st.meta.deletedSeed = st.meta.deletedSeed || [];
+    // 새 기본값 버전으로 맞추기 직전의 기록 — 공유 저장소(sync.js loadBase)가 '마지막으로 안 서버 내용'을 되살릴 때 씀.
+    // (맞춘 뒤의 내용으로만 되살리면 바뀐 문서의 기준을 잃어, 서버의 옛 내용과 칸마다 섞이거나 지운 짐이 되살아나요)
+    S.preSeedState = (MV.seed && MV.seed.version && (st.seedVersion || 0) < MV.seed.version) ? JSON.parse(JSON.stringify(st)) : null;
     const merged = mergeSeed(st);
     S.state = st;
     if (merged) S.persist();

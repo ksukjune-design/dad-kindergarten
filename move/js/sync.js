@@ -792,12 +792,21 @@
     let units;
     try { units = unitsOf(S.get()); } catch (e) { return; }
     const d = isObj(rec.d) ? rec.d : {};
+    // 이 기기를 열 때 새 기본값 버전으로 맞췄으면(core S.load → S.preSeedState) 맞추기 전 내용으로도 찾아요.
+    // 그래야 바뀐 문서·지운 짐의 기준(서버에 있던 옛 내용)을 잃지 않고 '이 기기에서 고친 것'으로 올려요.
+    let pre = null;
+    try { pre = S.preSeedState ? unitsOf(S.preSeedState) : null; } catch (e) { pre = null; }
     Object.keys(rec.h).forEach((path) => {
       if (typeof d[path] === 'string') { srv.set(path, d[path]); return; }
       const u = units.get(path);
-      if (u === undefined) return;
-      const j = canon(u);
-      if (hash(j) === rec.h[path]) srv.set(path, j);
+      if (u !== undefined) {
+        const j = canon(u);
+        if (hash(j) === rec.h[path]) { srv.set(path, j); return; }
+      }
+      const pu = pre ? pre.get(path) : undefined;
+      if (pu === undefined) return;
+      const pj = canon(pu);
+      if (hash(pj) === rec.h[path]) srv.set(path, pj);
     });
     baseId = rec.id;
   }
