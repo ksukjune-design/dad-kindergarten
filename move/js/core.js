@@ -315,6 +315,19 @@
       layouts: MV.seedLayouts ? MV.clone(MV.seedLayouts) : undefined,
     };
   }
+  /* 도면 배치가 바닥에서 차지하는 사각형 (view-floorplan 의 foot·rectOf 와 같은 규칙, 벽걸이 에어컨은 null) */
+  function rectOfPl(p, it) {
+    if (!p || !it || (it.cat === 'aircon' && it.ac === 'wall')) return null;
+    const nv = (v, d) => { const x = parseFloat(v); return isFinite(x) ? x : d; };
+    const w = Math.max(5, nv(it.w, 60)), d = Math.max(5, nv(it.d, 60));
+    const rot = p.rot === 90;
+    return { x: nv(p.x, 0), y: nv(p.y, 0), w: rot ? d : w, h: rot ? w : d };
+  }
+  function rectHit(a, b) {
+    const w = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+    const h = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+    return w > 1 && h > 1;
+  }
   // 예전 버전 기록을 새 기본값에 맞추기 (data-seed.js 의 MV.seed.migrations)
   function migrateSeed(state, seed) {
     const from = state.seedVersion || 0;
@@ -368,25 +381,65 @@
         if (state.meta.deletedSeed.indexOf(iid) < 0) state.meta.deletedSeed.push(iid);
         n++;
       });
-      // 기본 짐 목록 항목이 바뀐 경우: { inventory: { id: { from: { note: 옛 글 }, set?: { 칸: 새 값 } } } }
+      // 칸 값이 없으면(옛 기록에 model 칸이 없을 때 등) normInv 기본값과 비교해요
+      const invDef = normInv({ id: '_' }, true);
+      const cur = (it, k) => (it[k] === undefined ? invDef[k] : it[k]);
+      const sameVal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+      // 기본 짐을 목록에서 뺀 경우: { removeInventory: [id | { id, from: { 칸: 옛 기본값 }, keepNote: '메모 앞 글' }] }
+      //  · 기본 짐(seed)이고 지금 값이 from 과 모두 같을 때만(사용자가 고치지 않았을 때만) 지우고 meta.deletedSeed 에 넣어요
+      //    (다시 추가되지 않게). 그 짐을 가리키는 도면 배치도 모든 도면에서 함께 지워요(없는 짐을 가리키는 배치가 남지 않게)
+      //  · 사용자가 고친 짐은 남기고, keepNote 가 있으면 메모 앞에 한 번만 붙여요(지울지 사용자가 정하게)
+      (m.removeInventory || []).forEach((r) => {
+        const iid = typeof r === 'string' ? r : (r && typeof r === 'object' ? r.id : null);
+        if (!iid) return;
+        const idx = state.inventory.findIndex((x) => x && x.id === iid);
+        if (idx < 0) return;
+        const it = state.inventory[idx];
+        const f = (r && typeof r === 'object' && r.from && typeof r.from === 'object') ? r.from : {};
+        const untouched = !!it.seed && Object.keys(f).every((k) => sameVal(cur(it, k), f[k]));
+        if (untouched) {
+          state.inventory.splice(idx, 1);
+          state.meta.deletedSeed = state.meta.deletedSeed || [];
+          if (state.meta.deletedSeed.indexOf(iid) < 0) state.meta.deletedSeed.push(iid);
+          if (state.layouts && typeof state.layouts === 'object') {
+            Object.keys(state.layouts).forEach((lk) => {
+              const L = state.layouts[lk];
+              if (L && Array.isArray(L.placements)) L.placements = L.placements.filter((p) => !(p && p.invId === iid));
+            });
+          }
+          n++;
+          return;
+        }
+        const pre = r && typeof r === 'object' && typeof r.keepNote === 'string' ? r.keepNote : '';
+        const note = String(it.note || '');
+        if (pre && note.indexOf(pre.trim()) < 0) { it.note = pre + note; n++; }
+      });
+      // 기본 짐 목록 항목이 바뀐 경우: { inventory: { id: { from: { note: 옛 글 }, set?: { 칸: 새 값 }, prev?: { 칸: 옛 기본값 } } } }
       // 지금 값이 from 과 모두 같을 때만(사용자가 고치지 않았을 때만) 바꿔요.
       //  · set 이 없으면: from 에 적은 칸을 이 버전의 기본값(seed)으로
       //  · set 이 있으면: set 에 적은 칸은 set 값으로, from 에만 적은 칸은 기본값(seed)으로
       //    (from 에 적지 않은 칸 — 모델명·추정 표시 등 — 도 함께 바꿀 수 있어요. 예: 모델명으로 찾은 규격 넣기)
-      // 칸 값이 없으면(옛 기록에 model 칸이 없을 때 등) normInv 기본값과 비교해요
-      const invDef = normInv({ id: '_' }, true);
-      const cur = (it, k) => (it[k] === undefined ? invDef[k] : it[k]);
+      //  · prev 가 있으면: set 의 칸 중 지금 값이 prev(옛 기본값)와 다른 칸 = 사용자가 고친 칸(메모·모델명·링크·위치 등)은
+      //    그대로 두고 나머지만 바꿔요 (from = 바꿀지 말지 정하는 문, prev = 칸마다 지키는 것)
       Object.keys(m.inventory || {}).forEach((iid) => {
         const it = state.inventory.find((x) => x && x.id === iid);
         const sp = (seed.inventory || []).find((x) => x.id === iid);
         const rule = m.inventory[iid] || {};
         const f = rule.from || {};
         const set = (rule.set && typeof rule.set === 'object') ? rule.set : null;
+        const prevV = (rule.prev && typeof rule.prev === 'object') ? rule.prev : null;
         const keys = Object.keys(f);
         if (!it || !sp || !keys.length || !keys.every((k) => JSON.stringify(cur(it, k)) === JSON.stringify(f[k]))) return;
         const target = {};
         keys.forEach((k) => { target[k] = sp[k] === undefined ? invDef[k] : sp[k]; });
-        if (set) Object.keys(set).forEach((k) => { if (k !== 'id' && k !== 'seed') target[k] = set[k]; });
+        if (set) {
+          Object.keys(set).forEach((k) => {
+            if (k === 'id' || k === 'seed') return;
+            // from 에 있는 칸은 이미 옛 기본값과 같다고 확인했으니 그대로 바꿈
+            if (keys.indexOf(k) < 0 && prevV && Object.prototype.hasOwnProperty.call(prevV, k) && !sameVal(cur(it, k), prevV[k])) return;
+            target[k] = set[k];
+          });
+        }
         const tk = Object.keys(target);
         if (tk.every((k) => JSON.stringify(cur(it, k)) === JSON.stringify(target[k]))) return;
         tk.forEach((k) => { it[k] = MV.clone(target[k]); });
@@ -397,6 +450,8 @@
       //  · add: 같은 id 배치가 없고, 그 짐이 있고, 그 짐의 배치 수가 짐 개수(qty)보다 적을 때만 넣어요
       //         (사용자가 이미 놓은 짐은 건드리지 않음 · 배치 id 가 고정이라 두 기기가 같이 올려도 겹치지 않음)
       //  · ifInv { w, d }: 짐의 가로·깊이가 이 값일 때만 (사용자가 크기를 고친 짐은 좌표가 안 맞아 건드리지 않음)
+      //  · add 는 그 도면에 이미 있는 다른 배치와 1cm 넘게 겹치면 넣지 않아요 (사용자가 그 자리에 다른 짐을 놓았을 때)
+      //    — 벽걸이 에어컨처럼 바닥을 차지하지 않는 짐은 겹침으로 보지 않음 (view-floorplan 과 같은 규칙)
       Object.keys(m.layouts || {}).forEach((key) => {
         const rule = m.layouts[key];
         if (!rule || typeof rule !== 'object') return;
@@ -422,7 +477,10 @@
           if (!it || !sizeOk(it, pl.ifInv)) return;
           const qty = Math.max(0, Math.round(+it.qty || 0));
           if (pls.filter((x) => x && x.invId === pl.invId).length >= qty) return;
-          pls.push({ id: pl.id, invId: pl.invId, x: pl.x, y: pl.y, rot: pl.rot === 90 ? 90 : 0 });
+          const np = { id: pl.id, invId: pl.invId, x: pl.x, y: pl.y, rot: pl.rot === 90 ? 90 : 0 };
+          const r = rectOfPl(np, it);
+          if (r && pls.some((x) => { const o = x && rectOfPl(x, invOf(x.invId)); return o && rectHit(r, o); })) return;
+          pls.push(np);
           n++;
         });
       });
