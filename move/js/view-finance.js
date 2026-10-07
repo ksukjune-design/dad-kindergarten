@@ -281,8 +281,8 @@
   /* 가전 결정(2026-10-06): 냉장고(LG)·건조기(삼성)는 이삿짐센터 견적에 포함, 삼성 2in1 에어컨만 삼성전자서비스가
      이사 전에 새 집에 설치. 제조사 서비스 금액은 짐·견적 계산(lgCost)을 쓰고, 그게 없을 때만 아래 가족 결정 금액 */
   const AC_MOVE_FALLBACK = 500000;
-  /* 이사업체 — 짐·견적 계산(moveEstimate)이 없을 때만: 10/6 이사 견적 화면 값(6톤·5명, 부가세 포함 약 250만원, 추정) */
-  const MOVER_FALLBACK = 2500000;
+  /* 이사업체 — 짐·견적 계산(moveEstimate)이 없을 때만: 10/7 이사 견적 화면 값(실제 가구 규격 · 5톤·4~5명, 부가세 포함 약 211만원, 추정) */
+  const MOVER_FALLBACK = 2110000;
 
   /* ======================= 기본값 ======================= */
   /* 11/3 단계 기본 시각 (v7) — 통장업무·이사당일 가이드 시간표와 같게: A 입금 10:00~10:30 (질권이 있으면 A가 같은 시간 안에
@@ -299,7 +299,7 @@
   /* 가족 결정(2026-10-06): 옷장은 이사 후 간이 옷장(약 20만원, 선택·나중에), 통돌이 약 50만원(이사 후 배송),
      커튼·소품은 지금 것 가져감(0원), 입주청소는 직접(0원), 예비비 없음 */
   const LINE_META = {
-    mover: { auto: 'mover', low: 1500000, high: 2800000, conf: 'low', basis: '서울 20평대 3인 포장이사 약 150만~280만원(부가세 별도 시세). 이사 견적 화면 값 (10/6 기준 약 250만원 부가세 포함, 6톤·5명, 추정)을 그대로 가져와요. 냉장고·건조기는 이삿짐센터가 옮겨서 이 견적에 들어가요. 11/3(화)은 손없는날·주말은 아니지만, 월초라 업체에 따라 약 5% 할증이 붙을 수 있어요. 예산에는 실제로 낼 돈(부가세 포함)을 넣어요. 옷장을 이사 전에 사지 않으니 행거박스를 몇 개 가져오는지 물어 견적에 넣기. 방문견적 3곳으로 다시 맞추기' },
+    mover: { auto: 'mover', low: 1500000, high: 2800000, conf: 'low', basis: '서울 20평대 3인 포장이사 약 150만~280만원(부가세 별도 시세). 이사 견적 화면 값 (10/7 기준 약 211만원 부가세 포함, 5톤·4~5명, 추정)을 그대로 가져와요. 냉장고·건조기는 이삿짐센터가 옮겨서 이 견적에 들어가요. 11/3(화)은 손없는날·주말은 아니지만, 월초라 업체에 따라 약 5% 할증이 붙을 수 있어요. 예산에는 실제로 낼 돈(부가세 포함)을 넣어요. 옷장을 이사 전에 사지 않으니 행거박스를 몇 개 가져오는지 물어 견적에 넣기. 방문견적 3곳으로 다시 맞추기' },
     /* 줄 id 'lg' 는 저장 기록 호환 때문에 그대로 — 내용은 삼성 2in1 에어컨 이전설치 (이사 전에 새 집에 설치) */
     lg: { auto: 'lg', before: true, low: 450000, high: 700000, conf: 'mid', links: [LINK.ssAc], check: '1588-3366 예약 때 견적을 문자로 받아 확인',
       basis: '삼성전자서비스(1588-3366) 이전설치. 2in1(거실 스탠드 + 안방 벽걸이, 실외기 1대) 공식 기본 약 40.4만원(2026-05 단가표) + 배관 연장(1m당 약 1.9만~2.7만원)·실외기 앵글(외벽에 달 때 약 11만~13만원)·냉매 보충·타공 등 추가 → 예산 약 50만원(45만~70만원, 추정). 운반이 포함되는지는 자료마다 달라 예약 때 꼭 확인. 설치가 이사 전이라 11/3 돈이 들어오기 전에 지금 통장에서 나가요. 이 줄에는 삼성 에어컨 몫만 들어가요 — 냉장고·건조기는 이삿짐센터 견적에 들어 있고, 다른 가전을 제조사 서비스로 바꾸면 그 돈은 "제조사 서비스 이전 (LG 등, 이사 날)" 줄에 따로 잡혀요' },
@@ -341,7 +341,7 @@
   const GROUP_OF = { mover: 'essential', lg: 'essential', 'maker-other': 'essential', elevator: 'essential', waste: 'essential', internet: 'essential', washer: 'purchase', 'wardrobe-extra': 'purchase', wardrobe: 'optional', hug: 'optional', deco: 'purchase', clean: 'optional', reserve: 'optional' };
   const groupOf = (l) => (l && GROUP_BY_ID[l.group] ? l.group : (l && GROUP_OF[l.id]) || 'purchase');
   const REFUND_META = {
-    jangsu: { conf: 'mid', basis: '공동주택관리법 시행령 제31조 — 세입자가 낸 장기수선충당금은 소유자에게 돌려받을 수 있어요(약 20만~50만원 추정). 관리사무소 납부확인서로 금액 확정' },
+    jangsu: { conf: 'mid', basis: '공동주택관리법 시행령 제31조 — 세입자가 낸 장기수선충당금은 소유자에게 돌려받을 수 있어요(약 20만~50만원 추정). 관리사무소 납부확인서로 금액을 고치고, 11/3 보증금과 함께 A에게 받으면 받음으로 표시해요(그때 남는 돈에 더해요)' },
     hfFee: { conf: 'low', basis: 'HF 보증 해지 때 남은 기간 보증료가 돌려받는지 은행에 확인' },
   };
   function normLine(l) {
@@ -447,9 +447,12 @@
     });
     return out;
   }
+  /* 장기수선충당금 줄 이름 — v9(10/7 '지금 집 A에게서 받아야 돼'): 11/3 보증금과 함께 받는 돈. 옛 기본 이름 그대로인 줄만 바꿈 */
+  const JANGSU_LABEL = '장기수선충당금 — A에게 11/3 보증금과 함께 받기 (추정, 납부확인서 금액으로 고치기)';
+  const JANGSU_OLD_LABEL = '장기수선충당금 반환 (A에게 청구)';
   function defaultRefunds() {
     return [
-      { id: 'jangsu', label: '장기수선충당금 반환 (A에게 청구)', amount: 300000 },
+      { id: 'jangsu', label: JANGSU_LABEL, amount: 300000 },
       { id: 'hfFee', label: 'HF 보증료 미경과분 환급 (있으면)', amount: 0 },
     ].map(normRefund);
   }
@@ -457,8 +460,10 @@
      5: HUG 보증료 2025-03-31 개편 요율 (0.107%, 684,800원),
      6: 옷 자리 바꾸기(10/6 저녁) — '이동식 행거·보관용품 (필요하면, 이사 전)' 0원 줄 추가, 간이 옷장 메모,
      7: 11/3 단계 기본 시각을 가이드 시간표에 맞춤 — 안 고친 시각만 (migrateTimes),
-     8: 제조사 서비스를 '삼성 에어컨 (이사 전)' 줄과 '제조사 서비스 이전 (LG 등, 이사 날)' 줄로 나눔 — 새 줄만 더함 (V7_NEW_LINES) */
-  const FIN_V = 8;
+     8: 제조사 서비스를 '삼성 에어컨 (이사 전)' 줄과 '제조사 서비스 이전 (LG 등, 이사 날)' 줄로 나눔 — 새 줄만 더함 (V7_NEW_LINES),
+     9: 장기수선충당금 줄 이름을 '11/3 보증금과 함께 받기'로 (10/7) — 옛 기본 이름·금액 그대로이고 받음·메모가 없는 줄만.
+        받음(got)으로 표시한 들어올 돈은 남는 돈 계산(net·netEssential·netWithPurchases)에 더해요 — 받기 전에는 넣지 않음 */
+  const FIN_V = 9;
   /* 저장된 11/3 단계 시각 중 예전 기본값 그대로인 것만 새 기본 시각으로 (고친 시각은 그대로).
      고친 시각과 섞여 단계 순서가 새로 뒤바뀌면(앞 단계보다 빨라짐) 이 기록은 통째로 그대로 둠 */
   function timeAt(t, id) { return t && typeof t[id] === 'string' ? t[id] : (DEFAULT_TIMES[id] || ''); }
@@ -546,6 +551,8 @@
     f.budget.lines = raw.map(normLine);
     f.v = Math.max(rawV, FIN_V);
     f.budget.refunds = (Array.isArray(f.budget.refunds) ? f.budget.refunds : []).filter((x) => x && typeof x === 'object').map(normRefund);
+    /* v9: 손대지 않은 장기수선충당금 기본 줄만 새 이름으로 (금액·받음·메모를 고친 줄은 그대로) */
+    if (rawV < 9) f.budget.refunds.forEach((r) => { if (r.id === 'jangsu' && r.label === JANGSU_OLD_LABEL && r.amount === 300000 && !r.got && !r.memo) r.label = JANGSU_LABEL; });
     ['times', 'done', 'memo', 'prep'].forEach((k) => { if (!f.flow[k] || typeof f.flow[k] !== 'object') f.flow[k] = k === 'times' ? Object.assign({}, DEFAULT_TIMES) : {}; });
     if (!f.links || typeof f.links !== 'object' || Array.isArray(f.links)) f.links = {};
     return f;
@@ -757,7 +764,7 @@
         const p = (est.pay && isNum(est.pay.typical) && est.pay.typical > 0) ? est.pay : est;
         return { value: Math.round(p.typical / 1000) * 1000, src: 'est', note: '짐·견적 화면 계산값 · 부가세 포함' + (isNum(p.low) && isNum(p.high) ? ' (범위 ' + krw(p.low) + '~' + krw(p.high) + ')' : '') };
       }
-      return { value: MOVER_FALLBACK, src: 'research', note: '이사 견적 화면 값 (10/6 기준 약 250만원 부가세 포함, 6톤·5명, 추정) — 짐·견적 계산이 생기면 자동으로 바뀌어요' };
+      return { value: MOVER_FALLBACK, src: 'research', note: '이사 견적 화면 값 (10/7 기준 약 211만원 부가세 포함, 5톤·4~5명, 추정) — 짐·견적 계산이 생기면 자동으로 바뀌어요' };
     }
     if (kind === 'lg') {
       /* 짐·견적의 제조사 서비스(lgCost, 부가세 포함 소비자가) 중 삼성 에어컨 몫만 — 이사 전에 새 집에 설치.
@@ -852,6 +859,7 @@
     return {
       lines, total, paid, unpaid: total - paid, count: active.length, groups, before,
       refunds, refundsTotal: sum(refunds, (r) => r.amount), refundsPending: sum(refunds.filter((r) => !r.got), (r) => r.amount),
+      refundsGot: sum(refunds.filter((r) => r.got), (r) => r.amount),   // 받음으로 표시한 돈 — 남는 돈 계산에 더함
     };
   }
   function computeBroker(f) {
@@ -1030,9 +1038,9 @@
         title: 'HUG 전세보증금반환보증 가입',
         detail: '전입·확정일자를 마친 뒤, 계약기간 1/2이 지나기 전까지 신청(11월 중 권장). 반전세는 보증금 부분만 보증해요. 보증료는 2025-03-31 개편 요율로 ' + (f ? '약 ' + krw(hugPremium(f).value) + '(' + hugPremium(f).years + '년' : '2년 약 68.5만원(') + ', 추정 · 6·12개월 무이자 분납 가능)이에요.',
         links: [LINK.hug, LINK.hugCompare] },
-      { key: 'jangsu', part: 'money', re: [/장기\s*수선.*(돌려|반환|청구)/], due: move, conf: 'mid',
-        title: '구집 장기수선충당금 반환 청구 (A에게)',
-        detail: '관리사무소에서 납부확인서를 받아 소유자에게 청구하세요(약 20만~50만원 추정). 예산 탭의 "들어올 돈"에 금액이 있어요.',
+      { key: 'jangsu', part: 'money', re: [/장기\s*수선.*(돌려|반환|청구|받기|정산)/], due: move, conf: 'mid',
+        title: '구집 장기수선충당금 A에게 받기 (보증금과 함께)',
+        detail: '10/12 합의서에 한 줄 → 10/16 관리사무소에 금액 확인·납부확인서 요청 → ' + D.fmt(move) + ' 09:00 납부확인서 받기 → 10:30 빈집 확인 때 A에게 보여 주고 보증금과 함께 받기(약 20만~50만원 추정). 못 받으면 날짜·계좌를 문자로 약속받고 11/13 입금 확인. 예산 탭의 "들어올 돈"에서 금액을 고치고 받으면 받음으로 표시해요.',
         links: [] },
       { key: 'oldReport', part: 'admin', re: [/(해제|변경)\s*신고|구\s*계약.*신고/], due: D.add(move, 2), conf: 'low',
         title: '구 계약(2024) 해제·변경 신고가 필요한지 주민센터에 문의',
@@ -1203,9 +1211,10 @@
     const G = budget.groups;
     const c = {
       f, est, today, move, flow, budget,
-      net: flow.leftover - budget.unpaid,                                   // 전부 포함
-      netEssential: flow.leftover - G.essential.unpaid,                     // 11/3 전후 꼭 필요한 현금 기준
-      netWithPurchases: flow.leftover - G.essential.unpaid - G.purchase.unpaid, // 살림 구입까지
+      /* 받음으로 표시한 들어올 돈(장기수선충당금 등)만 더함 — 받기 전(금액 추정)에는 넣지 않아요 (보수적) */
+      net: flow.leftover + budget.refundsGot - budget.unpaid,                                   // 전부 포함
+      netEssential: flow.leftover + budget.refundsGot - G.essential.unpaid,                     // 11/3 전후 꼭 필요한 현금 기준
+      netWithPurchases: flow.leftover + budget.refundsGot - G.essential.unpaid - G.purchase.unpaid, // 살림 구입까지
     };
     c.broker = computeBroker(f);
     c.gift = computeGift(f, today);
@@ -1230,7 +1239,9 @@
       expensesPaid: c.budget.paid,
       refunds: c.budget.refundsTotal,
       net: c.net,
-      netWithRefunds: c.net + c.budget.refundsTotal,
+      netWithRefunds: c.net + c.budget.refundsPending,   // 받기 전 들어올 돈까지 (받은 돈은 net 에 이미 들어 있음)
+      refundsGot: c.budget.refundsGot,
+      refundsPending: c.budget.refundsPending,         // 아직 받기 전인 들어올 돈 (남는 돈 계산에 안 들어 있음)
       essentialUnpaid: c.budget.groups.essential.unpaid,
       purchaseUnpaid: c.budget.groups.purchase.unpaid,
       optionalUnpaid: c.budget.groups.optional.unpaid,
@@ -2162,6 +2173,7 @@ div.fn-alert { cursor: default; }
       el('div', { class: 'fn-stat is-final' + (c.netEssential < 0 ? ' is-neg' : '') },
         el('span', { class: 'fn-stat-k' }, c.netEssential < 0 ? '⚠ 꼭 드는 비용 내면 부족' : '꼭 드는 비용 내고 여유'),
         el('span', { class: 'fn-stat-v', title: won(c.netEssential) }, krw(Math.abs(c.netEssential))),
+        b.refundsGot > 0 ? el('span', { class: 'fn-stat-s' }, '그날 남는 돈 + 받은 돈 ' + krw(b.refundsGot) + '(장기수선충당금 등) − 꼭 드는 비용') : null,
         el('span', { class: 'fn-stat-s' }, '살림 구입까지 포함하면 ', el('b', verdictTxt(c.netWithPurchases))),
         el('span', { class: 'fn-stat-s' }, '전부 포함하면 ', el('b', verdictTxt(c.net)), ' · ',
           el('a', { href: '#/money/budget', onclick: P.tabLink('budget', 'fn-budget-sum') }, '예산 보기'))),
@@ -2446,6 +2458,19 @@ div.fn-alert { cursor: default; }
     return out;
   }
 
+  /* 11/3 돈 흐름의 '받을 돈' 쪽에 따로 보이는 줄: A에게서 같이 받을 장기수선충당금 (10/7 사용자 '지금 집 A에게서 받아야 돼').
+     받기 전(추정)에는 남는 돈에 넣지 않고, 예산 탭 '들어올 돈'에서 받음으로 표시하면 남는 돈 계산에 더해요 */
+  function jangsuLine(P) {
+    const r = (P.c.budget.refunds || []).find((x) => x && x.id === 'jangsu');
+    if (!r || !(r.amount > 0)) return null;
+    const go = el('a', { href: '#/money/budget', onclick: P.tabLink('budget', 'fn-budget-sum') }, '들어올 돈에서 고치기 →');
+    return el('div', { class: 'callout fn-jangsu mt-8' },
+      el('p', { class: 'mb-0' }, el('b', 'A에게서 같이 받을 돈: 장기수선충당금 약 ' + krw(r.amount)),
+        r.got ? ' — 받음으로 표시했어요. 아래 남는 돈 계산에 더했어요. '
+          : ' (추정 — 관리사무소 납부확인서 금액으로 고치기). 아직 받기 전이라 위·아래 남는 돈에 넣지 않았어요. ' + D.fmt(P.c.move) + ' 10:30 빈집 확인 때 납부확인서를 보여 주고 보증금과 함께 받아요. ',
+        go));
+  }
+
   function resultItem(P) {
     return el('li', { class: 'fn-step k-result' },
       el('div', { class: 'fn-rail', 'aria-hidden': 'true' }, el('span', { class: 'fn-num' }, '=')),
@@ -2455,7 +2480,8 @@ div.fn-alert { cursor: default; }
           el('div', { class: 'fn-result-k' }, '모두 끝나면 남는 돈'),
           el('div', { class: 'fn-result-v' + (fl.leftover < 0 ? ' is-neg' : ''), title: won(fl.leftover) }, eok(fl.leftover)),
           el('div', { class: 'fn-formula' }, '받을 돈 ' + won(fl.inflow) + ' − 보낼 돈 ' + won(fl.outflow) + ' = ' + won(fl.leftover)),
-          el('p', { class: 'small mb-0 mt-8' }, '꼭 드는 이사 비용 ' + krw(c.budget.groups.essential.unpaid) + '까지 빼면 ',
+          jangsuLine(P),
+          el('p', { class: 'small mb-0 mt-8' }, '꼭 드는 이사 비용 ' + krw(c.budget.groups.essential.unpaid) + '까지 빼면 ' + (c.budget.refundsGot ? '(받은 돈 ' + krw(c.budget.refundsGot) + ' 더해서) ' : ''),
             el('b', { style: { color: c.netEssential < 0 ? 'var(--bad)' : 'var(--good)' } }, verdictTxt(c.netEssential)),
             ' · 살림 구입까지 ' + verdictTxt(c.netWithPurchases) + ' · 전부 포함 ' + verdictTxt(c.net) + ' · ',
             el('a', { href: '#/money/budget', onclick: P.tabLink('budget', 'fn-budget-sum') }, '예산 보기 →')),
@@ -2791,7 +2817,7 @@ div.fn-alert { cursor: default; }
         } }, '+ 항목 추가'),
         el('span', { class: 'small muted' }, '새 항목은 "새로 사는 살림"에 들어가요 — 줄마다 "묶음"에서 옮길 수 있어요')));
     const refunds = el('section', { class: 'card' },
-      el('div', { class: 'fn-card-h' }, el('h3', '들어올 돈'), el('span', { class: 'small muted' }, '받으면 ✓ — 최종 계산에는 따로 표시해요')),
+      el('div', { class: 'fn-card-h' }, el('h3', '들어올 돈'), el('span', { class: 'small muted' }, '받으면 ✓ — 받은 돈만 남는 돈 계산에 더해요')),
       el('div', { class: 'fn-blist' }, f.budget.refunds.map((r) => refundRow(P, r))),
       el('div', { class: 'row mt-12' },
         el('button', { class: 'btn', type: 'button', onclick: () => {
@@ -2824,6 +2850,7 @@ div.fn-alert { cursor: default; }
         s.labels.length ? el('span', { class: 'fn-gcard-items' }, '지금 들어 있는 항목: ' + s.labels.join(' · ')) : el('span', { class: 'fn-gcard-items' }, '들어 있는 항목이 없어요'),
         el('a', { class: 'fn-gcard-go', href: '#/money/budget', onclick: P.tabLink('budget', 'fn-bg-' + g.id) }, '줄 보기 ↓'));
     };
+    const gotAmt = b.refundsGot > 0 ? b.refundsGot : 0;
     return [
       el('div', { class: 'fn-card-h', id: 'fn-budget-sum' }, el('h3', '이사 비용 한눈에')),
       /* 머리 숫자: 11/3 전후 꼭 필요한 현금 = 꼭 드는 이사 비용(아직 낼 돈) ↔ 그날 남는 돈 */
@@ -2831,7 +2858,9 @@ div.fn-alert { cursor: default; }
         el('div', { class: 'fn-hl-k' }, D.fmt(c.move) + ' 전후 꼭 필요한 현금'),
         /* 그날 남는 돈 − 꼭 드는 이사 비용 = 여유/부족 (좁은 화면에선 세 줄) */
         el('div', { class: 'fn-hl-eq' },
-          el('div', { class: 'fn-hl-cell' }, el('small', D.fmt(c.move) + ' 그날 남는 돈'), el('b', { title: won(fl.leftover) }, krw(fl.leftover))),
+          /* 받음으로 표시한 들어올 돈(장기수선충당금 등)은 여유 숫자에 더해져 있어서, 식이 맞게 '그날 남는 돈'에 넣어 보여요 */
+          el('div', { class: 'fn-hl-cell' }, el('small', D.fmt(c.move) + ' 그날 남는 돈' + (gotAmt ? ' (받은 돈 ' + krw(gotAmt) + ' 포함)' : '')),
+            el('b', { title: won(fl.leftover + gotAmt) }, krw(fl.leftover + gotAmt))),
           el('span', { class: 'fn-hl-op', 'aria-hidden': 'true' }, '−'),
           el('div', { class: 'fn-hl-cell' }, el('small', '꼭 드는 이사 비용 (아직 낼 돈)'), el('b', { title: won(ess) }, krw(ess))),
           el('span', { class: 'fn-hl-op', 'aria-hidden': 'true' }, '='),
@@ -2861,7 +2890,8 @@ div.fn-alert { cursor: default; }
         GROUPS.map((g) => el('span', el('i', { class: 'fn-sw-' + g.id }), g.short + ' ' + krw(G[g.id].unpaid))),
         fl.leftover > 0 ? el('span', el('i', { class: 'fn-mark-key' }), '세로선 = 그날 남는 돈') : null),
       el('div', { class: 'fn-gcards' }, GROUPS.map(cardOf)),
-      b.refundsPending ? el('p', { class: 'small muted mb-0' }, '들어올 돈 ' + krw(b.refundsPending) + '(장기수선충당금 등)은 받는 날이 정해지지 않아 위 계산에 넣지 않았어요 — 받으면 그만큼 여유가 늘어요.') : null,
+      b.refundsPending ? el('p', { class: 'small muted mb-0' }, '들어올 돈 ' + krw(b.refundsPending) + '(장기수선충당금 등)은 아직 받기 전이라(금액 추정) 위 계산에 넣지 않았어요 — 받음으로 표시하면 그만큼 여유가 늘어요.') : null,
+      b.refundsGot ? el('p', { class: 'small muted mb-0' }, '받은 돈 ' + krw(b.refundsGot) + '(들어올 돈에서 받음으로 표시)은 위 계산에 더했어요.') : null,
       el('p', { class: 'small muted mb-0' }, '전체 예산 ' + krw(b.total) + ' (' + b.count + '개) · 이미 낸 돈 ' + krw(b.paid) + ' · 앞으로 낼 돈 ' + krw(b.unpaid)),
       basis('low', '금액은 견적 전 추정이에요(조사 자료 기준). 견적·영수증이 생기면 아래 줄을 고치면 위 계산이 바로 바뀌어요.', [], '견적·영수증으로 다시 계산'),
     ];
@@ -3000,7 +3030,7 @@ div.fn-alert { cursor: default; }
       el('p', { class: 'small' }, lead),
       sec(GROUP_BY_ID.essential, [
         fl.rentPart ? li('월세 후불 확인', ' — 계약서대로 ' + D.fmt(addMonths(c.move, 1)) + '에 내면 ' + D.fmt(c.move) + '에 ' + krw(fl.rentPart) + '이 덜 나가요. 중개사·C와 확정하세요.') : null,
-        li('장기수선충당금 돌려받기', ' — 약 20만~50만원. 구집 관리사무소 납부확인서로 A에게 청구.'),
+        li('장기수선충당금 받기', ' — 약 20만~50만원. 구집 관리사무소 납부확인서를 보여 주고 ' + D.fmt(c.move) + ' 보증금과 함께 A에게 받아요. 받음으로 표시하면 남는 돈에 더해져요.'),
         li('이사업체 단가 협상', ' — 11/3(화)은 평일이고 손없는날도 아니지만, 월초라 업체에 따라 약 5% 할증이 붙을 수 있어요. 방문견적 3곳을 "부가세 포함 총액"으로 비교하고, 할증이 들어 있는지 물어보세요 (카드 수수료 전가는 금지). 냉장고·건조기도 이 견적에 넣어요.'),
         li('에어컨 이전설치는 이사 전에 내요', ' — 삼성전자서비스(1588-3366)에 되도록 빨리 예약하고, 운반 포함 여부와 배관 연장·앵글·타공 추가비를 견적 문자로 받으세요. 설치 날 내는 돈이라 ' + D.fmt(c.move) + ' 돈이 들어오기 전에 지금 통장에서 나가요.'),
         mo ? li('제조사 서비스로 옮기는 다른 가전 약 ' + krw(mo.value), ' — 짐 목록에서 제조사 서비스로 바꾼 가전이에요(가족 결정은 냉장고·건조기를 이삿짐센터가 옮기는 것). 이사 날 철거·운송·설치하고 그날 내요. 예약 때 문자 견적을 받고, 이삿짐센터 견적에서는 그 가전을 빼 달라고 하세요.') : null,

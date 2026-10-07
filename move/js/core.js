@@ -252,8 +252,12 @@
                  notes: [{ id, text, at }], links: [{label,url}], guide, order, seed, createdAt, updatedAt }],
                  // owner: 옛 기록 호환용으로만 남김 (기본 ''). 할 일은 사람에게 나눠 배정하지 않으므로
                  //        화면·거르기·정렬·검색·복사 글·AI 비서 어디에도 쓰지 않음
-       inventory: [{ id, name, cat, fate, qty, w, d, h, url, room, roomNew, brand, model, lg, ac, tag, note, assumed, seed }],
+       inventory: [{ id, name, cat, fate, qty, w, d, h, url, room, roomNew, brand, model, lg, ac, tag, note, assumed, seed, use? }],
                  // model: 명판·라벨에 적힌 모델명 (규격 확인용, 없으면 '')
+                 // use: 쓰임 공간(선택, normInv 기본값 없음 — 없으면 화면이 태그·종류별 기본값을 씀)
+                 //      { kind: 'drawer'|'hinged'|'sliding'|'lid'|'front-door'|'seat'|'bed'|'open'|'airflow'|'table',
+                 //        front, left, right, back, top (cm), note } — 자세한 뜻은 data-seed.js 머리말.
+                 //      정면 방향은 도면 배치 placement.rot (0 남 · 90 서 · 180 북 · 270 동, data-layouts.js 머리말)
                  // tag: 'fridge'|'washer'|'dryer'|'wardrobe'|'bed'|'sofa'|'tv'|'desk'|'table'|'shelf'|'aircon'|'' (의미 검색용)
        activity: [{ at, text }],
        ...모듈 하위 상태 (ensure 로 생성): layouts, planEdits, estimate, finance, ui
@@ -315,10 +319,68 @@
       layouts: MV.seedLayouts ? MV.clone(MV.seedLayouts) : undefined,
     };
   }
+  /* 도면 배치가 바닥에서 차지하는 사각형 (view-floorplan 의 foot·rectOf 와 같은 규칙, 벽걸이 에어컨은 null)
+     rot = 정면 방향 0 남 · 90 서 · 180 북 · 270 동 — 바닥 크기는 0·180 이 w×d, 90·270 이 d×w */
+  const PL_ROTS = [0, 90, 180, 270];
+  const plRot = (v) => (PL_ROTS.indexOf(+v) >= 0 ? +v : 0);
+  function rectOfPl(p, it) {
+    if (!p || !it || (it.cat === 'aircon' && it.ac === 'wall')) return null;
+    const nv = (v, d) => { const x = parseFloat(v); return isFinite(x) ? x : d; };
+    const w = Math.max(5, nv(it.w, 60)), d = Math.max(5, nv(it.d, 60));
+    const rot = plRot(p.rot) === 90 || plRot(p.rot) === 270;
+    return { x: nv(p.x, 0), y: nv(p.y, 0), w: rot ? d : w, h: rot ? w : d };
+  }
+  function rectHit(a, b) {
+    const w = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+    const h = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+    return w > 1 && h > 1;
+  }
+  /** 이 짐(invId)의 배치가 개수(qty)보다 많으면 남는 것을 모든 도면에서 빼요 → 뺀 수.
+      v7 기본 배치(pl-new-*·pl-old-*)가 아닌 것부터, 나중에 놓은 것(배열 뒤)부터 */
+  function trimPlacements(state, iid, qty) {
+    if (!state.layouts || typeof state.layouts !== 'object') return 0;
+    let cut = 0;
+    Object.keys(state.layouts).forEach((lk) => {
+      const L = state.layouts[lk];
+      if (!L || !Array.isArray(L.placements)) return;
+      const mine = L.placements.filter((p) => p && p.invId === iid);
+      let extra = mine.length - Math.max(0, qty);
+      if (extra <= 0) return;
+      const isSeedPl = (p) => /^pl-(new|old)-/.test(String(p.id || ''));
+      const order = mine.slice().reverse().sort((a, b) => (isSeedPl(a) ? 1 : 0) - (isSeedPl(b) ? 1 : 0));
+      const drop = new Set();
+      order.forEach((p) => { if (extra > 0) { drop.add(p); extra--; } });
+      L.placements = L.placements.filter((p) => !drop.has(p));
+      cut += drop.size;
+    });
+    return cut;
+  }
+  /** 정면(rot) 뜻이 생기기 전(v8 전) 배치: 등을 댄 벽을 보고 정면을 한 번만 정해요 (0↔180, 90↔270 — 바닥 크기·좌표는 그대로).
+      v7 까지 rot 0·90 은 '돌렸나'만 뜻했어요. v8 은 0 = 정면 아래 · 90 = 왼쪽이라, 아래 벽에 등을 댄 0 이나
+      왼쪽 벽에 등을 댄 90 은 '정면이 벽을 본다'로 잘못 읽혀요 → 그 벽에서 15cm 안이고 맞은편 벽은 더 멀면(20cm 넘게) 뒤집어요 */
+  function frontFromWall(p, it, rooms) {
+    const rot = plRot(p.rot);
+    if (rot !== 0 && rot !== 90) return false;
+    const r = rectOfPl(p, it);
+    if (!r || !Array.isArray(rooms)) return false;
+    const ok = (m) => m && isFinite(+m.x) && isFinite(+m.y) && +m.w > 0 && +m.h > 0;
+    const inside = (m) => r.x >= m.x - 1 && r.y >= m.y - 1 && r.x + r.w <= m.x + m.w + 1 && r.y + r.h <= m.y + m.h + 1;
+    const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
+    const rm = rooms.find((m) => ok(m) && inside(m)) || rooms.find((m) => ok(m) && cx >= m.x && cx <= m.x + m.w && cy >= m.y && cy <= m.y + m.h);
+    if (!rm) return false;
+    const gT = r.y - rm.y, gB = rm.y + rm.h - r.y - r.h, gL = r.x - rm.x, gR = rm.x + rm.w - r.x - r.w;
+    // 15cm: v8 에서 크기가 줄어든 짐(예: 퀸 침대 210 → 라지킹 200)은 왼쪽 위 기준이라 벽에서 조금 떨어져 보여요
+    if (rot === 0 && gB <= 15 && gT > gB + 20) { p.rot = 180; return true; }
+    if (rot === 90 && gL <= 15 && gR > gL + 20) { p.rot = 270; return true; }
+    return false;
+  }
   // 예전 버전 기록을 새 기본값에 맞추기 (data-seed.js 의 MV.seed.migrations)
   function migrateSeed(state, seed) {
     const from = state.seedVersion || 0;
     let n = 0;
+    // 활동 기록에 한 번만 남길 안내 (key 로 두 기기가 같이 맞춰도 한 줄 — sync.js mergeActivity)
+    const notes = [];
+    const noteOnce = (key, text) => { if (!state.activity.some((a) => a && a.key === key) && !notes.some((x) => x.key === key)) notes.push({ at: MV.nowISO(), key, text }); };
     // 직전 버전 기본 글의 지문 (migrations 의 itemsFrom: { id: 지문 }) — 담당만 바꾼 항목도 '글은 그대로'로 봄
     const prev = new Map();
     (seed.migrations || []).forEach((m) => {
@@ -368,29 +430,185 @@
         if (state.meta.deletedSeed.indexOf(iid) < 0) state.meta.deletedSeed.push(iid);
         n++;
       });
-      // 기본 짐 목록 항목이 바뀐 경우: { inventory: { id: { from: { note: 옛 글 }, set?: { 칸: 새 값 } } } }
+      // 칸 값이 없으면(옛 기록에 model 칸이 없을 때 등) normInv 기본값과 비교해요
+      const invDef = normInv({ id: '_' }, true);
+      const cur = (it, k) => (it[k] === undefined ? invDef[k] : it[k]);
+      const sameVal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+      // 기본 짐을 목록에서 뺀 경우: { removeInventory: [id | { id, from: { 칸: 옛 기본값 }, keepNote: '메모 앞 글' }] }
+      //  · 기본 짐(seed)이고 지금 값이 from 과 모두 같을 때만(사용자가 고치지 않았을 때만) 지우고 meta.deletedSeed 에 넣어요
+      //    (다시 추가되지 않게). 그 짐을 가리키는 도면 배치도 모든 도면에서 함께 지워요(없는 짐을 가리키는 배치가 남지 않게)
+      //  · 사용자가 고친 짐은 남기고, keepNote 가 있으면 메모 앞에 한 번만 붙여요(지울지 사용자가 정하게)
+      (m.removeInventory || []).forEach((r) => {
+        const iid = typeof r === 'string' ? r : (r && typeof r === 'object' ? r.id : null);
+        if (!iid) return;
+        const idx = state.inventory.findIndex((x) => x && x.id === iid);
+        if (idx < 0) return;
+        const it = state.inventory[idx];
+        const f = (r && typeof r === 'object' && r.from && typeof r.from === 'object') ? r.from : {};
+        const untouched = !!it.seed && Object.keys(f).every((k) => sameVal(cur(it, k), f[k]));
+        if (untouched) {
+          state.inventory.splice(idx, 1);
+          state.meta.deletedSeed = state.meta.deletedSeed || [];
+          if (state.meta.deletedSeed.indexOf(iid) < 0) state.meta.deletedSeed.push(iid);
+          if (state.layouts && typeof state.layouts === 'object') {
+            Object.keys(state.layouts).forEach((lk) => {
+              const L = state.layouts[lk];
+              if (L && Array.isArray(L.placements)) L.placements = L.placements.filter((p) => !(p && p.invId === iid));
+            });
+          }
+          n++;
+          return;
+        }
+        const pre = r && typeof r === 'object' && typeof r.keepNote === 'string' ? r.keepNote : '';
+        const note = String(it.note || '');
+        if (pre && note.indexOf(pre.trim()) < 0) { it.note = pre + note; n++; }
+      });
+      // 기본 짐 목록 항목이 바뀐 경우: { inventory: { id: { from: { note: 옛 글 }, set?: { 칸: 새 값 }, prev?: { 칸: 옛 기본값 } } } }
       // 지금 값이 from 과 모두 같을 때만(사용자가 고치지 않았을 때만) 바꿔요.
       //  · set 이 없으면: from 에 적은 칸을 이 버전의 기본값(seed)으로
       //  · set 이 있으면: set 에 적은 칸은 set 값으로, from 에만 적은 칸은 기본값(seed)으로
       //    (from 에 적지 않은 칸 — 모델명·추정 표시 등 — 도 함께 바꿀 수 있어요. 예: 모델명으로 찾은 규격 넣기)
-      // 칸 값이 없으면(옛 기록에 model 칸이 없을 때 등) normInv 기본값과 비교해요
-      const invDef = normInv({ id: '_' }, true);
-      const cur = (it, k) => (it[k] === undefined ? invDef[k] : it[k]);
+      //  · prev 가 있으면: set 의 칸 중 지금 값이 prev(옛 기본값)와 다른 칸 = 사용자가 고친 칸(메모·모델명·링크·위치 등)은
+      //    그대로 두고 나머지만 바꿔요 (from = 바꿀지 말지 정하는 문, prev = 칸마다 지키는 것)
       Object.keys(m.inventory || {}).forEach((iid) => {
         const it = state.inventory.find((x) => x && x.id === iid);
         const sp = (seed.inventory || []).find((x) => x.id === iid);
         const rule = m.inventory[iid] || {};
         const f = rule.from || {};
         const set = (rule.set && typeof rule.set === 'object') ? rule.set : null;
+        const prevV = (rule.prev && typeof rule.prev === 'object') ? rule.prev : null;
         const keys = Object.keys(f);
-        if (!it || !sp || !keys.length || !keys.every((k) => JSON.stringify(cur(it, k)) === JSON.stringify(f[k]))) return;
+        if (!it || !sp || !keys.length) return;
+        if (!keys.every((k) => JSON.stringify(cur(it, k)) === JSON.stringify(f[k]))) {
+          // 사용자가 고쳐서 바꾸지 않은 짐: keptNote 가 있으면 메모 앞에 한 번만 (예: 짐을 둘로 나눠 새 짐이 더해진 경우 — 두 번 세지 않게 안내)
+          const kn = typeof rule.keptNote === 'string' ? rule.keptNote : '';
+          const note = String(it.note || '');
+          // (이미 새 값인 짐 — 이 버전으로 맞춘 뒤 다시 돌 때 등 — 은 빼요)
+          const isNew = keys.every((k) => sameVal(cur(it, k), set && Object.prototype.hasOwnProperty.call(set, k) ? set[k] : (sp[k] === undefined ? invDef[k] : sp[k])));
+          if (kn && it.seed && !isNew && note.indexOf(kn.trim()) < 0) { it.note = kn + note; n++; }
+          return;
+        }
         const target = {};
         keys.forEach((k) => { target[k] = sp[k] === undefined ? invDef[k] : sp[k]; });
-        if (set) Object.keys(set).forEach((k) => { if (k !== 'id' && k !== 'seed') target[k] = set[k]; });
+        if (set) {
+          Object.keys(set).forEach((k) => {
+            if (k === 'id' || k === 'seed') return;
+            // from 에 있는 칸은 이미 옛 기본값과 같다고 확인했으니 그대로 바꿈
+            if (keys.indexOf(k) < 0 && prevV && Object.prototype.hasOwnProperty.call(prevV, k) && !sameVal(cur(it, k), prevV[k])) return;
+            target[k] = set[k];
+          });
+        }
         const tk = Object.keys(target);
         if (tk.every((k) => JSON.stringify(cur(it, k)) === JSON.stringify(target[k]))) return;
+        const qty0 = Math.round(+cur(it, 'qty') || 0);
         tk.forEach((k) => { it[k] = MV.clone(target[k]); });
         n++;
+        // 개수를 줄였으면(예: 책장 5단 3 → 1) 도면에 남는 배치도 빼요 — 없는 책장이 그려지거나 '수량보다 많이 놓였어요'가 뜨지 않게
+        const qty1 = Math.round(+it.qty || 0);
+        if (qty1 < qty0) {
+          const cut = trimPlacements(state, iid, qty1);
+          if (cut) {
+            n += cut;
+            noteOnce('seed-v' + m.to + '-trim-' + iid, '「' + String(it.name || iid).slice(0, 30) + '」 개수를 ' + qty0 + '개 → ' + qty1 + '개로 맞추며 도면에서 남는 배치 ' + cut + '개를 뺐어요.');
+          }
+        }
+      });
+      // 도면 기본 배치가 바뀐 경우: { layouts: { new: { add: [placement…], move: { 배치id: { from:{x,y,rot}, set:{x,y,rot}, ifInv? } } } } }
+      //  · rot 는 정면 방향 0·90·180·270 (그 밖의 값은 0)
+      //  · move: 그 배치가 지금 from 과 같을 때만(사용자가 옮기지 않았을 때만) set 으로
+      //  · add: 같은 id 배치가 없고, 그 짐이 있고, 그 짐의 배치 수가 짐 개수(qty)보다 적을 때만 넣어요
+      //         (사용자가 이미 놓은 짐은 건드리지 않음 · 배치 id 가 고정이라 두 기기가 같이 올려도 겹치지 않음)
+      //  · ifInv { w, d }: 짐의 가로·깊이가 이 값일 때만 (사용자가 크기를 고친 짐은 좌표가 안 맞아 건드리지 않음)
+      //  · add 는 그 도면에 이미 있는 다른 배치와 1cm 넘게 겹치면 넣지 않아요 (사용자가 그 자리에 다른 짐을 놓았을 때)
+      //  · add 의 clear {x,y,w,h}(쓰임 공간 앞): 그 안에 다른 짐이 있거나, 새 짐이 이미 놓인 초안 배치의 clear 를 막으면 넣지 않아요
+      //    — 벽걸이 에어컨처럼 바닥을 차지하지 않는 짐은 겹침으로 보지 않음 (view-floorplan 과 같은 규칙)
+      Object.keys(m.layouts || {}).forEach((key) => {
+        const rule = m.layouts[key];
+        if (!rule || typeof rule !== 'object') return;
+        if (!state.layouts || typeof state.layouts !== 'object' || Array.isArray(state.layouts)) state.layouts = {};
+        let L = state.layouts[key];
+        if (!L || typeof L !== 'object' || Array.isArray(L)) L = state.layouts[key] = { placements: [] };
+        if (!Array.isArray(L.placements)) L.placements = [];
+        const pls = L.placements;
+        const invOf = (iid) => state.inventory.find((x) => x && x.id === iid);
+        const sizeOk = (it, w) => !w || ['w', 'd'].every((k) => w[k] === undefined || Math.abs((+it[k] || 0) - w[k]) < 0.05);
+        const same = (p, f) => ['x', 'y', 'rot'].every((k) => f[k] === undefined || Math.abs((+p[k] || 0) - (+f[k] || 0)) < 0.05);
+        const clearAt = {};
+        (rule.add || []).forEach((pl) => { if (pl && pl.id && pl.clear) clearAt[pl.id] = { at: { x: pl.x, y: pl.y, rot: pl.rot }, clear: pl.clear }; });
+        Object.keys(rule.move || {}).forEach((pid) => { const mv = rule.move[pid]; if (mv && mv.clear && mv.set) clearAt[pid] = { at: mv.set, clear: mv.clear }; });
+        const addIds = new Set((rule.add || []).map((pl) => pl && pl.id).filter(Boolean));
+        const before = new Set(pls.filter((x) => x && x.id).map((x) => x.id));   // 이 버전으로 맞추기 전부터 있던 배치
+        const moved = new Set();
+        const kept = [];
+        // move: 옮길 후보(아직 v7 기본 자리)를 먼저 모두 고르고, 후보끼리는 '옮긴 뒤 자리'로 비교해요 (순서와 상관없이 같은 답)
+        let cand = [];
+        Object.keys(rule.move || {}).forEach((pid) => {
+          const mv = rule.move[pid] || {};
+          const p = pls.find((x) => x && x.id === pid);
+          const it = p && invOf(p.invId);
+          if (!p || !it || !mv.from || !mv.set || !same(p, mv.from) || !sizeOk(it, mv.ifInv)) return;
+          if (same(p, mv.set)) { moved.add(pid); return; }
+          const np = { x: mv.set.x !== undefined ? mv.set.x : p.x, y: mv.set.y !== undefined ? mv.set.y : p.y, rot: mv.set.rot !== undefined ? mv.set.rot : p.rot };
+          cand.push({ p, it, mv, np });
+        });
+        // 새 자리에 다른 배치가 있으면(사용자가 그 자리에 짐을 놓음) 옮기지 않아요 (쓰임 공간 앞은 보지 않음 — 옛 자리가 더 나쁠 수 있어서,
+        // 그 경우는 도면 점검이 알려요).
+        // 못 옮긴 후보는 제자리에 남으니, 남은 후보를 다시 봐요 (바뀌는 것이 없을 때까지)
+        for (let round = 0; round < 8; round++) {
+          const at = new Map(cand.map((c) => [c.p, c.np]));
+          const rectNow = (x) => rectOfPl(at.get(x) || x, invOf(x.invId));
+          const stuck = cand.filter((c) => {
+            const r = rectOfPl(c.np, c.it);
+            const others = pls.filter((x) => x && x !== c.p);
+            return !!r && others.some((x) => { const o = rectNow(x); return o && rectHit(r, o); });
+          });
+          if (!stuck.length) break;
+          stuck.forEach((c) => kept.push(String(c.it.name || c.p.invId).slice(0, 24)));
+          cand = cand.filter((c) => stuck.indexOf(c) < 0);
+        }
+        cand.forEach(({ p, mv }) => {
+          ['x', 'y', 'rot'].forEach((k) => { if (mv.set[k] !== undefined) p[k] = k === 'rot' ? plRot(mv.set[k]) : mv.set[k]; });
+          moved.add(p.id);
+          n++;
+        });
+        if (kept.length) noteOnce('seed-v' + m.to + '-keep-' + key, '도면 초안 자리에 다른 짐이 있어 옮기지 않았어요(지금 자리 그대로): ' + kept.join(', ') + '.');
+        // 정면 뜻이 생기기 전에 놓은 배치(초안이 옮기지 않은 것)는 등을 댄 벽을 보고 정면을 한 번 정해요
+        if (rule.fixFront) {
+          const plan = MV.plans && MV.plans[key];
+          const rooms = plan && Array.isArray(plan.rooms) ? plan.rooms : null;
+          if (rooms) pls.forEach((p) => { if (p && before.has(p.id) && !moved.has(p.id) && !addIds.has(p.id) && frontFromWall(p, invOf(p.invId), rooms)) n++; });
+        }
+        // 다른 짐에 막혀 넣지 못한 초안 배치 (활동 기록에 한 번 알려요 — 왜 초안에 없는지 알 수 있게)
+        const blocked = new Set();
+        const skipped = [];
+        const skip = (pl, it) => { blocked.add(pl.id); skipped.push(it); };
+        (rule.add || []).forEach((pl) => {
+          if (!pl || !pl.id || pls.some((x) => x && x.id === pl.id)) return;
+          const it = invOf(pl.invId);
+          if (!it || !sizeOk(it, pl.ifInv)) return;
+          // needs: 함께 놓이는 배치(예: 의자 → 식탁)가 그 초안 자리에 있을 때만 (식탁 없이 의자만 떠 있지 않게)
+          if (pl.needs) {
+            const t = pls.find((x) => x && x.id === pl.needs);
+            const at = (rule.add || []).find((x) => x && x.id === pl.needs);
+            if (!t || (at && !same(t, at))) { if (!t && blocked.has(pl.needs)) skip(pl, it); return; }
+          }
+          const qty = Math.max(0, Math.round(+it.qty || 0));
+          if (pls.filter((x) => x && x.invId === pl.invId).length >= qty) return;
+          const np = { id: pl.id, invId: pl.invId, x: pl.x, y: pl.y, rot: plRot(pl.rot) };
+          const r = rectOfPl(np, it);
+          if (r && pls.some((x) => { const o = x && rectOfPl(x, invOf(x.invId)); return o && rectHit(r, o); })) { skip(pl, it); return; }
+          // clear: 이 짐의 쓰임 공간 앞(서랍·문 앞 등)에 다른 짐이 있으면 넣지 않음 + 이미 놓인 초안 배치의 쓰임 공간 앞을 막지 않음
+          if (pl.clear && pls.some((x) => { const o = x && rectOfPl(x, invOf(x.invId)); return o && rectHit(pl.clear, o); })) { skip(pl, it); return; }
+          if (r && pls.some((x) => { const c = x && clearAt[x.id]; return c && same(x, c.at) && rectHit(r, c.clear); })) { skip(pl, it); return; }
+          pls.push(np);
+          n++;
+        });
+        if (skipped.length) {
+          const cnt = new Map();
+          skipped.forEach((it) => { const nm = String(it.name || it.id).split(/\s*[—(]/)[0].trim().slice(0, 24) || String(it.id); cnt.set(nm, (cnt.get(nm) || 0) + 1); });
+          const names = Array.from(cnt.entries()).map(([nm, c]) => nm + (c > 1 ? ' ×' + c : ''));
+          noteOnce('seed-v' + m.to + '-skip-' + key, '도면 초안 자리에 다른 짐이 있어 넣지 않았어요: ' + names.join(', ') + ' — 도면에서 + 놓기나 ✨ 자동 배치로 놓아 보세요.');
+        }
       });
       // 묶음 이름이 바뀐 경우: 사용자가 만들거나 이름을 고친 파트도 같은 새 묶음으로 옮겨요
       Object.keys(m.renameGroups || {}).forEach((og) => {
@@ -403,6 +621,7 @@
         });
       }
     });
+    notes.reverse().forEach((a) => state.activity.unshift(a));
     return n;
   }
   /* 옛 기록(편집 창에 담당 칸이 있던 때)의 '👤 담당 변경: …' 활동 줄은 지움 — 할 일을 사람에게 나누지 않으므로
@@ -439,7 +658,7 @@
     const hasKey = (k) => state.activity.some((a) => a && a.key === k);
     const kFix = 'seed-v' + seed.version + '-fix';
     const kAdd = 'seed-v' + seed.version + '-add';
-    if (migrated && !hasKey(kFix)) state.activity.unshift({ at: MV.nowISO(), key: kFix, text: '기본 파트·항목을 새 버전에 맞췄습니다 (' + migrated + '곳, 고친 내용·완료·메모는 그대로).' });
+    if (migrated && !hasKey(kFix)) state.activity.unshift({ at: MV.nowISO(), key: kFix, text: '기본 파트·항목·짐 목록·도면 배치를 새 버전에 맞췄습니다 (' + migrated + '곳, 고친 내용·완료·메모·직접 옮긴 배치는 그대로).' });
     if (added && !hasKey(kAdd)) state.activity.unshift({ at: MV.nowISO(), key: kAdd, text: '새 기본 항목 ' + added + '개를 추가했습니다 (기존 메모·완료 표시는 그대로).' });
     return true;
   }
@@ -466,6 +685,9 @@
     st.inventory = st.inventory || [];
     st.activity = st.activity || [];
     st.meta.deletedSeed = st.meta.deletedSeed || [];
+    // 새 기본값 버전으로 맞추기 직전의 기록 — 공유 저장소(sync.js loadBase)가 '마지막으로 안 서버 내용'을 되살릴 때 씀.
+    // (맞춘 뒤의 내용으로만 되살리면 바뀐 문서의 기준을 잃어, 서버의 옛 내용과 칸마다 섞이거나 지운 짐이 되살아나요)
+    S.preSeedState = (MV.seed && MV.seed.version && (st.seedVersion || 0) < MV.seed.version) ? JSON.parse(JSON.stringify(st)) : null;
     const merged = mergeSeed(st);
     S.state = st;
     if (merged) S.persist();
@@ -739,6 +961,7 @@
 
   /* ---- 규격 확인 (모델명으로 규격 확정) ----
      대상: 처리가 '가져감'·'미정'인 짐 중 ① 규격이 추정이거나 ② 모델명을 받았거나 ③ 처음에 추정이었던 기본 짐
+     (지금 버전 기본값 또는 예전 버전 기본값 — data-seed.js 의 MV.seed.assumedBefore)
      (③ 덕분에 크기를 고쳐 '확정'된 기본 짐도 목록에 남아 진행률 n/m 이 줄지 않아요).
      버릴 짐·팔 짐·살 짐은 빼요 (살 물건은 살 때 정해요). */
   V.SPEC_FATES = ['move', 'undecided'];
@@ -749,9 +972,11 @@
   };
   const modelOf = (it) => String((it && it.model) || '').trim();
   const fateOf = (it) => (V.FATES.some((f) => f.id === it.fate) ? it.fate : 'undecided');
+  // 지금 버전 기본값이 추정이거나, 예전 버전 기본값이 추정이던 짐(MV.seed.assumedBefore — 예: v7 때 크기를 고쳐 확정한 소파)
   const seedAssumed = (id) => {
     const sp = MV.seed && Array.isArray(MV.seed.inventory) ? MV.seed.inventory.find((x) => x && x.id === id) : null;
-    return !!(sp && sp.assumed);
+    const before = MV.seed && Array.isArray(MV.seed.assumedBefore) ? MV.seed.assumedBefore : [];
+    return !!(sp && sp.assumed) || before.indexOf(id) >= 0;
   };
   V.specTarget = (it) => {
     if (!it || typeof it !== 'object' || V.SPEC_FATES.indexOf(fateOf(it)) < 0) return false;

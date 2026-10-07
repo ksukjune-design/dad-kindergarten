@@ -233,7 +233,7 @@
     { k: 'ac_trip', g: 'ac', label: '에어컨 기사 출장비 (방문 1회)', unit: '원', v: 20000, lo: 0, hi: 30000, money: true, conf: 'mid', basis: '숨고 공시', src: ['soomgo'] },
     // 추가 작업
     { k: 'fridge_large', g: 'extra', label: '양문형·4도어 냉장고 추가비 (문짝 분리·재조립 등)', unit: '원/대', v: 50000, lo: 0, hi: 100000, money: true, conf: 'low', basis: '문짝 분리·재조립 5만~10만원이 시세와 맞음 (품목당 3만~5만원이라는 답도, 구글 검색으로 교차 확인). 현관문·엘리베이터 문 유효폭이 냉장고보다 넓으면 0원일 수 있어요 — 견적서에 금액을 적어 두세요', src: [] },
-    { k: 'fridge_large_w', g: 'extra', label: '대형 냉장고로 보는 폭', unit: 'cm', v: 85, conf: 'low', basis: '양문형·4도어는 폭 약 90cm(예: 870L 4도어 91.4cm, 약 146kg) — 85cm 이상을 대형으로 봄 (앱 기준)', src: [] },
+    { k: 'fridge_large_w', g: 'extra', label: '대형 냉장고로 보는 폭', unit: 'cm', v: 85, conf: 'low', basis: '양문형·4도어는 폭 약 90cm(예: 우리 LG 양문형 652L 91.3cm, 118kg) — 85cm 이상을 대형으로 봄 (앱 기준)', src: [] },
     { k: 'bed_dis', g: 'extra', label: '침대 분해조립', unit: '원/개', v: 50000, lo: 0, hi: 100000, money: true, conf: 'low', basis: '추정 (특수 구조 침대)', src: [] },
     { k: 'wardrobe_dis', g: 'extra', label: '장롱·시스템행거 해체·설치', unit: '원/식', v: 100000, lo: 50000, hi: 200000, money: true, conf: 'low', basis: '추정', src: [] },
     { k: 'stack', g: 'extra', label: '드럼세탁기·건조기 직렬 해체·설치', unit: '원', v: 70000, lo: 50000, hi: 100000, money: true, conf: 'low', basis: '추정. 건조기만 따로 옮기면 0원 가능', src: [] },
@@ -251,7 +251,7 @@
     { k: 'lg_ac_stand', g: 'lg', label: 'LG 에어컨 이전설치: 스탠드', unit: '원/대', v: 318000, lo: 318000, hi: 450000, money: true, conf: 'mid', basis: '2025-11-01 기준 (2차 출처)', src: ['lgAc'] },
     { k: 'lg_ac_2in1', g: 'lg', label: 'LG 에어컨 이전설치: 2in1', unit: '원/세트', v: 417000, lo: 417000, hi: 600000, money: true, conf: 'mid', basis: '2025-11-01 기준 (2차 출처)', src: ['lgAc'] },
     { k: 'lg_ac_pipe_per_m', g: 'lg', label: 'LG 에어컨 배관 연장 1m당', unit: '원/m', v: 19000, money: true, conf: 'mid', basis: '2차 출처. 실외기 앵글(12~14만)·매립배관 세척(5만)은 별도', src: ['lgAc'] },
-    { k: 'lg_fridge', g: 'lg', label: 'LG 냉장고 이전설치 (철거+설치)', unit: '원/대', v: 150000, lo: 75000, hi: 220000, money: true, conf: 'low', basis: '철거·설치 최소 7.5만, 900L 이상·정수기형 약 20만원 → 870L 4도어는 약 15만~22만원 추정 (운송비 4만원 따로, 블로그·검색 요약 기준 — 1544-7777 확인)', src: ['lxPrice', 'lgCare'] },
+    { k: 'lg_fridge', g: 'lg', label: 'LG 냉장고 이전설치 (철거+설치)', unit: '원/대', v: 150000, lo: 75000, hi: 220000, money: true, conf: 'low', basis: '철거·설치 최소 7.5만, 900L 이상·정수기형 약 20만원 → 우리 양문형 652L은 약 15만원 안팎 추정 (운송비 4만원 따로, 블로그·검색 요약 기준 — 1544-7777 확인)', src: ['lxPrice', 'lgCare'] },
     { k: 'lg_dryer', g: 'lg', label: 'LG 건조기 이전설치 (철거+설치)', unit: '원/대', v: 110000, lo: 73000, hi: 150000, money: true, conf: 'low', basis: '건조기 단가를 못 찾아 세탁기 요금으로 추정', src: ['lxPrice'] },
     { k: 'lg_washer', g: 'lg', label: 'LG 세탁기 이전설치', unit: '원/대', v: 98000, lo: 73000, hi: 130000, money: true, conf: 'low', basis: '예전 요금표 기준 (이번엔 세탁기를 버려서 참고용)', src: ['lxPrice'] },
     { k: 'lg_other', g: 'lg', label: 'LG TV·기타 가전 이전설치', unit: '원/대', v: 100000, lo: 60000, hi: 180000, money: true, conf: 'low', basis: 'TV 등 단가 미조사 — 냉장고·세탁기 요금 범위의 중간값으로 둠. 1544-7777에서 확인', src: ['lgCare'] },
@@ -820,7 +820,7 @@
     const fridges = cnt(inp.fridgeCount, autoFridges);
     const maxFw = Math.max(0, ...bigFridges.map((it) => num(it.w, 0)));
     if (fridges > 0) add('fridge', '대형 냉장고 ' + fridges + '대', fridges * c.fridge_large, '폭 ' + c.fridge_large_w + 'cm 이상 · ' + fridges + '대 × ' + won(c.fridge_large) +
-      ' · 현관문·엘리베이터 문 유효 폭이 ' + (maxFw ? '약 ' + Math.ceil(maxFw + 0.6) + 'cm(냉장고 폭 ' + r1(maxFw) + 'cm + 여유, 넉넉히 95cm)' : '냉장고 폭보다') + '보다 좁으면 문짝 분리 (시세 ' + won(COEF_MAP.fridge_large.lo) + '~' + won(COEF_MAP.fridge_large.hi) + ', 넓으면 0원)', 'special');
+      ' · 현관문·엘리베이터 문 유효 폭이 ' + (maxFw ? '약 ' + Math.ceil(maxFw + 1.7) + 'cm(냉장고 폭 ' + r1(maxFw) + 'cm + 여유, 넉넉히 95cm)' : '냉장고 폭보다') + '보다 좁으면 문짝 분리 (시세 ' + won(COEF_MAP.fridge_large.lo) + '~' + won(COEF_MAP.fridge_large.hi) + ', 넓으면 0원)', 'special');
     const autoStack = (mover.some(isWasher) && mover.some(isDryer)) ? 1 : 0;
     const stack = cnt(inp.stackCount, autoStack);
     if (stack > 0) add('stack', '세탁기·건조기 직렬 해체·설치', stack * c.stack, stack + '세트 × ' + won(c.stack), 'special');
@@ -1068,7 +1068,8 @@
 .es-icard-ctl { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
 .es-icard-ctl .es-isel { flex: 1 1 120px; }
 .es-icard-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 6px; font-size: .8rem; color: var(--ink-3); align-items: center; }
-.es-icard-meta .es-link { width: 36px; height: 30px; }
+.es-icard-meta .es-link { width: 36px; height: 36px; }
+@media (pointer: coarse) { .es-link, .es-icard-meta .es-link { width: 44px; height: 44px; } }
 .es-qtylab { font-size: .78rem; color: var(--ink-3); font-weight: 700; display: inline-flex; align-items: center; gap: 6px; }
 .es-banner { display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap; }
 .es-banner .es-bnum { font-size: 1.3rem; font-weight: 900; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
@@ -3474,7 +3475,7 @@
     if (m === '삼성' && isAcKind(kind)) return '이사 전(' + mdTxt + ' 전)에 새 집에 설치 · 지금 예약 (1588-3366) · 운반 포함 여부 확인 · 새 집 집주인·현 거주자 동의 필요';
     if (m === '삼성') return '삼성케어플러스(1588-4190)가 철거·설치 · 요금·운반 포함 여부 확인';
     if (m === 'LG') return 'LG 베스트케어(1544-7777)가 철거·운송·설치' + (isAcKind(kind) ? ' · 배관 연장·앵글은 따로' : '');
-    if (kind === 'fridge') return mdTxt + ' 이삿짐센터가 세워서 운반' + (w >= 85 ? ' · 폭 ' + r1(w) + 'cm — 현관문·엘리베이터 문 유효 폭이 약 ' + Math.ceil(w + 0.6) + 'cm(넉넉히 95cm)보다 좁으면 문짝 분리' : '') + ' · 세워 옮겼으면 약 5분 뒤 전원 (눕혔으면 2시간)';
+    if (kind === 'fridge') return mdTxt + ' 이삿짐센터가 세워서 운반' + (w >= 85 ? ' · 폭 ' + r1(w) + 'cm — 현관문·엘리베이터 문 유효 폭이 약 ' + Math.ceil(w + 1.7) + 'cm(넉넉히 95cm)보다 좁으면 문짝 분리' : '') + ' · 세워 옮겼으면 약 5분 뒤 전원 (눕혔으면 2시간)';
     if (kind === 'dryer') return mdTxt + ' 이삿짐센터가 세워서 운반 (눕히지 않기) · 물통·배수호스 물 빼기';
     if (kind === 'washer') return mdTxt + ' 이삿짐센터가 운반 · 호스 물 빼기 (드럼이면 운송볼트)';
     if (kind === 'ac_window') return '직접 떼서 ' + mdTxt + ' 이삿짐센터가 운반';

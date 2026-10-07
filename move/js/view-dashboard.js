@@ -706,7 +706,7 @@ button.db-wk-head:hover { background:var(--bg-3); }
   ];
   // 짐 목록에서 이삿짐센터가 옮기는 에어컨 수 (자금 모듈과 같은 규칙: 견적은 있는데 제조사 서비스가 없으면 에어컨 이전설치 0원)
   const moverAircons = () => MV.inv.list().filter((x) => x && (x.cat === 'aircon' || x.tag === 'aircon') && x.fate === 'move').length;
-  const MOVER_FALLBACK = 2500000;              // 견적 계산이 없을 때만: 10/6 이사 견적 화면 값 (6톤·5명, 부가세 포함 약 250만원, 추정)
+  const MOVER_FALLBACK = 2110000;              // 견적 계산이 없을 때만: 10/7 이사 견적 화면 값 (5톤·4~5명, 부가세 포함 약 211만원, 추정)
   const ELEV_FALLBACK = 200000;                // 견적 계산이 없을 때만: 두 단지 각 약 10만원 (서울 평균 약 10.4만원)
   /* 엘리베이터 사용료가 이사 견적(moveEstimate)에 이미 들어 있는지 — 자금 모듈(autoAmount 'elevator')과 같은 규칙:
      견적 줄에 '엘리베이터 사용료'(key elevFee)가 있으면 들어 있음, 짐·견적에 양쪽 0원으로 넣었으면 0원 */
@@ -791,12 +791,15 @@ button.db-wk-head:hover { background:var(--bg-3); }
       if (isNum(fs.netEssential)) {
         // 새 요약: 묶음별 (꼭 드는 이사 비용 / 새로 사는 살림 / 선택·나중에)
         const left = leftover != null ? leftover : null;
-        const essential = isNum(fs.essentialUnpaid) ? fs.essentialUnpaid : (left != null ? left - fs.netEssential : null);
+        // 받음으로 표시한 들어올 돈(장기수선충당금 등)은 여유 숫자에 더해져 있어요 — 표에도 한 줄로 보여 식이 맞게
+        const got = isNum(fs.refundsGot) && fs.refundsGot > 0 ? fs.refundsGot : 0;
+        const essential = isNum(fs.essentialUnpaid) ? fs.essentialUnpaid : (left != null ? left + got - fs.netEssential : null);
         const nwp = isNum(fs.netWithPurchases) ? fs.netWithPurchases : null;
         const net = isNum(fs.net) ? fs.net : null;
         const purchase = isNum(fs.purchaseUnpaid) ? fs.purchaseUnpaid : (nwp != null ? fs.netEssential - nwp : null);
         const optional = isNum(fs.optionalUnpaid) ? fs.optionalUnpaid : (nwp != null && net != null ? nwp - net : null);
         if (left != null) led.appendChild(ledgerRow('남는 돈', null, minus(left), 'sum', null, MV.fmt.won(left)));
+        if (got) led.appendChild(ledgerRow('받은 돈', '장기수선충당금 등 — 받음으로 표시', signed(got, 1), 'in', null, MV.fmt.won(got)));
         if (essential != null) {
           // 견적 계산이 있는데 제조사 서비스가 없으면(에어컨도 이삿짐센터) 에어컨 이전설치는 빼고 적음
           const mk = makerOf(est);
