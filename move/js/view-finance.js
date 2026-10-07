@@ -2173,6 +2173,7 @@ div.fn-alert { cursor: default; }
       el('div', { class: 'fn-stat is-final' + (c.netEssential < 0 ? ' is-neg' : '') },
         el('span', { class: 'fn-stat-k' }, c.netEssential < 0 ? '⚠ 꼭 드는 비용 내면 부족' : '꼭 드는 비용 내고 여유'),
         el('span', { class: 'fn-stat-v', title: won(c.netEssential) }, krw(Math.abs(c.netEssential))),
+        b.refundsGot > 0 ? el('span', { class: 'fn-stat-s' }, '그날 남는 돈 + 받은 돈 ' + krw(b.refundsGot) + '(장기수선충당금 등) − 꼭 드는 비용') : null,
         el('span', { class: 'fn-stat-s' }, '살림 구입까지 포함하면 ', el('b', verdictTxt(c.netWithPurchases))),
         el('span', { class: 'fn-stat-s' }, '전부 포함하면 ', el('b', verdictTxt(c.net)), ' · ',
           el('a', { href: '#/money/budget', onclick: P.tabLink('budget', 'fn-budget-sum') }, '예산 보기'))),
@@ -2849,6 +2850,7 @@ div.fn-alert { cursor: default; }
         s.labels.length ? el('span', { class: 'fn-gcard-items' }, '지금 들어 있는 항목: ' + s.labels.join(' · ')) : el('span', { class: 'fn-gcard-items' }, '들어 있는 항목이 없어요'),
         el('a', { class: 'fn-gcard-go', href: '#/money/budget', onclick: P.tabLink('budget', 'fn-bg-' + g.id) }, '줄 보기 ↓'));
     };
+    const gotAmt = b.refundsGot > 0 ? b.refundsGot : 0;
     return [
       el('div', { class: 'fn-card-h', id: 'fn-budget-sum' }, el('h3', '이사 비용 한눈에')),
       /* 머리 숫자: 11/3 전후 꼭 필요한 현금 = 꼭 드는 이사 비용(아직 낼 돈) ↔ 그날 남는 돈 */
@@ -2856,7 +2858,9 @@ div.fn-alert { cursor: default; }
         el('div', { class: 'fn-hl-k' }, D.fmt(c.move) + ' 전후 꼭 필요한 현금'),
         /* 그날 남는 돈 − 꼭 드는 이사 비용 = 여유/부족 (좁은 화면에선 세 줄) */
         el('div', { class: 'fn-hl-eq' },
-          el('div', { class: 'fn-hl-cell' }, el('small', D.fmt(c.move) + ' 그날 남는 돈'), el('b', { title: won(fl.leftover) }, krw(fl.leftover))),
+          /* 받음으로 표시한 들어올 돈(장기수선충당금 등)은 여유 숫자에 더해져 있어서, 식이 맞게 '그날 남는 돈'에 넣어 보여요 */
+          el('div', { class: 'fn-hl-cell' }, el('small', D.fmt(c.move) + ' 그날 남는 돈' + (gotAmt ? ' (받은 돈 ' + krw(gotAmt) + ' 포함)' : '')),
+            el('b', { title: won(fl.leftover + gotAmt) }, krw(fl.leftover + gotAmt))),
           el('span', { class: 'fn-hl-op', 'aria-hidden': 'true' }, '−'),
           el('div', { class: 'fn-hl-cell' }, el('small', '꼭 드는 이사 비용 (아직 낼 돈)'), el('b', { title: won(ess) }, krw(ess))),
           el('span', { class: 'fn-hl-op', 'aria-hidden': 'true' }, '='),

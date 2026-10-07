@@ -1068,7 +1068,8 @@
 .es-icard-ctl { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
 .es-icard-ctl .es-isel { flex: 1 1 120px; }
 .es-icard-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 6px; font-size: .8rem; color: var(--ink-3); align-items: center; }
-.es-icard-meta .es-link { width: 36px; height: 30px; }
+.es-icard-meta .es-link { width: 36px; height: 36px; }
+@media (pointer: coarse) { .es-link, .es-icard-meta .es-link { width: 44px; height: 44px; } }
 .es-qtylab { font-size: .78rem; color: var(--ink-3); font-weight: 700; display: inline-flex; align-items: center; gap: 6px; }
 .es-banner { display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap; }
 .es-banner .es-bnum { font-size: 1.3rem; font-weight: 900; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }

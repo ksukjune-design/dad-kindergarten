@@ -558,7 +558,7 @@
       { id: 'appliance-23', partId: 'appliance', title: '[삼성 예약일] 새 집 에어컨 설치 입회·시운전 (11/3 전)', due: '2026-11-02', priority: 'high', guide: 'appliance#lg',
         detail: '날짜는 삼성과 확정한 설치일로 바꾸세요. 들어가자마자 집 상태를 사진으로 찍어요.\n스탠드는 도면 자리에, 벽걸이는 안방 배관 구멍 쪽에 다는지 확인하세요. 실외기를 외벽 앵글에 달면 볼트·안전줄을 확인해요.\n두 실내기 모두 냉방을 10~15분 켜서 찬바람·물빠짐·실외기 소리를 보세요. 배관 보온재와 구멍 실리콘 마감도 봐요.\n배관을 몇 m 늘렸는지, 가스를 얼마나 넣었는지 적힌 영수증을 받고, 끝나면 문단속 후 중개사에게 알려요.' },
       { id: 'appliance-15', partId: 'appliance', title: '[11/2 밤] 냉장고 전원 끄고 물기·물받이 정리', due: '2026-11-02', priority: 'high', guide: 'appliance#prep',
-        detail: '이사 전날 밤 플러그를 뽑고 남은 음식은 아이스박스로 옮기세요.\n안쪽 물기와 성에를 닦고, 아래 물받이가 있으면 비워요.\n유리 선반·서랍·매직스페이스 칸 안의 물건을 빼고, 선반은 따로 싸거나 테이프로 고정해요.\n문 4개를 마스킹테이프로 붙이고 전원선은 뒤에 묶어 두세요.' },
+        detail: '이사 전날 밤 플러그를 뽑고 남은 음식은 아이스박스로 옮기세요.\n안쪽 물기와 성에를 닦고, 아래 물받이가 있으면 비워요.\n유리 선반·서랍·매직스페이스 칸 안의 물건을 빼고, 선반은 따로 싸거나 테이프로 고정해요.\n양쪽 문을 마스킹테이프로 붙이고 전원선은 뒤에 묶어 두세요.' },
       { id: 'appliance-17', partId: 'appliance', title: '[11/3] 냉장고·건조기 들이고 전원 켜기', due: '2026-11-03', priority: 'high', guide: 'appliance#prep',
         detail: '이삿짐센터가 냉장고·건조기를 세워서 옮겼는지 확인하세요.\n냉장고: 도면 자리에 놓고 수평을 맞춰요(앞쪽을 살짝 높이면 문이 잘 닫혀요). 옆·뒤·위를 몇 cm씩 띄워요.\n세워서 옮겼으면 약 5분 뒤, 눕혀서 옮겼으면 2시간 세워 둔 뒤 전원을 꽂아요(LG 안내). 충분히 차가워지려면 2~3일 걸리니 그동안 아이스박스를 같이 써요.\n건조기: 다용도실 정한 자리에 수평을 맞추고 통돌이 자리는 비워요. 세워서 왔어도 몇 시간(약 2시간, 추정·설명서 확인) 뒤에 켜고, 눕혔다면 하루 세워 둔 뒤 켜세요.' },
       { id: 'appliance-18', partId: 'appliance', title: '[11/4] 가전 점검 (냉장고 온도·건조기 시운전·에어컨)', due: '2026-11-04', priority: 'high', guide: 'appliance#laundry',
@@ -879,11 +879,11 @@
         url: 'https://www.ikea.com/kr/ko/p/alex-drawer-unit-white-40473549/',
         use: { kind: 'drawer', front: 60, note: '서랍 깊이 약 52cm + 손 → 앞 60cm.' },
         note: '10/7 링크로 받은 모델: 이케아 알렉스 서랍유닛(화이트) 36×58×70cm, 서랍 5칸(안쪽 깊이 52cm), 포장 포함 27.5kg. 데스커 책상 상판 아래(약 69cm)에 안 들어가서 책상 옆에 둬요. 깊이 58cm라 책상 앞면과 거의 맞아요. 서랍을 빼려면 앞에 약 60cm가 필요해요. 새 집에서는 책상과 같이 작은방2예요(10/7). 쓰임 공간(10/7 크리티컬 포인트): 서랍 앞 60cm — 도면 초안은 됨.' },
-      { id: 'inv-living-box', name: '리빙박스 (링크 목록에 없는 짐·잡동사니, 약 5개 분량)', cat: 'misc', tag: 'box', fate: 'move', qty: 5, w: 60, d: 40, h: 30, room: '작은방2', roomNew: '작은방2', brand: '', lg: false, assumed: true,
+      { id: 'inv-living-box', name: '리빙박스 (링크 목록에 없는 짐·잡동사니, 약 5개 분량)', cat: 'misc', tag: 'box', fate: 'move', qty: 5, w: 60, d: 40, h: 30, room: '작은방2', roomNew: '작은방2', brand: '', lg: false, assumed: true, floor: false,
         note: '10/7 답: 링크 목록에 없는 짐은 리빙박스로 약 5개 분량이에요. 그래서 예전 짐 목록에 예시로 넣어 두었던 TV·거실장, 거실 테이블, 서랍장, 전신거울, 아이 침대·책상, 공기청정기, 자전거·킥보드, 빨래건조대, 전자레인지·밥솥 수납장, 커튼은 짐 목록에서 뺐어요 — 실제로 있는 큰 가구가 있으면 짐 목록에 따로 넣어 주세요. 여름옷·얇은 옷과 여분 이불도 리빙박스에 담아 봄까지 둬요. 새 집에서는 방 안쪽 벽에서 5~10cm, 바닥에서 약 10cm 띄우고, 뒷발코니·다용도실에는 두지 않아요(겨울 결로). 리빙박스는 이 짐 목록에서 이미 부피를 세니, 이사 견적의 \'여름옷·이불 박스 + 행거박스\' 칸에는 따로 더하지 마세요.' },
       { id: 'inv-top-box', name: '간이박스 — 다이소 특대 리빙박스 45L', cat: 'misc', tag: 'box', fate: 'move', qty: 6, w: 52, d: 35, h: 28, room: '', roomNew: '작은방2', floor: false, model: '다이소 특대형 리빙박스 45L (1016218)', assumed: false,
         url: 'https://www.daisomall.co.kr/pd/pdr/SCR_PDR_0001?pdNo=1016218',
-        note: '10/7 확인: 다이소 특대형 리빙박스 45L(품번 1016218) 약 52×35×28cm, 6개. 옷장 위 3개·책장 위 3개에 올려 두어서 도면 바닥에는 놓지 않아요(이사 견적 부피에는 넣어요). 200cm 캐비닛장 ①(2단 행어형) 위는 천장(약 230cm, 추정)까지 약 30cm라 28cm 박스가 겨우 들어가요 — 169cm 캐비닛장 ②(3단 수납형) 위(약 61cm)에 2단으로 두면 꺼내기 쉬워요. 아이 책장(높이 118cm) 3개 위에는 1개씩 올려요(박스 깊이 35cm라 앞으로 약 6cm 나와요).' },
+        note: '10/7 확인: 다이소 특대형 리빙박스 45L(품번 1016218) 약 52×35×28cm, 6개. 옷장 위 3개·책장 위 3개에 올려 두어서 도면 바닥에는 놓지 않아요(이사 견적 부피에는 넣어요). 200cm 캐비닛장 ①(2단 행어형) 위는 천장(약 230cm, 추정)까지 약 30cm라 28cm 박스가 겨우 들어가요 — 그래서 옷장 위 3개는 169cm 캐비닛장 ②(3단 수납형) 위(약 61cm)에 2단 + 캐비닛장 ① 위에 1개(빠듯 — 천장 실측 뒤, 안 되면 방 안쪽 벽)로, 책장 위 3개는 아이 책장(높이 118cm) 3개 위에 1개씩 올려요(박스 깊이 35cm라 앞으로 약 6cm 나와요).' },
     ],
   };
 
@@ -992,12 +992,14 @@
       'inv-drying-rack': { name: '빨래건조대', cat: 'misc', tag: '', fate: 'move', qty: 1, w: 150, d: 60, h: 100, room: '전면 발코니', roomNew: '뒷발코니', assumed: true, note: '실제 규격·URL로 바꿔 주세요.' },
       'inv-living-box': { name: '리빙박스', cat: 'misc', tag: '', fate: 'move', qty: 10, w: 60, d: 40, h: 30, room: '작은방2', roomNew: '작은방2', brand: '', lg: false, assumed: true, note: '여름옷·얇은 옷과 여분 이불을 담아 봄까지 둬요. 실제 개수와 규격으로 고쳐 주세요. 새 집에서는 방 안쪽 벽에서 5~10cm, 바닥에서 약 10cm 띄우고, 뒷발코니·다용도실에는 두지 않아요(겨울 결로). 리빙박스는 이 짐 목록에서 이미 부피를 세니, 이사 견적의 \'여름옷·이불 박스 + 행거박스\' 칸에는 따로 더하지 마세요.' },
     };
+    // 예전 버전(v7)에서 규격이 추정이던 기본 짐 — 규격 확인 목록(core MV.inv.specTarget ③)에 남겨 진행률이 줄지 않게
+    MV.seed.assumedBefore = Object.keys(V7).filter((id) => V7[id].assumed);
     const KEEP = '[10/7: 링크 목록에 없음 — 필요 없으면 지우세요] ';
     const REMOVE = ['inv-tv', 'inv-sofa-table', 'inv-range-rack', 'inv-drawer', 'inv-mirror', 'inv-hanger-system',
       'inv-bed-kid', 'inv-desk-kid', 'inv-air-purifier', 'inv-bike', 'inv-drying-rack'];
     // normInv(core) 기본값 — 옛 기록에 칸이 없을 때 core 가 비교하는 값과 같게
     const DEF = { cat: 'misc', tag: '', fate: 'move', qty: 1, room: '', roomNew: '', brand: '', model: '', url: '', lg: false, ac: null, assumed: false, note: '' };
-    const KEYS = ['name', 'cat', 'tag', 'fate', 'qty', 'w', 'd', 'h', 'room', 'roomNew', 'brand', 'model', 'url', 'lg', 'ac', 'assumed', 'note', 'use'];
+    const KEYS = ['name', 'cat', 'tag', 'fate', 'qty', 'w', 'd', 'h', 'room', 'roomNew', 'brand', 'model', 'url', 'lg', 'ac', 'assumed', 'note', 'use', 'floor'];
     const GATE = ['name', 'w', 'd', 'h', 'qty', 'assumed'];
     const REMOVE_GATE = ['name', 'fate', 'qty', 'w', 'd', 'h', 'note', 'model', 'url'];
     const val = (o, k) => (o[k] === undefined ? DEF[k] : o[k]);
@@ -1021,7 +1023,7 @@
     // 메모 앞에 한 번 안내를 붙여요 — 새 짐이 따로 더해져 의자·옷장이 두 번 세어지지 않게 사용자가 고치거나 지우도록 (core keptNote)
     const SPLIT = {
       'inv-dining': '[10/7: 의자 4개는 「식탁 의자」 짐으로 따로 넣었어요 — 이 짐에 의자가 들어 있으면 이름·크기를 식탁만으로 고치세요] ',
-      'inv-cabinet': '[10/7: 캐비닛장은 ① 2단 행어형 ×2(이 짐)와 ② 3단 수납형 ×1(새 짐)로 나눠 넣었어요 — 이 짐이 세 칸을 합친 크기면 ① 하나 크기로 고치거나 ②를 지우세요] ',
+      'inv-cabinet': '[10/7: 캐비닛장은 ① 2단 행어형 ×2(이 짐)와 ② 3단 수납형 ×1(새 짐)로 나눠 넣었어요 — 이 짐이 세 칸을 합친 크기면 이름·크기를 ① 하나(76×50×200)로, 개수를 2로 고치세요. 이미 ①·②를 따로 적어 두었으면 이 짐을 지우세요] ',
     };
     Object.keys(SPLIT).forEach((id) => { if (inventory[id]) inventory[id].keptNote = SPLIT[id]; });
     const removeInventory = REMOVE.map((id) => {
@@ -1035,5 +1037,8 @@
     const useOnly = {};
     MV.seed.inventory.forEach((sp) => { if (sp.use) useOnly[sp.id] = { from: { use: undefined }, set: { use: sp.use } }; });
     MV.seed.migrations.push({ to: 8, inventory: useOnly });
+    // 냉장고 전날 정리(appliance-15): 4도어 때 글 '문 4개' → 양문형 '양쪽 문'. 담당만 바꿔 '고친 항목'으로 잡히던 기기도
+    // 글이 v7 기본값 그대로면 새 글로 (값 = v7(5fc3ee5) 기본 글의 지문 — MV.seedItemPrint)
+    MV.seed.migrations.push({ to: 8, itemsFrom: { 'appliance-15': '4slngt6cwd' } });
   })();
 })();

@@ -578,6 +578,10 @@
           const rooms = plan && Array.isArray(plan.rooms) ? plan.rooms : null;
           if (rooms) pls.forEach((p) => { if (p && before.has(p.id) && !moved.has(p.id) && !addIds.has(p.id) && frontFromWall(p, invOf(p.invId), rooms)) n++; });
         }
+        // 다른 짐에 막혀 넣지 못한 초안 배치 (활동 기록에 한 번 알려요 — 왜 초안에 없는지 알 수 있게)
+        const blocked = new Set();
+        const skipped = [];
+        const skip = (pl, it) => { blocked.add(pl.id); skipped.push(it); };
         (rule.add || []).forEach((pl) => {
           if (!pl || !pl.id || pls.some((x) => x && x.id === pl.id)) return;
           const it = invOf(pl.invId);
@@ -586,19 +590,25 @@
           if (pl.needs) {
             const t = pls.find((x) => x && x.id === pl.needs);
             const at = (rule.add || []).find((x) => x && x.id === pl.needs);
-            if (!t || (at && !same(t, at))) return;
+            if (!t || (at && !same(t, at))) { if (!t && blocked.has(pl.needs)) skip(pl, it); return; }
           }
           const qty = Math.max(0, Math.round(+it.qty || 0));
           if (pls.filter((x) => x && x.invId === pl.invId).length >= qty) return;
           const np = { id: pl.id, invId: pl.invId, x: pl.x, y: pl.y, rot: plRot(pl.rot) };
           const r = rectOfPl(np, it);
-          if (r && pls.some((x) => { const o = x && rectOfPl(x, invOf(x.invId)); return o && rectHit(r, o); })) return;
+          if (r && pls.some((x) => { const o = x && rectOfPl(x, invOf(x.invId)); return o && rectHit(r, o); })) { skip(pl, it); return; }
           // clear: 이 짐의 쓰임 공간 앞(서랍·문 앞 등)에 다른 짐이 있으면 넣지 않음 + 이미 놓인 초안 배치의 쓰임 공간 앞을 막지 않음
-          if (pl.clear && pls.some((x) => { const o = x && rectOfPl(x, invOf(x.invId)); return o && rectHit(pl.clear, o); })) return;
-          if (r && pls.some((x) => { const c = x && clearAt[x.id]; return c && same(x, c.at) && rectHit(r, c.clear); })) return;
+          if (pl.clear && pls.some((x) => { const o = x && rectOfPl(x, invOf(x.invId)); return o && rectHit(pl.clear, o); })) { skip(pl, it); return; }
+          if (r && pls.some((x) => { const c = x && clearAt[x.id]; return c && same(x, c.at) && rectHit(r, c.clear); })) { skip(pl, it); return; }
           pls.push(np);
           n++;
         });
+        if (skipped.length) {
+          const cnt = new Map();
+          skipped.forEach((it) => { const nm = String(it.name || it.id).split(/\s*[—(]/)[0].trim().slice(0, 24) || String(it.id); cnt.set(nm, (cnt.get(nm) || 0) + 1); });
+          const names = Array.from(cnt.entries()).map(([nm, c]) => nm + (c > 1 ? ' ×' + c : ''));
+          noteOnce('seed-v' + m.to + '-skip-' + key, '도면 초안 자리에 다른 짐이 있어 넣지 않았어요: ' + names.join(', ') + ' — 도면에서 + 놓기나 ✨ 자동 배치로 놓아 보세요.');
+        }
       });
       // 묶음 이름이 바뀐 경우: 사용자가 만들거나 이름을 고친 파트도 같은 새 묶음으로 옮겨요
       Object.keys(m.renameGroups || {}).forEach((og) => {
@@ -951,6 +961,7 @@
 
   /* ---- 규격 확인 (모델명으로 규격 확정) ----
      대상: 처리가 '가져감'·'미정'인 짐 중 ① 규격이 추정이거나 ② 모델명을 받았거나 ③ 처음에 추정이었던 기본 짐
+     (지금 버전 기본값 또는 예전 버전 기본값 — data-seed.js 의 MV.seed.assumedBefore)
      (③ 덕분에 크기를 고쳐 '확정'된 기본 짐도 목록에 남아 진행률 n/m 이 줄지 않아요).
      버릴 짐·팔 짐·살 짐은 빼요 (살 물건은 살 때 정해요). */
   V.SPEC_FATES = ['move', 'undecided'];
@@ -961,9 +972,11 @@
   };
   const modelOf = (it) => String((it && it.model) || '').trim();
   const fateOf = (it) => (V.FATES.some((f) => f.id === it.fate) ? it.fate : 'undecided');
+  // 지금 버전 기본값이 추정이거나, 예전 버전 기본값이 추정이던 짐(MV.seed.assumedBefore — 예: v7 때 크기를 고쳐 확정한 소파)
   const seedAssumed = (id) => {
     const sp = MV.seed && Array.isArray(MV.seed.inventory) ? MV.seed.inventory.find((x) => x && x.id === id) : null;
-    return !!(sp && sp.assumed);
+    const before = MV.seed && Array.isArray(MV.seed.assumedBefore) ? MV.seed.assumedBefore : [];
+    return !!(sp && sp.assumed) || before.indexOf(id) >= 0;
   };
   V.specTarget = (it) => {
     if (!it || typeof it !== 'object' || V.SPEC_FATES.indexOf(fateOf(it)) < 0) return false;
