@@ -162,17 +162,28 @@
     const m = MV.ui.modal({ title: '데이터 · 설정', body });
   }
 
+  /* 자금(finance.v)·견적(estimate.v) 버전 이전은 원래 그 화면을 열 때 저장돼요. 대시보드만 여는 기기에서도 공유 기록(클로드가 읽는 db 포함)과
+     AI 비서가 확정값(10/8 이사업체 계약·에어컨 설치)을 보도록, 저장된 문서가 옛 버전이면 화면을 그리기 전·공유 기록을 받은 뒤에 한 번 이전해 저장해요.
+     문서가 없으면 만들지 않아요. 공유 기록에 다시 붙기 전이면 sync.migrateDoc 이 맞추기 전·뒤를 남겨 늦게 여는 기기의 결과가 먼저 연 기기에서 고친 것을 덮지 않게 해요 */
+  function migrateSections() {
+    [MV.calc && MV.calc.ensureFinance, MV.calc && MV.calc.ensureEstimate].forEach((fn) => {
+      if (typeof fn !== 'function') return;
+      try { fn({ onlyOld: true }); } catch (e) { console.warn('[app] 이전', e); }
+    });
+  }
   function boot() {
     try {
       const t = localStorage.getItem('mv:theme');
       if (t) document.documentElement.dataset.theme = t;
     } catch (e) { /* 무시 */ }
     MV.store.load();
+    migrateSections();
     const menu = document.getElementById('topbar-menu');
     if (menu) menu.addEventListener('click', openMenu);
     const onRoute = () => { MV.rerender(); renderNav(); renderTop(); };
     window.addEventListener('hashchange', onRoute);
     MV.store.on('change', (e) => {
+      if (e && (e.reset || e.source === 'remote')) migrateSections(); // 받은 공유 기록이 옛 버전이면 (조용히 저장 — 다시 그리기는 아래대로)
       renderNav(); renderTop();
       if (e && e.reset) MV.rerender(true);
     });

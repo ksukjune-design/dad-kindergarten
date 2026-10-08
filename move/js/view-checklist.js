@@ -1053,8 +1053,9 @@
         const realToday = D.str(new Date()); const yest = D.add(realToday, -1);
         const days = []; const byDay = new Map();
         items.forEach((it) => {
+          // 날짜만 적힌 완료일('YYYY-MM-DD' — 기본값 이전 규칙이 완료로 표시한 항목)은 그 날짜 그대로 (시간대와 상관없이)
           const dt = new Date(it.doneAt);
-          const k = isNaN(dt) ? '' : D.str(dt);
+          const k = /^\d{4}-\d{2}-\d{2}$/.test(String(it.doneAt || '')) ? it.doneAt : isNaN(dt) ? '' : D.str(dt);
           if (!byDay.has(k)) { byDay.set(k, []); days.push(k); }
           byDay.get(k).push(it);
         });

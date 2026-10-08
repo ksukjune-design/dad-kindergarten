@@ -40,7 +40,8 @@
             '11/3에 현금 모자라?'의 답 = netEssential, 월세 후불이면 + rentPart. 이사 전에 먼저 나갈 돈(beforeMoveUnpaid)·
             주의사항(warnings: id·level·href)도 같이 보냄
             줄마다 group(essential/purchase/optional), AI가 고친 줄은 edited=true (자금흐름 기본값 바꿈이 건드리지 않게)
-   가족 결정 지시 턴의 [가족 결정](2026-10-06): 큰 가전(냉장고·건조기 이삿짐센터, 2in1 에어컨 삼성전자서비스 이사 전 설치),
+   가족 결정 지시 턴의 [가족 결정](2026-10-06~10-08): 큰 가전(냉장고·건조기·2in1 에어컨 모두 이삿짐센터 — 에어컨 설치는 이사 뒤 따로 부른 기사, 약 40만원),
+            이사업체 계약(10/8 아정당 총 190만원·부가세 없음·현금이체, 계약금 10만원 냄, 잔금 180만원 11/3 점검 뒤),
             옷장은 이사 뒤 간이, 붙박이장 비우기('나' 옷 → 간이옷장, '나' 잡화 → 잡화정리, 이동식 행거는 필요할 때만), 커튼·소품 그대로, 입주청소 직접, 예비비 없음, HUG 비교(#/guide/hug),
             사전 이삿짐 정리 파트 이름은 앱 데이터에서 읽음
    오류     sample 오류 코드마다 한국어 안내, 자동 재시도 없음 (사용자가 '다시 보내기').
@@ -65,8 +66,9 @@
   const MAX_UNDOS = 10;               // 되돌리기를 기억하는 답 수 (이 창에서만)
   const PRI_LABEL = { high: '중요', mid: '보통', low: '여유' };
   const PRI_RANK = { high: 0, mid: 1, low: 2 };
-  /* 자금흐름 예산에서 '자동 계산'이 되는 항목 (view-finance.js 의 LINE_META.auto) */
-  const AUTO_BUDGET = new Set(['mover', 'lg', 'maker-other', 'waste', 'elevator', 'hug']);
+  /* 자금흐름 예산에서 '자동 계산'이 되는 항목 (view-finance.js 의 LINE_META.auto).
+     10/8부터 'mover'(이사업체 잔금 — 아정당 계약)·'mover-deposit'(계약금, 냄)·'lg'(에어컨 설치, 별도 기사)는 확정·직접 입력 줄이라 여기 없어요 */
+  const AUTO_BUDGET = new Set(['maker-other', 'waste', 'elevator', 'hug']);
   /* 이 코드가 오면 이 화면에서 기능을 숨김 (다시 묻지 않음) */
   const HIDE_CODES = new Set(['not_granted', 'sampling_disabled', 'not_declared', 'capability_disabled', 'capability_removed']);
   const BLOCK_COPY = {
@@ -82,12 +84,12 @@
     { id: 'budget', icon: '💰', label: '예산·비용 점검', prompt: () => '이사 예산과 ' + D.fmt(D.moveDate()) + ' 뒤 남는 돈을 점검해 줘. 부족하면 얼마나 부족하고 어떻게 메울 수 있는지 알려 줘.' },
     { id: 'plan', icon: '📈', label: '일정(워크플랜) 점검', prompt: () => '이사일까지 주별 워크플랜을 점검해 줘. 밀린 주·일이 몰린 주와 일정을 조정해야 할 일을 알려 줘.' },
     { id: 'day', icon: '📅', label: () => moveMD() + ' 당일 순서', prompt: () => D.fmt(D.moveDate()) + ' 이사 당일 순서를 시간대별로 알려 줘. 돈 보내는 순서와 짐 옮기는 순서도 같이.' },
-    { id: 'quote', icon: '🚚', label: '이사업체 견적 비교', prompt: () => '받은 이사업체 견적을 모델 추정치와 비교해 줘. 아직 없으면 견적 받을 때 꼭 확인할 점을 알려 줘.' },
+    { id: 'quote', icon: '🚚', label: '이사업체 계약 점검', prompt: () => '이사업체 계약에서 아직 확인할 것(계약서·허가·보험·작업 범위)과 ' + D.fmt(D.moveDate()) + ' 잔금 이체 순서를 알려 줘. 계약 금액과 견적 모델도 비교해 줘.' },
     { id: 'kid', icon: '🎒', label: '아이 취학 일정', prompt: () => '아이 취학(2027년 3월 백석초 입학) 관련 일정과 지금 해야 할 일을 정리해 줘.' },
   ];
   const EXAMPLES = [
-    '삼성 에어컨 이전설치 견적 45만원 받았어, 예산에 반영해줘',
-    '○○이사업체 견적 210만원, 사다리차 포함 — 견적 비교에 넣어줘',
+    '에어컨 설치 기사 견적 45만원 받았어, 예산에 반영해줘',
+    '아정당 계약서 받았어 — 체크하고 메모 남겨줘: 사다리차 포함',
     '우리은행 질권 확인 끝났어, 체크하고 메모 남겨줘: 질권 없음',
     '다음 주 월요일까지 입주청소 용품 사기 할 일 추가해줘 !중요',
     '남은 예산 얼마나 부족해?',
@@ -698,6 +700,10 @@
       alreadyPaid: krw(f.alreadyPaid),
       refundsExpected: f.refundsExpected > 0 ? krw(f.refundsExpected) + ' — 아직 받기 전이라 위 숫자에 안 들어 있어요 (받으면 전부 기준 ' + verdict(f.netAllWithRefunds) + ')' : '없음 (아직 받을 돈이 남아 있지 않아요)',
       refundsGot: f.refundsGot > 0 ? krw(f.refundsGot) + ' — 이미 받아서 위 숫자(남는 돈)에 더했어요. 다시 더하지 마세요' : undefined,
+      mover: fs.mover && num(fs.mover.total) > 0
+        ? '이사업체 계약 확정: ' + (fs.mover.company || '이사업체') + ' 총 ' + krw(fs.mover.total) + (num(fs.mover.paid) > 0 ? ' — 낸 돈(계약금) ' + krw(fs.mover.paid) : '') +
+          ', 아직 낼 잔금 ' + krw(fs.mover.unpaid) + (fs.moverPayTime ? ' (' + moveMD() + ' ' + fs.moverPayTime + ' 점검 뒤 이체)' : '') + '. 잔금은 꼭 드는 이사 비용에 들어 있어요 — 남는 돈에서 두 번 빼지 마세요'
+        : undefined,
       numbers,
       warnings: w.list,
       moreWarnings: w.more || undefined,
@@ -751,6 +757,7 @@
         };
       })(),
       totalWithMakerService: est.totalPay && isNumF(est.totalPay.typical) ? won(est.totalPay.typical) : null,
+      contract: contractView(est),
       makerBlocked: makerBlocked(est).length ? makerBlocked(est) : undefined,
       quotes: quotes.filter((q) => num(q.amount) > 0).length,
     };
@@ -847,7 +854,7 @@
       '8. 예산·부족을 물으면(예: "' + moveMD() + '에 현금 모자라?") 예산 화면(#/money/budget)과 같은 순서로 답하세요: ① 꼭 드는 이사 비용 기준 ' + D.fmt(move) + ' 전후 현금 여유/부족(머리 숫자 — finance.cashVsEssential, numbers.netEssential) ② 새로 사는 살림까지 ③ 선택·나중에까지 전부. "부족"을 한 숫자로 뭉뚱그리지 마세요. 돈 흐름에 11월 월세가 들어 있으면 계약서대로 후불일 때의 숫자(finance.rentNote)도 같이 말하고, 이사 전에 먼저 나갈 돈(finance.beforeMove)도 알려 주세요. 중개보수·잔금·대출 상환·월세는 예산이 아니라 돈 흐름에 이미 들어 있어요.',
       '9. 지난 답에 "(이 답에서 앱에 이미 반영한 변경: …)"이 붙어 있으면 그 변경은 이미 저장됐어요 — 같은 변경을 다시 하지 마세요.',
       '10. 대화의 마지막 사용자 메시지에만 답하세요. 지난 질문 뒤에 "(사용자가 이 요청을 중지했어요…)", "(…처리하지 못했어요…)", "(…끊겼어요…)" 같은 표시가 있으면 그 요청은 끝난 것이니 실행하거나 이어서 하지 마세요 — 사용자가 마지막 메시지에서 다시 해 달라고 할 때만 하세요.',
-      '11. [가족 결정]을 따르세요. 그와 다른 옛 안내(냉장고·건조기를 LG 서비스로 옮기기, 이사 전 옷장 주문·벽 고정 동의, 간이옷장 하나 더 사기, \'나\' 잡화를 간이옷장에 넣기, 입주청소 업체, 예비비, 새 커튼·소품 구매)는 권하지 마세요. 앱 데이터(짐 목록 inventory.bigAppliances·예산)가 결정과 다르면 다르다고 알려 주고 고칠지 물어보세요. 짐의 lg=true 는 "제조사 서비스(LG 베스트케어·삼성전자서비스)로 옮김", brand 는 제조사예요.',
+      '11. [가족 결정]을 따르세요. 그와 다른 옛 안내(에어컨을 제조사 서비스로 이사 전에 설치·이사 전 새 집 출입 동의, 이사업체 방문견적 3곳 받고 고르기, 냉장고·건조기를 LG 서비스로 옮기기, 이사 전 옷장 주문·벽 고정 동의, 간이옷장 하나 더 사기, \'나\' 잡화를 간이옷장에 넣기, 입주청소 업체, 예비비, 새 커튼·소품 구매)는 권하지 마세요. 앱 데이터(짐 목록 inventory.bigAppliances·예산)가 결정과 다르면 다르다고 알려 주고 고칠지 물어보세요. 짐의 lg=true 는 "제조사 서비스(LG 베스트케어·삼성전자서비스)로 옮김", brand 는 제조사예요.',
       '12. 규격 확인: 짐 목록의 많은 가구 크기는 추정(assumedSize)이라, 사용자가 10/7에 명판·라벨 모델명을 하나씩 알려 줘요. 짐의 model 은 그 모델명이에요. 모델명을 받으면 그 짐의 model 에 넣고(추정 표시는 그대로), 그 모델의 가로·깊이·높이를 확실히 알 때만 w·d·h 를 넣으세요(그러면 추정이 꺼져요). 크기를 모르면 지어내지 말고 [규격 확인](#/stuff/inventory/spec) 화면의 검색 링크로 찾아보거나 줄자로 재 달라고 하세요. 진행 상황은 overview 의 inventory.specCheck 에 있어요.',
     ];
     const est = modelEstimate();
@@ -872,15 +879,16 @@
       '- 아이는 유치원생이고 2027년 3월 백석초 입학 예정.',
       '- 사람: A = 지금 집 집주인, B = 지금 집 매수인, C = 새 집 집주인, 중개사.',
       '',
-      '[가족 결정 (2026-10-06~10-07, 최신 — 예전 안내보다 우선)]',
-      '- 큰 가전: LG 디오스 오브제컬렉션 양문형 652L 냉장고(S634BB35Q, 91.3×73.5×179cm, 118kg — 10/7 확정)와 삼성 그랑데 AI 건조기(2021년형, 19kg으로 추정, 68.6×87.6×98.4cm — 모델명은 라벨로 확인 중)는 ' + D.fmt(move) + '에 이삿짐센터가 세워서 옮겨요. 삼성 2in1 에어컨(거실 스탠드 + 안방 벽걸이, 실외기 1대)은 삼성전자서비스(1588-3366) 이전설치로 이사 전에 새 집에 설치해요 — 약 50만원(추정 45만~70만원). 안 되면 예비안: 이사 전에 철거만 하고 ' + D.fmt(move) + ' 오후~다음 날 설치. LG 베스트케어는 기본으로 쓰지 않아요.',
+      '[가족 결정 (2026-10-06~10-08, 최신 — 예전 안내보다 우선)]',
+      '- 큰 가전: LG 디오스 오브제컬렉션 양문형 652L 냉장고(S634BB35Q, 91.3×73.5×179cm, 118kg — 10/7 확정)와 삼성 그랑데 AI 건조기(2021년형, 19kg으로 추정, 68.6×87.6×98.4cm — 모델명은 라벨로 확인 중)는 ' + D.fmt(move) + '에 이삿짐센터가 세워서 옮겨요. 삼성 2in1 에어컨(거실 스탠드 + 안방 벽걸이, 실외기 1대)도 ' + D.fmt(move) + ' 이삿짐센터가 분리·포장·운반하고(10/8 결정), 설치는 따로 부른 설치 기사가 ' + D.fmt(move) + ' 오후(짐을 다 들인 뒤) 또는 다음 날 해요 — 약 40만원(추정 30만~55만원, 설치 기사 2곳 이상 견적으로 고치기). 예전 계획(제조사 서비스가 이사 전에 새 집에 설치, 이사 전 새 집 출입 동의)은 없어졌어요. LG 베스트케어는 기본으로 쓰지 않아요.',
+      '- 이사업체 계약 (10/8): 아정당(이사 업체를 이어 주는 플랫폼)과 총 190만원, 부가세 없음, 현금(계좌)이체로 계약했어요. 계약금 10만원은 이미 냈고(예산 줄 "mover-deposit", 냄), 잔금 180만원(예산 줄 "mover")은 ' + D.fmt(move) + ' 짐을 다 내리고 파손·누락 점검이 끝난 뒤(16:30쯤) 계약서의 업체 계좌로 이체해요. 두 줄과 에어컨 설치 줄("lg")은 자동 계산이 없는 확정·직접 입력 줄이에요. 현금영수증·세금계산서는 못 받을 수 있어 계약서와 이체 내역을 보관해요. 업체 고르기·방문견적은 끝났어요 — 남은 일은 계약서(견적서) 서면으로 받기, 실제 오는 업체의 허가·적재물배상보험 확인, 특약(행거박스·폐기물·가전 조건), 잔금 이체. 업체 견적의 "계약 확정" 견적(contract)이 실제 금액이고, 견적 모델은 참고용이에요.',
       '- 고장 난 세탁기는 지금 집에서 버려요(폐가전 무상방문수거 1599-0903). 새 통돌이 세탁기는 LG T19MX7 19kg(63.2×67×104cm, 약 50만원 안쪽인지 주문 전 확인), 11/4~11/6 새 집 배송.',
-      '- 제조사 서비스 비용: 견적의 makerService(제조사별 byBrand)가 제조사 서비스 전체예요' + mkNow + '. 예산에서는 둘로 나뉘어요: 줄 id "lg" = 삼성 에어컨 이전설치(이사 전에 내는 돈), 줄 id "maker-other" = 그 밖의 제조사 서비스(LG 베스트케어 등, 이사 날). "LG 이전"이라고 부르지 말고 그 이름(' + mkLabel + ', 예산 줄은 label)으로 부르세요.',
+      '- 예산 줄 이름: 줄 id "lg"는 이름만 옛것이고 지금은 "에어컨 설치 (이사 뒤, 별도 기사)" 40만원 추정 줄이에요(설치 기사 견적을 받으면 이 줄 금액을 고쳐요). 줄 id "maker-other" = 제조사 서비스로 옮기는 가전(LG 베스트케어 등, 이사 날)이 있을 때만 생기는 돈이고 지금은 0원이에요. 견적의 makerService(제조사별 byBrand)가 그 금액이에요' + mkNow + '. "LG 이전"이라고 부르지 말고 그 이름(' + mkLabel + ', 예산 줄은 label)으로 부르세요.',
       '- 옷장: 새 옷장은 이사 전에 사지 않아요. 지금 있는 캐비닛장 3종(마켓비 피도르 2단 행어형 76×50×200 2개 + 3단 수납형 76×50×169 1개, 나란히 폭 228cm)·간이옷장(일루일루 마르 스탠드 행거, 82×40×147.6)을 가져가 쓰고, 걸린 옷은 행거박스·박스로 옮겨요(이삿짐센터에 행거박스를 몇 개 가져오는지 물어 견적에 넣기). 이사 뒤 2주쯤 살아 보고 방을 재서 간이 옷장·행거(이케아 등)를 사요 — 예산 "선택·나중에" 약 20만원(추정), ' + D.fmt(move) + ' 현금에는 안 넣어요. 이사 전 옷장 주문·벽 고정 동의는 필요 없고, 나중에 키 큰 옷장을 고르면 그때 벽 고정을 확인해요.',
       '- 붙박이장 비우기: 지금 집 붙박이장은 두고 가니 이사 전에 모두 비워요 — 아내 옷 → 가족 캐비닛장 3종(2단 행어형 2개 + 3단 수납형 1개, 가져감) · \'나\' 옷 → 지금 간이옷장 · \'나\' 잡화 → 잡화정리 파트(리빙박스 하나에 담아 \'나-잡화\'라고 적기, 10/13) · 아이 옷 → 등원 옷은 아이 방 서랍, 외투·행사 옷은 간이옷장 · 여름옷·얇은 옷 → 우리 리빙박스에 담아 봄까지 보관. 간이옷장이 모자랄 때만 바퀴 달린 이동식 행거 1개(약 1.5만~3만원)를 사요 — 예산 줄 "이동식 행거·보관용품 (필요하면, 이사 전)"(지금 0원, 산 만큼 이사 뒤 간이 옷장 20만원에서 빼요). 간이옷장을 하나 더 사라고 권하지 마세요.',
       '- 새 집 방 (10/7 사용자 결정·도면 초안): 안방에는 옷장을 두지 않아요(라지킹 매트리스 200×200 프레임 없음·낮은 좌식 화장대·니토리 체스트랙). 캐비닛장 3종(아내 옷)과 데스커 책상·이케아 알렉스 서랍(아내·아이 공용)은 작은방2, 책장 4개(한샘 샘 5단 1 + 어린이 3단 3)와 간이옷장은 작은방1(아이 방), 장난감장·식탁+의자 4·소파·에어컨 스탠드는 거실. 식탁과 소파는 10/7 요청으로 자리를 서로 맞바꿨어요(식탁 → 거실 왼쪽 안방 쪽 벽, 소파 → 거실 오른쪽 벽 위쪽) — 사용자가 뜻한 것이 맞는지는 아직 확인 중이라고 말하세요.',
       '- 새 집 배치 규칙 (10/7): 모든 가구는 벽·다른 가구·고정물에서 10cm 띄워요(오차 여유 — 도면 화면 \'오차 여유\' 기본 10cm). 가구마다 쓰임 공간(서랍·여닫이 문 앞, 앉는 자리, 통돌이 뚜껑 위, 에어컨 바람 앞)을 비워요 — 표는 [크리티컬 포인트](#/guide/space/critical), 배치 초안·남은 문제·조정 목록은 [배치 초안](#/guide/space/layout-draft). 남은 문제: 냉장고 자리 폭 90cm(추정) < 91.3cm·문 앞 3.5cm 모자람, 다용도실 건조기 앞 42.4cm(90cm 필요)·10cm 여유를 두 곳 줄임(통돌이–건조기 5cm, 건조기–다용도실 문 열림 범위 3.2cm — 폭이 11.8cm 모자라 한 곳만으로는 안 됨), 작은방2 알렉스 서랍(70cm)이 북쪽 창 오른쪽 끝 28cm 아래(아이가 딛고 올라설 수 있음 — 창틀 높이 실측·창 잠금장치). 새 집 도면은 추정이라 10/10 실측 뒤 다시 맞춰요.',
-      '- 이사 견적 (10/7): 짐 목록을 실제 규격으로 바꿔 약 22.5㎥ · 5톤 · 4~5명, 약 211만원(부가세 포함, 별도 약 192만원)이에요. 숫자는 늘 견적 화면(#/stuff/estimate) 값을 따르세요.',
+      '- 이사 견적 모델 (10/8, 참고용): 짐 목록 기준 약 23㎥ · 5톤 · 4~5명, 약 255만원(부가세 포함, 별도 약 232만원 — 에어컨 설치비 약 40만원 포함)이에요. 이사업체 금액은 계약 190만원이 기준이고, 모델은 짐이 늘어 추가요금이 생길지 볼 때만 써요. 숫자는 늘 견적 화면(#/stuff/estimate) 값을 따르세요.',
       '- 장기수선충당금: 지금 집 A에게서 11/3 보증금과 함께 받아요(약 20만~50만원 추정 — 관리사무소 납부확인서 금액). 받기 전에는 남는 돈 계산에 넣지 않아요 → [장기수선충당금](#/guide/money/tax-repair).',
       '- 커튼·소품은 지금 것을 그대로 가져가요(새로 안 사요, 0원). 사전방문 때 창 크기만 재서 지금 커튼이 맞는지 확인하고, 안 맞으면 이사 뒤 조정해요.',
       '- 입주청소는 업체 없이 가족이 직접 해요(0원) — 청소용품을 미리 챙기고, ' + D.fmt(move) + ' 열쇠 받은 직후나 다음 날 짐 풀기 전에 해요. 예비비 줄은 없어요.',
@@ -1007,9 +1015,15 @@
   function financeReady(st) {
     return !!(st && st.finance && typeof st.finance === 'object' && st.finance.budget && Array.isArray(st.finance.budget.lines));
   }
-  /** 자금흐름 상태가 아직 없으면 자금흐름 화면이 기본값을 만들게 함 (화면 밖에서 한 번 그림) */
+  /** 자금흐름 상태가 아직 없으면 자금흐름 화면이 기본값을 만들게 함 (화면 밖에서 한 번 그림).
+      있으면 자금 화면과 같은 버전 이전을 먼저 저장 — 옛 줄(예: v9 '삼성 에어컨 이전설치')을 읽거나 고치면 나중에 이전이 덮어써요 */
   function ensureFinance() {
-    if (financeReady(MV.store.get())) return MV.store.get().finance;
+    if (financeReady(MV.store.get())) {
+      if (MV.calc && typeof MV.calc.ensureFinance === 'function') {
+        try { MV.calc.ensureFinance(); } catch (e) { console.warn('[agent] finance migrate', e); }
+      }
+      if (financeReady(MV.store.get())) return MV.store.get().finance;
+    }
     const v = MV.views.money;
     if (v && typeof v.render === 'function') {
       const host = document.createElement('div');
@@ -1096,6 +1110,12 @@
   }
 
   /* ---- 견적 (state.estimate.quotes — view-estimate.js 와 같은 모양) ---- */
+  /** 견적 화면과 같은 상태 확보·이전(계약 견적 v1)을 먼저 저장 — 아직 짐·견적 화면을 안 열었어도 계약 견적을 찾고 고칠 수 있게 */
+  function ensureEstimate() {
+    if (MV.calc && typeof MV.calc.ensureEstimate === 'function') {
+      try { MV.calc.ensureEstimate(); } catch (e) { console.warn('[agent] estimate migrate', e); }
+    }
+  }
   function quotesOf(st) {
     const e = st && st.estimate;
     return e && Array.isArray(e.quotes) ? e.quotes.filter((q) => q && typeof q === 'object') : [];
@@ -1113,20 +1133,28 @@
     const vatPct = num(est.coef && est.coef.vat_pct) || 10;
     const vm = 1 + vatPct / 100;
     const incl = !!est.vatIncl;
-    const ex0 = q.vatIncluded !== false ? amt / vm : amt;
+    /* 부가세 없음(noVat — 현금이체 계약 등): 낼 돈 = 견적 금액이라 빼지도 더하지도 않음 (견적 화면과 같은 방식 — 빠진 항목만 기준에 맞춰 더함) */
+    const noVat = !!q.noVat;
+    const ex0 = !noVat && q.vatIncluded !== false ? amt / vm : amt;
     const pe = est.partsEx || {};
     const adds = [];
     let ex = ex0;
+    let missing = 0;
     [['ladder', '사다리차'], ['aircon', '에어컨 이전'], ['waste', '폐기물'], ['arrange', '정리 인력']].forEach(([k, label]) => {
-      if (!q[k] && num(pe[k]) > 0) { ex += num(pe[k]); adds.push(label + ' ' + krw(num(pe[k]) * (incl ? vm : 1))); }
+      if (!q[k] && num(pe[k]) > 0) { ex += num(pe[k]); missing += num(pe[k]); adds.push(label + ' ' + krw(num(pe[k]) * (incl ? vm : 1))); }
     });
+    if (noVat) return { amount: Math.round(incl ? amt + missing * vm : ex), adds };
     return { amount: Math.round(incl ? ex * vm : ex), adds };
   }
   function quoteView(q, est) {
     const sb = sameBasis(q, est);
     const out = {
       id: q.id, company: q.company || '', amount: num(q.amount) || null, amountTxt: num(q.amount) > 0 ? amt(q.amount) : '금액 없음',
-      vatIncluded: q.vatIncluded !== false,
+      vatIncluded: !q.noVat && q.vatIncluded !== false,
+      noVat: !!q.noVat || undefined, // 부가세 없음(현금이체 등) — 낼 돈 = 견적 금액
+      contracted: !!q.contracted || undefined, // 계약한 업체 (10/8 아정당)
+      depositPaid: q.contracted ? !!q.depositPaid : undefined,
+      balanceDate: q.contracted && q.balanceDate ? q.balanceDate : undefined,
       includes: { ladder: !!q.ladder, aircon: !!q.aircon, waste: !!q.waste, arrange: !!q.arrange },
       tons: q.tons == null ? null : num(q.tons), crew: q.crew == null ? null : num(q.crew), deposit: q.deposit == null ? null : num(q.deposit),
       date: q.date || '', visitDone: !!q.visitDone, licenseChecked: !!q.licenseChecked, insuranceChecked: !!q.insuranceChecked,
@@ -1138,8 +1166,20 @@
       out.sameBasisTxt = krw(sb.amount) + ' (' + (est.vatIncl ? '부가세 포함' : '부가세 별도') + ' 기준' + (sb.adds.length ? ', 빠진 항목 더함: ' + sb.adds.join(', ') : '') + ')';
       out.vsModel = (diff >= 0 ? '+' : '−') + Math.abs(Math.round(diff * 100)) + '%';
       out.flag = sb.amount < num(est.low) ? '모델 하한보다 쌈 — 당일 추가요금 위험, 포함 항목 서면 확인' : sb.amount > num(est.high) ? '모델 상한보다 비쌈 — 포함 항목 확인 후 협상' : '모델 범위 안';
+      if (q.contracted) out.flag += ' (계약한 업체 — 금액은 확정, 비교는 참고. 에어컨 이전이 빠져 있으면 모델의 에어컨 설치비를 더한 값이에요 — 우리는 설치 기사를 따로 불러요)';
     }
     return out;
+  }
+  /** 계약한 이사업체 (10/8 아정당 — 견적 화면의 contract, 짐·견적 화면을 아직 안 열어 저장 전이어도 보임) */
+  function contractView(est) {
+    const c = est && est.contract && typeof est.contract === 'object' ? est.contract : null;
+    if (!c || !(num(c.pay) > 0)) return null;
+    return {
+      company: c.company || '', amount: Math.round(num(c.pay)), amountTxt: krw(c.pay) + (c.noVat ? ' (부가세 없음)' : c.vatIncluded ? ' (부가세 포함)' : ''),
+      deposit: Math.round(num(c.deposit)), depositPaid: !!c.depositPaid, balance: Math.round(num(c.balance)), balanceDate: c.balanceDate || '',
+      quoteId: c.id || '',
+      note: '실제로 낼 이사업체 금액은 이 계약이에요 (자금 예산 "mover" 잔금 + "mover-deposit" 계약금 줄). 모델 금액은 참고용',
+    };
   }
   function modelView(est) {
     if (!est) return null;
@@ -1153,9 +1193,10 @@
         const c = makerCostOf(est);
         if (!c) return null;
         return { label: makerLabel(est), count: num(c.count), typical: krw(c.typical), low: krw(c.low), high: krw(c.high), byBrand: makerByBrand(c, krw),
-          note: '이삿짐센터 금액과 따로 제조사에 내는 돈(부가세 포함). 예산에서는 줄 id "lg"(삼성 에어컨, 이사 전)와 "maker-other"(그 밖의 제조사 서비스, 이사 날)로 나뉘어요 — "LG 이전"이 아니라 label 이름으로 부르세요' };
+          note: '이삿짐센터 금액과 따로 제조사에 내는 돈(부가세 포함). 예산에서는 줄 id "maker-other"(제조사 서비스, 이사 날)에 들어가요 — 줄 id "lg"는 이름만 옛것이고 지금은 에어컨 설치(이사 뒤, 별도 기사) 직접 입력 줄이에요. "LG 이전"이 아니라 label 이름으로 부르세요' };
       })(),
       totalWithMakerService: est.totalPay ? krw(est.totalPay.typical) : null,
+      contract: contractView(est),
       makerBlocked: makerBlocked(est),
       calibrated: num(est.calibFactor) && Math.abs(num(est.calibFactor) - 1) > 1e-6 ? '방문견적으로 ×' + num(est.calibFactor).toFixed(2) + ' 보정됨' : '보정 전 (리서치 추정치)',
       notes: Array.isArray(est.notes) ? est.notes.slice(0, 4).map((n) => clip(n, 160)) : [],
@@ -1175,6 +1216,12 @@
     if (has(input, 'company')) { const c = str(input.company, 60); if (!c) throw new Error('업체 이름이 비어 있어요.'); set('company', c, '업체'); }
     if (has(input, 'amount')) set('amount', parseAmount(input.amount, '견적 금액', { min: 100000, max: 1e9 }), '금액', (v) => (v ? amt(v) : '-'));
     if (has(input, 'vatIncluded')) set('vatIncluded', toBool(input.vatIncluded), '부가세', (b) => (b === false ? '별도' : '포함'));
+    /* 부가세 없음(현금이체 등 — 낼 돈 = 견적 금액). 견적 화면처럼 vatIncluded 는 false 로 함께 둠 */
+    if (has(input, 'noVat')) {
+      const nv = toBool(input.noVat);
+      set('noVat', nv, '부가세 없음', (b) => (b ? '예' : '아니요'));
+      if (nv && !has(input, 'vatIncluded')) set('vatIncluded', false, '부가세', (b) => (b === false ? '별도' : '포함'));
+    } else if (has(input, 'vatIncluded') && toBool(input.vatIncluded) && base && base.noVat) set('noVat', false, '부가세 없음', (b) => (b ? '예' : '아니요'));
     [['ladder', '사다리차'], ['aircon', '에어컨 이전'], ['waste', '폐기물'], ['arrange', '정리 인력']].forEach(([k, l]) => { if (has(input, k)) set(k, toBool(input[k]), l, yes); });
     [['visitDone', '방문견적'], ['licenseChecked', '허가증'], ['insuranceChecked', '보험증권']].forEach(([k, l]) => { if (has(input, k)) set(k, toBool(input[k]), l, ok); });
     if (has(input, 'tons')) { const t = input.tons === null ? null : num(input.tons); if (t != null && (t <= 0 || t > 30)) throw new Error('차량 톤수는 0~30 사이로 주세요.'); set('tons', t, '차량', (v) => (v == null ? '-' : v + '톤')); }
@@ -1552,7 +1599,7 @@
     },
     {
       name: 'add_budget_line', label: '예산 항목 추가하는 중',
-      description: '예산에 새 항목을 추가해요. type: expense(지출, 기본) 또는 refund(들어올 돈). 지출은 group 을 정하세요: essential=이사 날 전후 꼭 드는 이사 비용(입주청소·사다리차·보관이사 등), purchase=새로 사는 살림(가구·가전), optional=선택·나중에. 이미 있는 항목(이사업체, 에어컨 이전설치(id lg), 통돌이, 이동식 행거·보관용품(id wardrobe-extra), 간이 옷장, HUG 보증료 등)은 update_budget 으로 고치고, 중개보수·잔금·대출 상환·월세는 돈 흐름에 이미 있으니 넣지 마세요.',
+      description: '예산에 새 항목을 추가해요. type: expense(지출, 기본) 또는 refund(들어올 돈). 지출은 group 을 정하세요: essential=이사 날 전후 꼭 드는 이사 비용(입주청소·사다리차·보관이사 등), purchase=새로 사는 살림(가구·가전), optional=선택·나중에. 이미 있는 항목(이사업체 잔금(id mover)·계약금(id mover-deposit), 에어컨 설치(id lg), 통돌이, 이동식 행거·보관용품(id wardrobe-extra), 간이 옷장, HUG 보증료 등)은 update_budget 으로 고치고, 중개보수·잔금·대출 상환·월세는 돈 흐름에 이미 있으니 넣지 마세요.',
       inputSchema: {
         type: 'object',
         properties: { label: { type: 'string' }, amount: S_MONEY, type: { type: 'string', enum: ['expense', 'refund'] }, group: S_GROUP, paid: { type: 'boolean' }, date: { type: ['string', 'null'] }, memo: { type: 'string' } },
@@ -1586,8 +1633,9 @@
     },
     {
       name: 'get_estimate', label: '견적 보는 중',
-      description: '이사 견적: 짐 목록으로 계산한 모델 추정치(기준가·범위·차량·인원)와 제조사 서비스(LG 베스트케어·삼성전자서비스) 이전설치비 makerService(label·제조사별 byBrand — 이삿짐센터 금액과 따로), 지금까지 넣은 업체 견적 quotes(같은 조건 환산 금액, 모델 대비 %). 금액은 원.',
+      description: '이사 견적: 계약한 이사업체 contract(실제로 낼 금액 — 10/8 아정당), 짐 목록으로 계산한 모델 추정치(참고용 — 기준가·범위·차량·인원)와 제조사 서비스(LG 베스트케어·삼성전자서비스) 이전설치비 makerService(label·제조사별 byBrand — 이삿짐센터 금액과 따로), 지금까지 넣은 업체 견적 quotes(같은 조건 환산 금액, 모델 대비 %). 금액은 원.',
       run: () => {
+        ensureEstimate();
         const est = modelEstimate();
         if (!est) throw new Error('짐·견적 화면이 없어 견적을 계산할 수 없어요.');
         return { model: modelView(est), quotes: quotesOf(MV.store.get()).map((q) => quoteView(q, est)), link: '#/stuff/quotes' };
@@ -1595,11 +1643,11 @@
     },
     {
       name: 'add_quote', label: '견적 넣는 중',
-      description: '업체 견적 비교에 이사업체 견적을 추가해요. amount 는 견적 총액(원 또는 "210만원"). vatIncluded 기본 true. ladder·aircon·waste·arrange 는 견적에 그 항목이 포함됐는지. visitDone 은 방문견적이면 true. 결과에 모델과의 비교.',
+      description: '업체 견적 비교에 이사업체 견적을 추가해요. amount 는 견적 총액(원 또는 "210만원"). vatIncluded 기본 true, 부가세를 내지 않는 현금 견적이면 noVat true. ladder·aircon·waste·arrange 는 견적에 그 항목이 포함됐는지. visitDone 은 방문견적이면 true. 결과에 모델과의 비교.',
       inputSchema: {
         type: 'object',
         properties: {
-          company: { type: 'string' }, amount: S_MONEY, vatIncluded: { type: 'boolean' },
+          company: { type: 'string' }, amount: S_MONEY, vatIncluded: { type: 'boolean' }, noVat: { type: 'boolean', description: '부가세 없음(현금이체 등 — 낼 돈 = 금액)' },
           ladder: { type: 'boolean', description: '사다리차 포함' }, aircon: { type: 'boolean', description: '에어컨 이전 포함' },
           waste: { type: 'boolean', description: '폐기물 처리 포함' }, arrange: { type: 'boolean', description: '정리 인력 포함' },
           tons: { type: 'number' }, crew: { type: 'integer' }, deposit: S_MONEY, date: { type: 'string', description: '견적 받은 날 YYYY-MM-DD' },
@@ -1609,6 +1657,7 @@
       },
       run: (a, ctx) => {
         if (!has(a, 'company') || !has(a, 'amount')) throw new Error('업체 이름(company)과 금액(amount)이 필요해요.');
+        ensureEstimate();
         const { p } = quotePatch(a, null, true);
         const norm = (s) => String(s || '').replace(/\s+/g, '').toLowerCase();
         const dup = quotesOf(MV.store.get()).find((q) => norm(q.company) === norm(p.company));
@@ -1622,7 +1671,7 @@
         const est = modelEstimate();
         const v = quoteView(q, est);
         const inc = [['ladder', '사다리차'], ['aircon', '에어컨'], ['waste', '폐기물'], ['arrange', '정리']].filter(([k]) => q[k]).map(([, l]) => l);
-        record(ctx, '🚚 견적 추가: ' + q.company + ' ' + amt(q.amount) + (q.vatIncluded ? '' : ' (부가세 별도)') + (inc.length ? ' · ' + inc.join('·') + ' 포함' : '') + (v.vsModel ? ' · 모델 대비 ' + v.vsModel : ''), '#/stuff/quotes');
+        record(ctx, '🚚 견적 추가: ' + q.company + ' ' + amt(q.amount) + (q.noVat ? ' (부가세 없음)' : q.vatIncluded ? '' : ' (부가세 별도)') + (inc.length ? ' · ' + inc.join('·') + ' 포함' : '') + (v.vsModel ? ' · 모델 대비 ' + v.vsModel : ''), '#/stuff/quotes');
         const n = quotesOf(MV.store.get()).filter((x) => num(x.amount) > 0).length;
         return { id: q.id, quote: v, model: modelView(est), quotesCount: n, hint: n >= 3 ? '견적이 3곳 이상이에요 — 업체 견적 화면에서 "견적으로 보정"을 누르면 모델과 예산이 맞춰져요.' : '방문견적 3곳을 받으면 비교가 정확해져요.' };
       },
@@ -1633,7 +1682,7 @@
       inputSchema: {
         type: 'object',
         properties: {
-          id: { type: 'string' }, company: { type: 'string' }, amount: S_MONEY, vatIncluded: { type: 'boolean' },
+          id: { type: 'string' }, company: { type: 'string' }, amount: S_MONEY, vatIncluded: { type: 'boolean' }, noVat: { type: 'boolean' },
           ladder: { type: 'boolean' }, aircon: { type: 'boolean' }, waste: { type: 'boolean' }, arrange: { type: 'boolean' },
           tons: { type: 'number' }, crew: { type: 'integer' }, deposit: S_MONEY, date: { type: 'string' },
           visitDone: { type: 'boolean' }, licenseChecked: { type: 'boolean' }, insuranceChecked: { type: 'boolean' }, note: { type: 'string' },
@@ -1642,8 +1691,13 @@
       },
       run: (a, ctx) => {
         const id = str(a.id, 80);
+        ensureEstimate();
         const q0 = quotesOf(MV.store.get()).find((q) => q.id === id || String(q.company || '').replace(/\s+/g, '') === id.replace(/\s+/g, ''));
-        if (!q0) throw new Error('견적 "' + id + '"을(를) 찾지 못했어요. 견적: ' + (quotesOf(MV.store.get()).map((q) => q.id + '(' + (q.company || '이름 없음') + ')').join(', ') || '없음'));
+        if (!q0) {
+          const ct = contractView(modelEstimate());
+          const hint = ct && !quotesOf(MV.store.get()).some((q) => q.id === ct.quoteId) ? ' 계약한 업체(' + ct.company + ') 견적은 짐·견적 화면(#/stuff/quotes)을 한 번 열면 저장돼요 — 열어 달라고 안내하세요.' : '';
+          throw new Error('견적 "' + id + '"을(를) 찾지 못했어요. 견적: ' + (quotesOf(MV.store.get()).map((q) => q.id + '(' + (q.company || '이름 없음') + ')').join(', ') || '없음') + '.' + hint);
+        }
         const { p, diffs } = quotePatch(a, q0, false);
         if (!diffs.length) return { id: q0.id, changed: [], note: '이미 그 값이라 바꾼 것이 없어요.' };
         mutate(ctx, () => MV.store.update((st) => {
@@ -2632,8 +2686,8 @@
     const url = MV.config && MV.config.sharedUrl ? String(MV.config.sharedUrl) : '';
     const can = [
       ['🗓', '“이번 주 할 일 정리해줘”, “지연된 일 뭐 있어?” — 체크리스트·워크플랜을 보고 정리해요'],
-      ['💰', '“삼성 에어컨 이전설치 견적 45만원 받았어, 예산에 반영해줘” — 예산을 고치고 남는 돈을 다시 계산해요'],
-      ['🚚', '“○○이사업체 견적 210만원, 사다리차 포함” — 견적 비교에 넣고 모델과 비교해요'],
+      ['💰', '“에어컨 설치 기사 견적 45만원 받았어, 예산에 반영해줘” — 예산을 고치고 남는 돈을 다시 계산해요'],
+      ['🚚', '“이사업체 계약에서 아직 확인할 게 뭐야?” — 계약 금액·잔금 일정과 남은 확인 일을 정리해요'],
       ['✅', '“우리은행 질권 확인 끝났어, 체크하고 메모 남겨줘” — 체크·메모·할 일 추가'],
       ['↺', '바꾼 내용은 기록에 🤖로 남고, 답마다 한 번에 되돌릴 수 있어요'],
     ];
@@ -2948,5 +3002,5 @@ body.ag-fab-pad #view::after { content: ''; display: block; height: 76px; }
   if (sampleFn()) syncAvailability();
 
   // 테스트·디버깅용 (화면에는 영향 없음)
-  MV.agent = { _debug: { md, overview, instruction, tools: () => TOOLS.map((t) => t.name), state: R, buildInput } };
+  MV.agent = { _debug: { md, overview, instruction, tools: () => TOOLS.map((t) => t.name), tool: (name) => TOOLS.find((t) => t.name === name) || null, state: R, buildInput } };
 })();
