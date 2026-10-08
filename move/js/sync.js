@@ -44,6 +44,8 @@
          새 기본값 버전(data-seed version)을 늦게 여는 기기: 열 때 돌린 이전 규칙이 바꾼 문서(맞추기 전·뒤)를
          'mv:sync:seedpre:v1' 에 남기고, 다시 붙을 때 서버가 이미 그 버전 이상이면 합치기 전에 되돌려요(undoSeed) —
          먼저 올린 기기와 그 뒤 사용자가 고친 것을 '이 기기에서 고친 것'으로 덮거나 섞지 않게.
+         자금(finance.v)·견적(estimate.v) 묶음 문서의 자기 버전 이전도 같음 (migrateDoc): 다시 붙기 전에 이전해 저장하면
+         맞추기 전·뒤를 seedPre 에 함께 남기고(sec: 경로 → 그 묶음 버전), 서버 문서가 이미 그 버전 이상이면 되돌린 뒤 합쳐요.
    처음 공유 시작(initFromLocal): 파이어베이스는 move/meta 를 '없을 때만' 먼저 써서(트랜잭션) 두 기기가 거의 같이 눌러도
          한쪽 기록만 공유 기록이 되고, 늦은 쪽은 공유 기록으로 맞춤 (이 기기 기록은 BACKUP_KEY 에 따로 보관).
          이미 공유가 시작됐으면(상태가 empty 가 아니면) 다시 올리지 않음.
@@ -98,7 +100,7 @@
   let resyncing = false;
   let starting = false;         // 처음 공유 시작 중 (move/meta 를 '없을 때만' 쓰는 중)
   let deferred = [];            // 다시 읽는 동안 도착한 변경 (다 읽은 뒤 처리)
-  let seedPre = null;           // { id, to, u: { 경로: [맞추기 전 내용|null, 맞춘 뒤 내용|null] } } — 아래 rejoin·undoSeed 참고
+  let seedPre = null;           // { id, to, u: { 경로: [맞추기 전 내용|null, 맞춘 뒤 내용|null] }, sec?: { 경로: 묶음 버전 } } — 아래 rejoin·undoSeed·migrateDoc 참고
   let baseId = null;            // srv 가 어느 저장소의 내용인지 ('firebase:프로젝트/묶음') — 있을 때만 기준을 남기고 다시 붙을 때 합침
   let baseT = 0;
   const toasted = new Set();
@@ -763,9 +765,14 @@
     seedPre = null;
     saveSeedPre();
   }
-  function undoSeed(st) {
+  /** 묶음 문서(move/finance 등) 경로면 상태 키, 아니면 null */
+  function secKey(path) {
+    const id = path.indexOf('move/') === 0 ? path.slice(5) : '';
+    return SECTIONS.indexOf(id) >= 0 ? id : null;
+  }
+  function undoSeed(st, paths) {
     let undone = 0;
-    Object.keys(seedPre.u).forEach((path) => {
+    paths.forEach((path) => {
       const pair = seedPre.u[path];
       if (!Array.isArray(pair)) return;
       const preJ = typeof pair[0] === 'string' ? pair[0] : null;
@@ -775,6 +782,7 @@
       let target;
       if (curJ === postJ) target = preJ;                              // 맞춘 뒤 이 기기에서 안 고침
       else if (lu === undefined) return;                              // 맞춘 뒤 이 기기에서 지움 → 지운 채로
+      else if (preJ === null) return;                                 // 이 기기에서 새로 만든 묶음 문서를 그 뒤 고침 → 그대로 합침
       else if (path === 'move/activity') {
         const post = new Set(((postJ ? JSON.parse(postJ) : {}).list || []).map(canon));
         const pre = (preJ ? JSON.parse(preJ) : {}).list || [];
@@ -786,6 +794,7 @@
       if (target === curJ) return;
       if (target === null) {
         if (isItemPath(path)) { applyUnit(st, path, null); undone++; }
+        else if (secKey(path)) { delete st[secKey(path)]; undone++; } // 이 기기가 이전하며 처음 만든 묶음 문서 → 서버 것을 그대로 받음
         return;
       }
       const body = JSON.parse(target);
@@ -800,10 +809,15 @@
   function rejoin(remote) {
     const st = S.get();
     // 서버가 이미 이 기본값 버전 이상이면, 이 기기가 열 때 돌린 이전 규칙의 결과를 되돌린 뒤 합쳐요 (서버의 결과·그 뒤 고친 것이 이김)
+    // 자금·견적 묶음 문서의 자기 버전 이전(sec)은 서버의 그 문서가 이미 그 버전 이상일 때만 되돌려요 (아직 옛 버전이면 이 기기 결과를 올림)
     const sv = (MV.seed && MV.seed.version) || 0;
     const rMeta = strip(remote.get('move/meta'));
-    if (seedPre && seedPre.id === baseId && seedPre.to === sv && isObj(rMeta) && (+rMeta.seedVersion || 0) >= sv) {
-      try { undoSeed(st); } catch (e) { console.error('[sync] undoSeed', e); }
+    if (seedPre && seedPre.id === baseId && isObj(seedPre.u)) {
+      const sec = isObj(seedPre.sec) ? seedPre.sec : {};
+      const seedDone = seedPre.to === sv && isObj(rMeta) && (+rMeta.seedVersion || 0) >= sv;
+      const docV = (path) => { const d = strip(remote.get(path)); return isObj(d) && isObj(d.v) ? (+d.v.v || 0) : 0; };
+      const paths = Object.keys(seedPre.u).filter((path) => (sec[path] ? docV(path) >= sec[path] : seedDone));
+      if (paths.length) { try { undoSeed(st, paths); } catch (e) { console.error('[sync] undoSeed', e); } }
     }
     clearSeedPre();
     const units = unitsOf(st);
@@ -886,7 +900,14 @@
         const aj = a === undefined ? null : canon(a), bj = b === undefined ? null : canon(b);
         if (aj !== bj) u[path] = [aj, bj];
       });
-      seedPre = { id: rec.id, to: sv, u };
+      // 다시 붙기 전에 남겨 둔 묶음 문서 이전(sec)은 이어서 남김 (연결 없이 새 버전을 또 연 경우)
+      let old = null;
+      try { old = JSON.parse(global.localStorage.getItem(SEEDPRE_KEY) || 'null'); } catch (e) { old = null; }
+      const sec = {};
+      if (isObj(old) && old.id === rec.id && isObj(old.u) && isObj(old.sec)) {
+        Object.keys(old.sec).forEach((path) => { if (Array.isArray(old.u[path]) && !u[path]) { u[path] = old.u[path]; sec[path] = old.sec[path]; } });
+      }
+      seedPre = { id: rec.id, to: sv, u, sec };
       saveSeedPre();
     } else {
       let sp = null;
@@ -895,6 +916,29 @@
       else if (sp) { try { global.localStorage.removeItem(SEEDPRE_KEY); } catch (e) { /* 무시 */ } }
     }
   }
+
+  /** 묶음 문서(move/finance·move/estimate)의 자기 버전 이전을 저장할 때: save() 가 저장소를 고침.
+      공유 기록 기준(baseId)이 있는데 아직 다시 붙기 전(연결 전·연결 중)이면, 맞추기 전·뒤 내용을 seedPre 에 남겨
+      rejoin 이 서버 문서가 이미 ver 이상일 때 되돌리게 해요 — 늦게 여는 기기의 이전 결과(기본값)가 먼저 연 기기에서
+      그 뒤 고친 값(예: 에어컨 설치 실제 견적)·지운 견적을 '이 기기에서 고친 것'으로 덮거나 되살리지 않게.
+      공유 중이거나 기준이 없으면(처음 연결·이 기기만·클로드 버전) 그냥 저장 */
+  Y.migrateDoc = function migrateDoc(path, ver, save) {
+    const track = !!baseId && Y.mode !== 'shared' && !!secKey(path) && +ver > 0;
+    let preJ = null;
+    if (track) { const u = unitOf(S.get(), path); preJ = u === undefined ? null : canon(u); }
+    save();
+    if (!track) return;
+    const u = unitOf(S.get(), path);
+    const postJ = u === undefined ? null : canon(u);
+    if (postJ === preJ || postJ === null) return;
+    const sv = (MV.seed && MV.seed.version) || 0;
+    if (!seedPre || seedPre.id !== baseId || !isObj(seedPre.u)) seedPre = { id: baseId, to: sv, u: {} };
+    if (!isObj(seedPre.sec)) seedPre.sec = {};
+    if (Object.prototype.hasOwnProperty.call(seedPre.u, path)) return; // 이미 남겨 둠 — 처음 남긴 맞추기 전 내용을 지킴
+    seedPre.u[path] = [preJ, postJ];
+    seedPre.sec[path] = +ver;
+    saveSeedPre();
+  };
 
   /** 공유 저장소가 비어 있을 때: 이 기기 기록으로 공유를 시작 → Promise<true(시작함)|false(안 함)>
       두 기기가 거의 같이 눌러도 한쪽만 시작하도록, 파이어베이스는 move/meta 를 '없을 때만' 먼저 씀.

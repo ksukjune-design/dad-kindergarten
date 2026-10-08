@@ -181,6 +181,9 @@
   D.weekStart = (s) => { const d = D.parse(s); const wd = (d.getDay() + 6) % 7; d.setDate(d.getDate() - wd); return D.str(d); };
   D.moveDate = () => (MV.store.state && MV.store.state.meta && MV.store.state.meta.moveDate) || '2026-11-03';
   D.time = (iso) => {
+    // 날짜만 적힌 값('YYYY-MM-DD' — 기본값 이전 규칙 completeItems 의 완료 날짜·메모 시각)은 시각 없이 날짜만
+    // (new Date 로 읽으면 세계 표준시 자정이라 '10/8 09:00'처럼 없는 시각이 보여요)
+    if (typeof iso === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(iso)) { const p = D.parse(iso); return (p.getMonth() + 1) + '/' + p.getDate(); }
     const d = new Date(iso);
     if (isNaN(d)) return '';
     return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
@@ -252,6 +255,8 @@
                  notes: [{ id, text, at }], links: [{label,url}], guide, order, seed, createdAt, updatedAt }],
                  // owner: 옛 기록 호환용으로만 남김 (기본 ''). 할 일은 사람에게 나눠 배정하지 않으므로
                  //        화면·거르기·정렬·검색·복사 글·AI 비서 어디에도 쓰지 않음
+                 // doneAt·notes[].at: 보통 ISO 시각. 기본값 이전 규칙(completeItems·removeItems 의 keepNote)이 적은 것은
+                 //        날짜만 'YYYY-MM-DD' (MV.date.time 이 시각 없이 날짜만 보여 줌)
        inventory: [{ id, name, cat, fate, qty, w, d, h, url, room, roomNew, brand, model, lg, ac, tag, note, assumed, seed, use? }],
                  // model: 명판·라벨에 적힌 모델명 (규격 확인용, 없으면 '')
                  // use: 쓰임 공간(선택, normInv 기본값 없음 — 없으면 화면이 태그·종류별 기본값을 씀)
@@ -303,11 +308,40 @@
     return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
   }
   MV.seedItemPrint = itemPrint;
+  const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+  /** 이전 규칙이 메모·완료에 적는 날짜 (migrations 의 doneAt, 없으면 기본 데이터 버전의 날) — 날짜만 'YYYY-MM-DD' */
+  const ruleDay = (m, seed) => (m && typeof m.doneAt === 'string' && DAY_RE.test(m.doneAt) ? m.doneAt : seedAt(seed).slice(0, 10));
+  /* 이미 끝난 일을 완료로 (migrations 의 completeItems: { id: '메모 한 줄' } · doneAt?: 'YYYY-MM-DD')
+     · 그 항목이 있고 아직 완료가 아닐 때만: done = true, doneAt = 그날(날짜만), 메모 끝에 한 줄
+       (같은 글이나 같은 메모 id 가 이미 있으면 다시 더하지 않음)
+     · 사용자가 고친 항목이어도 완료 표시와 메모만 더해요 — 제목·설명·날짜·중요도는 그대로
+     · 이미 완료한 항목은 건드리지 않음(완료 날짜·메모 그대로). 지운 항목은 되살리지 않음
+     · 메모 id·시각과 고친 시각(updatedAt — 기본 데이터 버전 시각, 더 늦게 고친 항목은 그대로)이 정해진 값이라
+       두 기기가 같이 맞춰도 글자 하나까지 같아요(공유 기록에서 메모가 두 번 생기거나 엇갈리지 않음)
+     → 완료로 바꾼 항목 배열 */
+  function completeSeedItems(state, m, seed) {
+    const day = ruleDay(m, seed);
+    const at = seedAt(seed);
+    const nid = 'nt_seed_v' + m.to + '_done';
+    const done = [];
+    Object.keys(m.completeItems || {}).forEach((iid) => {
+      const it = (state.items || []).find((x) => x && x.id === iid);
+      if (!it || it.done) return;
+      const text = String(m.completeItems[iid] || '').trim();
+      it.done = true;
+      it.doneAt = day;
+      if (!Array.isArray(it.notes)) it.notes = [];
+      if (text && !it.notes.some((x) => x && (x.id === nid || String(x.text || '').trim() === text))) it.notes.push({ id: nid, text, at: day });
+      if (!(typeof it.updatedAt === 'string' && it.updatedAt > at)) it.updatedAt = at;
+      done.push(it);
+    });
+    return done;
+  }
   function freshState() {
     const seed = MV.seed || { version: 0, parts: [], items: [], inventory: [] };
     const now = MV.nowISO();
     const at = seedAt(seed);
-    return {
+    const st = {
       version: 1,
       seedVersion: seed.version || 0,
       meta: { moveDate: seed.moveDate || '2026-11-03', createdAt: now, updatedAt: now, deletedSeed: [] },
@@ -318,6 +352,9 @@
       // 큰 가전을 도면에 미리 놓아 둔 기본 배치 (data-layouts.js)
       layouts: MV.seedLayouts ? MV.clone(MV.seedLayouts) : undefined,
     };
+    // 이미 끝난 일(migrations 의 completeItems — 예: 10/8 이사업체 계약)은 새로 여는 기기에서도 완료로 (기록이 있는 기기와 같은 모습)
+    (seed.migrations || []).forEach((m) => { if (m && m.completeItems && m.to <= (seed.version || 0)) completeSeedItems(st, m, seed); });
+    return st;
   }
   /* 도면 배치가 바닥에서 차지하는 사각형 (view-floorplan 의 foot·rectOf 와 같은 규칙, 벽걸이 에어컨은 null)
      rot = 정면 방향 0 남 · 90 서 · 180 북 · 270 동 — 바닥 크기는 0·180 이 w×d, 90·270 이 d×w */
@@ -420,14 +457,44 @@
         ['name', 'emoji', 'group', 'desc', 'guide'].forEach((k) => { if (sp[k] !== undefined) p[k] = sp[k]; });
         n++;
       });
-      (m.removeItems || []).forEach((iid) => {
+      // 이미 끝난 일을 완료로: { completeItems: { id: '메모 한 줄' }, doneAt?: 'YYYY-MM-DD' } (completeSeedItems 머리말)
+      if (m.completeItems) {
+        const done = completeSeedItems(state, m, seed);
+        if (done.length) {
+          n += done.length;
+          noteOnce('seed-v' + m.to + '-done', '이미 끝난 할 일 ' + done.length + '개를 완료로 표시했어요: ' + done.map((it) => '「' + String(it.title || it.id).slice(0, 26) + '」').join(', ')
+            + ' — 까닭은 각 항목 메모에 있어요(아직 남은 일이면 체크를 풀면 돼요).');
+        }
+      }
+      // 기본 항목 지우기: { removeItems: [id | { id, keepNote? }] }
+      //  · id(글자): 완료 표시도 메모도 없는 기본 항목을 지워요 (예전 버전 규칙 그대로)
+      //  · { id, keepNote }: 손대지 않은 기본 항목(완료·메모 없음, 한 번도 고치지 않았거나 글이 직전 기본값 그대로 — itemsFrom)만
+      //    지워요. 손댄 항목은 남기고, 완료가 아니면 keepNote 를 메모로 한 번 더해요(지울지 사용자가 정하게 — 메모 id 고정이라
+      //    두 기기가 같이 맞춰도 한 번). 완료한 항목은 건드리지 않음
+      //  지운 항목은 meta.deletedSeed 에 넣어 다시 추가되지 않게 해요
+      (m.removeItems || []).forEach((r) => {
+        const strict = !!(r && typeof r === 'object');
+        const iid = strict ? r.id : r;
+        if (typeof iid !== 'string' || !iid) return;
         const idx = state.items.findIndex((x) => x.id === iid);
         if (idx < 0) return;
         const it = state.items[idx];
-        if (!it.seed || it.done || (it.notes && it.notes.length)) return;
-        state.items.splice(idx, 1);
-        state.meta.deletedSeed = state.meta.deletedSeed || [];
-        if (state.meta.deletedSeed.indexOf(iid) < 0) state.meta.deletedSeed.push(iid);
+        if (!it.seed || it.done) return;
+        const hasNotes = !!(it.notes && it.notes.length);
+        const touched = hasNotes || (strict && !(it.updatedAt === it.createdAt || (prev.has(iid) && prev.get(iid).has(itemPrint(it)))));
+        if (!touched) {
+          state.items.splice(idx, 1);
+          state.meta.deletedSeed = state.meta.deletedSeed || [];
+          if (state.meta.deletedSeed.indexOf(iid) < 0) state.meta.deletedSeed.push(iid);
+          n++;
+          return;
+        }
+        const kn = strict && typeof r.keepNote === 'string' ? r.keepNote.trim() : '';
+        if (!kn) return;
+        const nid = 'nt_seed_v' + m.to + '_keep';
+        if (!Array.isArray(it.notes)) it.notes = [];
+        if (it.notes.some((x) => x && (x.id === nid || String(x.text || '').trim() === kn))) return;
+        it.notes.push({ id: nid, text: kn, at: ruleDay(m, seed) });
         n++;
       });
       // 칸 값이 없으면(옛 기록에 model 칸이 없을 때 등) normInv 기본값과 비교해요
@@ -470,6 +537,9 @@
       //    (from 에 적지 않은 칸 — 모델명·추정 표시 등 — 도 함께 바꿀 수 있어요. 예: 모델명으로 찾은 규격 넣기)
       //  · prev 가 있으면: set 의 칸 중 지금 값이 prev(옛 기본값)와 다른 칸 = 사용자가 고친 칸(메모·모델명·링크·위치 등)은
       //    그대로 두고 나머지만 바꿔요 (from = 바꿀지 말지 정하는 문, prev = 칸마다 지키는 것)
+      //  · fact · factNote (확정된 사실 — 예: 10/8 '에어컨은 이삿짐센터가 옮김'): from 과 달라 바꾸지 않은 기본 짐(사용자가 고친 짐)도
+      //    fact 의 칸만 그 값으로 바꾸고(예: { lg: false }), factNote 를 메모 끝에 한 번 이어 붙여요(이미 들어 있으면 그대로).
+      //    from 이 맞아 바꾼 짐도 끝에 한 번 더 봐요 — 그래서 set·기본 메모에 fact 값·factNote 글을 그대로 넣어 두면 두 번 돌려도 같아요
       Object.keys(m.inventory || {}).forEach((iid) => {
         const it = state.inventory.find((x) => x && x.id === iid);
         const sp = (seed.inventory || []).find((x) => x.id === iid);
@@ -479,6 +549,16 @@
         const prevV = (rule.prev && typeof rule.prev === 'object') ? rule.prev : null;
         const keys = Object.keys(f);
         if (!it || !sp || !keys.length) return;
+        const fact = (rule.fact && typeof rule.fact === 'object') ? rule.fact : {};
+        const factNote = typeof rule.factNote === 'string' ? rule.factNote.trim() : '';
+        const applyFact = () => {
+          if (!it.seed) return 0;
+          let c = 0;
+          Object.keys(fact).forEach((k) => { if (k !== 'id' && k !== 'seed' && !sameVal(cur(it, k), fact[k])) { it[k] = MV.clone(fact[k]); c = 1; } });
+          const note = String(it.note || '');
+          if (factNote && note.indexOf(factNote) < 0) { it.note = note.trim() ? note.replace(/\s+$/, '') + ' ' + factNote : factNote; c = 1; }
+          return c;
+        };
         if (!keys.every((k) => JSON.stringify(cur(it, k)) === JSON.stringify(f[k]))) {
           // 사용자가 고쳐서 바꾸지 않은 짐: keptNote 가 있으면 메모 앞에 한 번만 (예: 짐을 둘로 나눠 새 짐이 더해진 경우 — 두 번 세지 않게 안내)
           const kn = typeof rule.keptNote === 'string' ? rule.keptNote : '';
@@ -486,6 +566,7 @@
           // (이미 새 값인 짐 — 이 버전으로 맞춘 뒤 다시 돌 때 등 — 은 빼요)
           const isNew = keys.every((k) => sameVal(cur(it, k), set && Object.prototype.hasOwnProperty.call(set, k) ? set[k] : (sp[k] === undefined ? invDef[k] : sp[k])));
           if (kn && it.seed && !isNew && note.indexOf(kn.trim()) < 0) { it.note = kn + note; n++; }
+          n += applyFact();
           return;
         }
         const target = {};
@@ -499,10 +580,11 @@
           });
         }
         const tk = Object.keys(target);
-        if (tk.every((k) => JSON.stringify(cur(it, k)) === JSON.stringify(target[k]))) return;
+        if (tk.every((k) => JSON.stringify(cur(it, k)) === JSON.stringify(target[k]))) { n += applyFact(); return; }
         const qty0 = Math.round(+cur(it, 'qty') || 0);
         tk.forEach((k) => { it[k] = MV.clone(target[k]); });
         n++;
+        applyFact();
         // 개수를 줄였으면(예: 책장 5단 3 → 1) 도면에 남는 배치도 빼요 — 없는 책장이 그려지거나 '수량보다 많이 놓였어요'가 뜨지 않게
         const qty1 = Math.round(+it.qty || 0);
         if (qty1 < qty0) {

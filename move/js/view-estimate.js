@@ -21,7 +21,13 @@
            inputs: { 이사 조건 },              // builtinBoxes(기본 20): ‘여름옷·이불 박스 + 행거박스’ 칸 — 키 이름은 호환 때문에 그대로
                                                //   (붙박이장 옷은 캐비닛장·간이옷장·박스로 나눠 옮김, 행거박스 1개 ≈ 박스 3개, 추정)
            quotes: [{ id, company, amount, vatIncluded, tons, crew, ladder, aircon, arrange, waste,
-                      deposit, date, note, licenseChecked, insuranceChecked, visitDone }],
+                      deposit, date, note, licenseChecked, insuranceChecked, visitDone,
+                      noVat,                       // 부가세 없음(현금이체 등 — 낼 돈 = 견적 금액). vatIncluded 는 false 로 함께 둠
+                      contracted, contractDate,    // 계약함 ('계약 확정' 칩, 자금·대시보드의 이사업체 금액 — 한 곳만)
+                      depositPaid, balanceDate }],  // 계약금 냄, 잔금 날짜 (잔금 = 금액 − 계약금)
+           v:      1 = 10/8 계약 견적(아정당 190만원 · 부가세 없음 · 계약금 10만원 냄 · 잔금 180만원 11/3)을 넣은 기록 (migrateEst —
+                   같은 업체 견적이 이미 있으면 새로 넣지 않고 그 견적에 계약 내용을 표시, 메모는 이어 붙임. 두 번 돌려도 같음).
+                   v 가 없는 기록은 읽을 때(quotesOf)도 같은 규칙으로 보여 주고, 짐·견적 화면을 열거나 고칠 때 저장해요 (ensureEst)
            calib:  { factor, at, median, n, base, sig }, // 방문견적 중앙값 보정 (factor 1 = 보정 없음, sig = 보정에 쓴 견적 서명)
            lgChecks: { schedule, landlord, brand } }
    계산  MV.calc.moveEstimate(state) → { tons, crew, volume, low, typical, high,
@@ -30,6 +36,8 @@
                    byBrand:{ LG:{low,typical,high,count}, '삼성':{low,typical,high,count} }, vatIncluded:true} | null
                    (이름은 호환 때문에 lgCost — 자금·대시보드·AI 비서가 lgCost.typical/low/high/count 를 읽음)
            makerCost,                     // lgCost 와 같은 객체 (새 이름)
+           contract: { id, company, amount, pay, noVat, deposit, depositPaid, balance, balanceDate, contractDate } | null,
+                                          // 계약한 업체 견적 (pay = 실제로 낼 돈 — 부가세 없음이면 금액 그대로). 모델 금액은 참고용
            vatIncl,                       // low/typical/high 가 부가세 포함인지 (‘부가세 포함으로 보기’, 기본 꺼짐 = 리서치 시세 그대로 부가세 별도)
            ex:{low,typical,high},         // 이삿짐센터 부가세 별도 금액 (언제나 별도 — 화면의 보조 숫자)
            lgBlocked:[{id,name,reason}],  // 제조사 서비스 표시가 켜져 있지만 맡길 수 없어(reason 'brand'|'window'|'unpriced') 이삿짐센터 짐으로 계산한 가전
@@ -164,7 +172,7 @@
     { id: 'crew', title: '차량 등급별 작업 인원', icon: '👷' },
     { id: 'date', title: '날짜 할증 (본비에만 붙음)', icon: '📅' },
     { id: 'lift', title: '사다리차 · 엘리베이터', icon: '🏗️' },
-    { id: 'ac', title: '에어컨 이전 (이삿짐센터 협력 기사)', icon: '❄️' },
+    { id: 'ac', title: '에어컨 이전설치 (사설·협력 기사 시세)', icon: '❄️' },
     { id: 'extra', title: '추가 작업', icon: '🛠️' },
     { id: 'range', title: '범위 · 부가세 · 계약금', icon: '📏' },
     { id: 'lg', title: 'LG 베스트케어 이전설치 (LG 제품만)', icon: '🔧' },
@@ -446,7 +454,55 @@
     const f = num(c && c.factor, 1);
     return { factor: f > 0 ? f : 1, at: (c && c.at) || null, median: num(c && c.median, null), n: num(c && c.n, 0), base: num(c && c.base, null), basis: (c && c.basis) || null, sig: (c && typeof c.sig === 'string') ? c.sig : null };
   }
-  function quotesOf(est) { return (est && Array.isArray(est.quotes)) ? est.quotes.filter((q) => q && typeof q === 'object') : []; }
+  /* ---------- 계약한 견적 (10/8): 아정당 총 1,900,000원 · 부가세 없음(현금이체) · 계약금 100,000원 냄 · 잔금 1,800,000원 11/3 ----------
+     에어컨은 분리·운반까지(설치는 따로 부른 기사) — 그래서 ‘에어컨 이전’ 포함은 끔 (비교할 땐 모델의 에어컨 설치비를 더해요).
+     사다리차·엘리베이터·폐기물 포함 여부는 아직 몰라서 끔 — 계약서로 확인하면 체크 */
+  const EST_V = 1;
+  const CONTRACT_NOTE = '10/8 계약 — 총 190만원(부가세 없음, 현금이체). 계약금 10만원 냄, 잔금 180만원은 11/3 이사 당일(짐 내리고 점검한 뒤). 에어컨은 분리·운반까지(설치는 따로 기사). 사다리차·엘리베이터·폐기물 포함 여부는 계약서로 확인';
+  const CONTRACT_TERMS = { amount: 1900000, vatIncluded: false, noVat: true, deposit: 100000, depositPaid: true, balanceDate: '2026-11-03', contracted: true, contractDate: '2026-10-08' };
+  const CONTRACT_QUOTE = Object.assign({ id: 'qt-ajd-1008', company: '아정당', date: '', tons: null, crew: null, ladder: false, aircon: false, arrange: false, waste: false,
+    licenseChecked: false, insuranceChecked: false, visitDone: false, note: CONTRACT_NOTE }, CONTRACT_TERMS);
+  const isContractCo = (q) => /아정당/.test(String((q && q.company) || '').replace(/\s+/g, ''));
+  /* 메모 이어 붙이기: 새 메모 뒤에 전에 적은 메모 (이미 이어 붙였으면 그대로) */
+  const noteJoin = (def, cur) => {
+    const c = String(cur == null ? '' : cur).trim();
+    if (!c || c === def) return def;
+    if (c.indexOf(def) === 0) return c;
+    return def + ' (전에 적은 메모: ' + c + ')';
+  };
+  /* 견적 상태 이전 (e 를 직접 고침, 바뀌었으면 true). 시각·uid 를 쓰지 않아 두 기기가 따로 돌려도 같은 결과 */
+  function migrateEst(e) {
+    if (!e || typeof e !== 'object' || num(e.v, 0) >= EST_V) return false;
+    if (!Array.isArray(e.quotes)) e.quotes = [];
+    const hit = e.quotes.find((q) => q && typeof q === 'object' && isContractCo(q));
+    if (hit) Object.assign(hit, CONTRACT_TERMS, { note: noteJoin(CONTRACT_NOTE, hit.note) });
+    else e.quotes.push(MV.clone(CONTRACT_QUOTE));
+    e.v = EST_V;
+    return true;
+  }
+  /* 읽기용: 아직 이전하지 않은 기록(v 없음)은 복사본에 이전 규칙을 적용해 보여 줌 (저장은 화면을 열거나 고칠 때) */
+  function withEstMig(est) {
+    const e = est && typeof est === 'object' ? est : {};
+    if (num(e.v, 0) >= EST_V) return e;
+    const copy = Object.assign({}, e, { quotes: (Array.isArray(e.quotes) ? e.quotes : []).map((q) => (q && typeof q === 'object' ? Object.assign({}, q) : q)) });
+    migrateEst(copy);
+    return copy;
+  }
+  function quotesOf(est) { const e = withEstMig(est); return Array.isArray(e.quotes) ? e.quotes.filter((q) => q && typeof q === 'object') : []; }
+  /* 계약한 견적 요약 (없으면 null) — 계약함 표시가 여러 개면 맨 앞 것. vm = 1 + 부가세율 (부가세 별도 계약이면 실제로 낼 돈에 더함) */
+  function contractOf(est, vm) {
+    const q = quotesOf(est).find((x) => x.contracted && num(x.amount, 0) > 0);
+    if (!q) return null;
+    const amount = Math.round(num(q.amount, 0));
+    const noVat = !!q.noVat;
+    const pay = noVat || q.vatIncluded !== false ? amount : Math.round(amount * (vm || 1.1));
+    const deposit = Math.max(0, Math.round(num(q.deposit, 0)));
+    return {
+      id: q.id, company: q.company || '이름 없는 업체', amount, pay, noVat, vatIncluded: !noVat && q.vatIncluded !== false,
+      deposit, depositPaid: !!q.depositPaid, balance: Math.max(0, pay - deposit),
+      balanceDate: normDate(q.balanceDate) || '', contractDate: normDate(q.contractDate) || '',
+    };
+  }
 
   /* ======================= 짐 분류 도우미 ======================= */
   const FATE_IDS = new Set(['move', 'buy', 'discard', 'sell', 'undecided']);
@@ -900,6 +956,7 @@
     const totalPay = { low: pay.low + (lgCost ? lgCost.low : 0), typical: pay.typical + (lgCost ? lgCost.typical : 0), high: pay.high + (lgCost ? lgCost.high : 0) };
 
     /* 6) 안내 문구 */
+    const contract = contractOf(est, 1 + vatRate); // 계약한 업체 견적 (10/8 아정당) — 있으면 모델 금액은 참고용
     const notes = [];
     if (lgBlocked.length) {
       const nb = lgBlocked.map(nm);
@@ -913,6 +970,7 @@
     else if (!going.length) notes.push('가져갈 짐이 없어 박스·잡동사니 기본값으로만 계산했어요.');
     else if (assumed.length && assumed.length * 2 >= going.length) notes.push('가져갈 짐 ' + going.length + '개 중 ' + assumed.length + '개가 추정 규격이에요. 실제 치수를 재면 더 정확해져요.');
     if (useCalib) notes.push('방문견적 ' + calib.n + '곳의 중앙값에 맞춰 ×' + calib.factor.toFixed(2) + ' 보정한 금액이에요.');
+    else if (contract) notes.push('이사업체는 ' + josa(contract.company, '과/와') + ' ' + won(contract.pay) + (contract.noVat ? '(부가세 없음)' : '') + '에 계약했어요 — 짐 목록으로 계산한 모델 금액은 리서치 계수로 만든 참고용 추정이에요.');
     else notes.push('리서치 계수(대부분 신뢰도 낮음)로 만든 추정치예요. 방문견적 3곳을 받으면 다시 맞추세요.');
     if (next && next.headroom < 1.5) notes.push('짐이 ' + m3(next.headroom) + '(박스 약 ' + next.boxes + '개)만 늘어도 ' + tonsLabel(next.tons) + '으로 올라가 약 ' + won(next.delta) + ' 더 들어요.');
     if (acCnt.unknown) notes.push('종류를 안 적은 에어컨 ' + acCnt.unknown + '대는 스탠드로 계산했어요.');
@@ -921,6 +979,7 @@
 
     return {
       tons, crew, volume: r1(volume), low, typical, high, lines, lgCost, makerCost: lgCost, notes,
+      contract, // 계약한 업체 견적 (10/8 아정당) — 자금·대시보드는 이 금액, 모델 금액은 참고
       typicalRaw, subtotalEx: Math.round(subtotal), vatIncl: !!inp.vat, vatMul: 1 + vatRate, partsEx,
       pay, totalPay, ex, // pay: 이삿짐센터 부가세 포함 / totalPay: pay + 제조사 서비스(부가세 포함) / ex: 이삿짐센터 부가세 별도
       lgBlocked: lgBlocked.map((it) => ({ id: it.id, name: nm(it), reason: svcOf(it).reason || 'brand' })),
@@ -936,18 +995,20 @@
   }
 
   /* 업체 견적 → 모델과 같은 조건·같은 부가세 기준으로 환산 (빠진 항목은 모델 금액을 더함)
-     ex: 부가세 별도 기준 / inc: 부가세 포함 기준 / amount: 지금 모델 기준(‘부가세 포함으로 보기’ 켜면 inc, 끄면 ex) */
+     ex: 부가세 별도 기준 / inc: 부가세 포함 기준 / amount: 지금 모델 기준(‘부가세 포함으로 보기’ 켜면 inc, 끄면 ex)
+     부가세 없음(noVat, 현금이체 계약): 낼 돈 = 견적 금액이라 ex 도 inc 도 금액 그대로 (부가세를 빼지도 더하지도 않음) */
   function normQuote(q, raw) {
     const amt = num(q && q.amount, 0);
     if (!(amt > 0)) return null;
     const c = raw.coef;
     const vm = 1 + c.vat_pct / 100;
     const incl = raw.vatIncl;
-    const quoteIncl = q.vatIncluded !== false;
+    const noVat = !!q.noVat;
+    const quoteIncl = !noVat && q.vatIncluded !== false;
     const exAmt = quoteIncl ? amt / vm : amt;
     const adds = [];
     if (quoteIncl && !incl) adds.push({ label: '부가세 빼기', v: exAmt - amt, vat: true });
-    if (!quoteIncl && incl) adds.push({ label: '부가세 ' + r1(c.vat_pct) + '%', v: amt * (vm - 1), vat: true });
+    if (!quoteIncl && !noVat && incl) adds.push({ label: '부가세 ' + r1(c.vat_pct) + '%', v: amt * (vm - 1), vat: true });
     const pe = raw.partsEx || {};
     const missing = [];
     if (!q.ladder && pe.ladder > 0) missing.push(['사다리차', pe.ladder]);
@@ -956,7 +1017,7 @@
     if (!q.arrange && pe.arrange > 0) missing.push(['정리 인력', pe.arrange]);
     missing.forEach(([label, v]) => adds.push({ label, v: v * (incl ? vm : 1) }));
     const ex = exAmt + sum(missing, (m) => m[1]);
-    const inc = ex * vm;
+    const inc = noVat ? amt + sum(missing, (m) => m[1]) * vm : ex * vm;
     return { amount: Math.round(incl ? inc : ex), ex: Math.round(ex), inc: Math.round(inc), adds, basis: incl ? 'inc' : 'ex' };
   }
   const basisLabel = (incl) => (incl ? '부가세 포함' : '부가세 별도');
@@ -1116,6 +1177,15 @@
 .es-hero-side .callout { margin: 0; font-size: .86rem; }
 .es-lgsum { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 10px 12px; border-radius: 12px; background: var(--kid-bg); color: var(--kid); font-size: .88rem; font-weight: 700; }
 .es-lgsum b { font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+/* 계약한 이사업체 (10/8 아정당) — 모델 추정보다 먼저 보여 줌 */
+.es-contract { border: 1px solid color-mix(in srgb, var(--good) 35%, var(--line)); background: var(--good-bg); border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.es-contract-top { display: flex; align-items: center; gap: 6px 8px; flex-wrap: wrap; }
+.es-contract-co { font-size: .95rem; overflow-wrap: anywhere; }
+.es-contract-big { font-size: 1.6rem; font-weight: 900; letter-spacing: -.02em; line-height: 1.15; font-variant-numeric: tabular-nums; color: var(--good); }
+.es-contract-big small { font-size: .5em; font-weight: 800; color: var(--ink-2); margin-left: 6px; letter-spacing: 0; }
+.es-contract-sub { font-size: .84rem; color: var(--ink-2); font-weight: 650; line-height: 1.45; }
+.es-contract p { margin: 2px 0 0; line-height: 1.45; }
+.es-acsteps { margin: 8px 0 0; padding-left: 1.15em; display: flex; flex-direction: column; gap: 4px; line-height: 1.5; }
 .es-calib { border: 1px solid color-mix(in srgb, var(--think) 30%, var(--line)); background: var(--think-bg); border-radius: 12px; padding: 10px 12px; font-size: .86rem; }
 .es-calib .es-calib-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .es-calib .es-calib-top b { color: var(--think); }
@@ -1226,6 +1296,7 @@
 .es-qcard { border-left: 4px solid var(--line-2); }
 .es-qcard.is-best { border-left-color: var(--good); }
 .es-qcard.is-cheap { border-left-color: var(--bad); }
+.es-qcard.is-contract { border-left-color: var(--good); }
 .es-qcard-head { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
 .es-qcard-head .es-qname { flex: 1; font-weight: 800; font-size: 1rem; }
 .es-qchecks { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 10px; }
@@ -1392,8 +1463,29 @@
     if (!Array.isArray(e.quotes)) e.quotes = [];
     if (!e.calib || typeof e.calib !== 'object') e.calib = { factor: 1, at: null, median: null, n: 0, base: null };
     if (!e.lgChecks || typeof e.lgChecks !== 'object') e.lgChecks = { schedule: false, landlord: false, brand: false };
+    migrateEst(e); // 계약 견적(10/8) — 읽기(quotesOf)와 같은 규칙으로 저장
     return e;
   }
+  /* 짐·견적 상태 확보 + 계약 견적 이전(v1)을 조용히 저장 — 읽을 때 보던 것과 같은 내용이라 화면은 그대로 (자금 화면 ensureState 와 같은 방식).
+     이전(또는 처음 만들기)은 sync 가 맞추기 전·뒤를 남겨요 — 늦게 여는 기기가 공유 기록에 다시 붙을 때 서버가 이미 v1 이면 되돌린 뒤 합쳐서,
+     먼저 연 기기에서 그 뒤 고치거나 지운 계약 견적을 이 기기의 이전 결과로 되돌리거나 되살리지 않게. AI 비서도 견적을 읽고 고치기 전에 불러요 */
+  function ensureEstState() {
+    const cur = stGet().estimate;
+    const stored = cur && typeof cur === 'object' && !Array.isArray(cur) ? cur : null;
+    const save = () => {
+      MV.store.ensure('estimate', defaults);
+      if (num(stGet().estimate.v, 0) < EST_V) MV.store.update((st) => { ensureEst(st); }, { silent: true, source: 'es' });
+    };
+    if ((!stored || num(stored.v, 0) < EST_V) && MV.sync && typeof MV.sync.migrateDoc === 'function') MV.sync.migrateDoc('move/estimate', EST_V, save);
+    else save();
+    return stGet().estimate;
+  }
+  /* o.onlyOld: 저장된 견적 문서가 있고 옛 버전일 때만 이전 (없으면 만들지 않음 — app.js 가 화면을 그리기 전에 씀) */
+  MV.calc.ensureEstimate = function ensureEstimate(o) {
+    const e = stGet().estimate;
+    if (o && o.onlyOld && !(e && typeof e === 'object' && !Array.isArray(e) && num(e.v, 0) < EST_V)) return e || null;
+    return ensureEstState();
+  };
   function setInput(key, value) { MV.store.update((st) => { ensureEst(st).inputs[key] = value; }, { source: 'es' }); }
   function setCoef(key, value, log) { MV.store.update((st) => { ensureEst(st).coef[key] = value; }, { source: 'es', log }); }
   function getQuote(id) { return quotesOf(estSt()).find((q) => q.id === id) || null; }
@@ -1541,7 +1633,9 @@
       el('div',
         el('b', '추정치예요. '),
         compact
-          ? '계수 대부분이 리서치 신뢰도 ‘낮음’이에요. 방문견적 3곳을 받으면 ‘견적으로 보정’으로 다시 맞추세요.'
+          ? (R && R.est && R.est.contract
+            ? '계수 대부분이 리서치 신뢰도 ‘낮음’이에요. 이사업체는 계약 금액으로 정해졌으니, 이 금액은 짐이 늘었을 때 추가요금을 가늠하는 참고로만 보세요.'
+            : '계수 대부분이 리서치 신뢰도 ‘낮음’이에요. 방문견적 3곳을 받으면 ‘견적으로 보정’으로 다시 맞추세요.')
           : '계수(톤당 8만원, 1인 21만원, 할증률, 품목 부피 등) 대부분이 리서치 신뢰도 ‘낮음’이에요. 방문견적 3곳을 받아 ‘업체 견적 비교’에 넣고 ‘견적으로 보정’하세요. 업체에 ‘적정가’라고 내미는 근거로 쓰지는 마세요.'));
   }
   /* 제조사 서비스에 맡길 수 없는데(그 밖의 제조사·창문형·요금 미조사 삼성 가전) 표시가 켜진 가전 → 이삿짐센터로 (되돌리기 가능).
@@ -1612,8 +1706,11 @@
       return el('div', { class: 'view-head es-head' },
         el('div',
           el('h1', '🚚 짐·견적'),
-          el('div', { class: 'sub' }, '짐 ', el('b', n + '개'), ' · 예상 이사비 ', el('b', '약 ' + won(est.pay.typical)), ' ', el('span', { class: 'es-vat' }, '부가세 포함'),
-            ' (' + won(est.pay.low) + '~' + won(est.pay.high) + ') · 부가세 별도 약 ' + won(est.ex.typical) + ' · 추정치')),
+          est.contract
+            ? el('div', { class: 'sub' }, '짐 ', el('b', n + '개'), ' · 이사업체 ', el('b', '계약 확정 ' + won(est.contract.pay)), ' ', el('span', { class: 'es-vat' }, est.contract.noVat ? '부가세 없음' : '부가세 포함'),
+              ' (' + est.contract.company + ') · 모델 추정 약 ' + won(est.pay.typical) + '(부가세 포함, 참고)')
+            : el('div', { class: 'sub' }, '짐 ', el('b', n + '개'), ' · 예상 이사비 ', el('b', '약 ' + won(est.pay.typical)), ' ', el('span', { class: 'es-vat' }, '부가세 포함'),
+              ' (' + won(est.pay.low) + '~' + won(est.pay.high) + ') · 부가세 별도 약 ' + won(est.ex.typical) + ' · 추정치')),
         R.tab === 'inventory' ? null : el('div', { class: 'actions' },
           el('button', { type: 'button', class: 'btn btn-sm', onclick: openExport }, '📋 업체에 보낼 짐 목록')));
     }, 'head');
@@ -2540,6 +2637,7 @@
       if (isAircon(it) && it.ac) parts.push('[' + (AC_LABEL[it.ac] || it.ac) + ']');
       if (lgActive(it, inp)) parts.push('※ ' + MAKERS[makerOf(it)].who + '가 따로 옮김 — 견적 제외');
       else if (isGoing(it, inp) && (isFridge(it) || isDryer(it) || isWasher(it))) parts.push('※ 세워서 운반');
+      else if (isGoing(it, inp) && isAircon(it) && it.ac !== 'window') parts.push('※ 분리·포장·운반 (설치는 따로 기사를 불러요)');
       if (it.roomNew && it.roomNew !== it.room) parts.push('→ 새 집 ' + it.roomNew);
       const vn = vendorNote(it);
       if (vn) parts.push('· ' + vn);
@@ -2549,7 +2647,7 @@
     out.push('[이사 짐 목록] ' + D.fmtLong(D.moveDate()));
     out.push('출발: ' + placeName(plans.old, '지금 집') + ' ' + inp.fromFloor + '층 (' + (METHODS[inp.fromMethod] || '') + ') → 도착: ' + placeName(plans.new, '새 집') + ' ' + inp.toFloor + '층 (' + (METHODS[inp.toMethod] || '') + ')');
     out.push('이사 형태: ' + (PACK_TYPES.find((p) => p.id === inp.packType) || PACK_TYPES[0]).label + ' · 예상 박스 약 ' + est.volumeParts.boxes + '개' + (inp.boxAuto && inp.builtinBoxes ? ' (여름옷·이불 박스와 걸린 옷 행거박스 포함)' : ''));
-    if (est.counts.acN) out.push('에어컨 이전 요청: ' + AC_T.filter((t) => est.counts.acUnits[t]).map((t) => AC_LABEL[t] + ' ' + est.counts.acUnits[t] + '대').join(', '));
+    if (est.counts.acN) out.push('에어컨: ' + AC_T.filter((t) => est.counts.acUnits[t]).map((t) => AC_LABEL[t] + ' ' + est.counts.acUnits[t] + '대').join(', ') + ' — 분리·포장·운반 부탁드려요 (설치는 따로 기사를 불러요)');
     const lgList = inv.filter((it) => lgActive(it, inp));
     if (lgList.length) out.push('제조사 서비스로 따로 옮길 가전 (견적 제외): ' + lgList.map((it) => nm(it) + ' (' + MAKERS[makerOf(it)].who + ')').join(', '));
     out.push('');
@@ -2574,10 +2672,13 @@
     sec('discard', '버릴 짐 — 옮기지 않음');
     sec('sell', '판매·나눔 예정 — 옮기지 않음');
     sec('buy', '새로 살 것 — 새 집으로 따로 배송');
-    sec('undecided', '아직 미정 — 방문견적 때 함께 상의');
+    sec('undecided', est.contract ? '아직 미정 — 정해지면 미리 알려 드릴게요' : '아직 미정 — 방문견적 때 함께 상의');
     out.push('');
     const bigAppl = moving.filter((it) => !lgActive(it, inp) && (isFridge(it) || isDryer(it) || isWasher(it)));
-    out.push('요청: 부가세 포함 총액(결제수단 무관)으로 문자나 PDF로 부탁드립니다.' +
+    const ct = est.contract;
+    out.push((ct
+      ? '요청: 계약(총 ' + won(ct.pay) + (ct.noVat ? ', 부가세 없음' : '') + (ct.deposit ? ' — 계약금 ' + won(ct.deposit) + (ct.depositPaid ? ' 냄' : '') + ', 잔금 ' + won(ct.balance) + (ct.balanceDate ? ' ' + D.fmt(ct.balanceDate) : '') : '') + ')에 아래 짐이 모두 들어 있는지, 작업 범위(포장·에어컨 분리·운반·사다리차·엘리베이터)와 추가요금이 없는지 문자나 계약서로 확인 부탁드립니다.'
+      : '요청: 부가세 포함 총액(결제수단 무관)으로 문자나 PDF로 부탁드립니다.') +
       (bigAppl.length ? ' 대형 가전(' + bigAppl.map((it) => LG_KIND[lgKind(it)].label).filter((x, i, a) => a.indexOf(x) === i).join('·') + ')은 세워서 운반해 주시고, 문짝 분리·수평 맞춤이 포함인지와 금액을 적어 주세요.' : '') +
       (lgList.length ? ' 제조사 서비스가 옮기는 가전은 견적에서 빼 주세요.' : '') +
       ' 행거박스를 몇 개 가져오시는지(포함 여부, 모자라면 1개 금액)도 적어 주세요.');
@@ -2594,7 +2695,7 @@
     const data = exportData();
     const ta = el('textarea', { class: 'textarea es-export-ta', readonly: true, 'aria-label': '업체에 보낼 짐 목록', spellcheck: 'false' }, data.text);
     const body = el('div', { class: 'stack' },
-      el('p', { class: 'small es-muted mb-0' }, '방문견적 업체 3곳에 똑같이 보내세요. 버릴 짐과 제조사 서비스(LG·삼성)가 옮길 가전은 따로 표시돼요. 메모는 앱 안내 문구(‘~해 주세요’ 등)를 빼고 짐 설명만 넣었어요.'),
+      el('p', { class: 'small es-muted mb-0' }, (R && R.est && R.est.contract ? '계약한 업체(' + R.est.contract.company + ')에 보내 짐과 작업 범위가 계약에 다 들어 있는지 확인하세요.' : '방문견적 업체 3곳에 똑같이 보내세요.') + ' 버릴 짐과 제조사 서비스(LG·삼성)가 옮길 가전은 따로 표시돼요. 메모는 앱 안내 문구(‘~해 주세요’ 등)를 빼고 짐 설명만 넣었어요.'),
       el('div', { class: 'row' },
         el('button', { type: 'button', class: 'btn btn-primary', onclick: () => copyText(ta.value, ta) }, '📋 복사'),
         el('button', { type: 'button', class: 'btn', onclick: () => { Promise.resolve(MV.ui.download('move-inventory-' + D.today() + '.csv', '﻿' + data.csv, 'text/csv;charset=utf-8')).then((ok) => { if (ok !== false) toast('CSV 파일을 저장했어요.'); }); } }, '⬇ CSV 저장')),
@@ -2632,7 +2733,7 @@
      짐·조건이 바뀌면 같은 견적이라도 ‘같은 조건 환산’ 금액이 달라지므로, 그걸로 ‘견적이 바뀌었다’고 하면 안 돼요 */
   function quoteSig(est) {
     return quotesOf(est).filter((q) => num(q.amount, 0) > 0)
-      .map((q) => [q.id, Math.round(num(q.amount, 0)), q.vatIncluded === false ? 0 : 1, q.ladder ? 1 : 0, q.aircon ? 1 : 0, q.waste ? 1 : 0, q.arrange ? 1 : 0].join(':'))
+      .map((q) => [q.id, Math.round(num(q.amount, 0)), q.noVat ? 2 : q.vatIncluded === false ? 0 : 1, q.ladder ? 1 : 0, q.aircon ? 1 : 0, q.waste ? 1 : 0, q.arrange ? 1 : 0].join(':'))
       .sort().join('|');
   }
   /* 업체 견적에 ‘포함’ 체크가 안 돼 모델 금액을 더한 항목 (보정 비율이 크게 흔들리는 원인) */
@@ -2712,6 +2813,16 @@
     MV.store.update((s) => { ensureEst(s).calib = { factor: 1, at: null, median: null, n: 0, base: null }; }, { log: '이사 견적 보정 해제' });
     toast('보정을 해제했어요.', { action: { label: '되돌리기', onClick: () => MV.store.update((s) => { ensureEst(s).calib = prev; }, { log: '견적 보정 다시 적용' }) } });
   }
+  /* 계약한 이사업체 상자 — 머리 숫자는 계약 금액(실제로 낼 돈), 모델 금액은 참고 */
+  function contractBox(ct, compact) {
+    if (!ct) return null;
+    return el('div', { class: 'es-contract', 'aria-label': '계약한 이사업체' },
+      el('div', { class: 'es-contract-top' }, el('span', { class: 'chip good' }, '✅ 계약 확정'), el('b', { class: 'es-contract-co' }, ct.company),
+        ct.contractDate ? el('span', { class: 'small es-muted' }, D.fmt(ct.contractDate) + ' 계약') : null),
+      el('div', { class: 'es-contract-big', title: F.won(ct.pay) }, won(ct.pay), el('small', ct.noVat ? '부가세 없음 · 현금이체' : ct.vatIncluded ? '부가세 포함' : '부가세 별도 + 부가세')),
+      el('div', { class: 'es-contract-sub' }, '계약금 ' + won(ct.deposit) + (ct.depositPaid ? ' 냄' : ' (아직 안 냄)') + ' · 잔금 ' + won(ct.balance) + (ct.balanceDate ? ' — ' + D.fmt(ct.balanceDate) + ' 이사 당일' : '')),
+      compact ? null : el('p', { class: 'small es-muted' }, '모델 금액은 같은 조건으로 계산한 참고용 추정이에요. 자금 화면은 계약 금액으로 계산해요. 에어컨 설치는 따로 부른 기사(자금 화면 ‘에어컨 설치’ 줄)예요.'));
+  }
   function heroCard() {
     const est = R.est;
     const qp = quotePoints('inc');
@@ -2722,7 +2833,7 @@
     return el('section', { class: 'card es-hero', 'aria-label': '예상 이사비' },
       el('div', { class: 'es-hero-grid' },
         el('div',
-          el('div', { class: 'es-eyebrow' }, '이삿짐센터 예상 비용 · 추정치' + (est.calibFactor !== 1 ? ' (방문견적 보정)' : '')),
+          el('div', { class: 'es-eyebrow' }, (est.contract ? '모델 추정 (참고) · 이삿짐센터' : '이삿짐센터 예상 비용 · 추정치') + (est.calibFactor !== 1 ? ' (방문견적 보정)' : '')),
           el('div', { class: 'es-big', title: F.won(pay.typical) + ' (부가세 포함)' }, '약 ' + won(pay.typical), el('small', '부가세 포함')),
           el('div', { class: 'es-rangetxt' }, '범위 ' + won(pay.low) + ' ~ ' + won(pay.high)),
           el('div', { class: 'es-exline' }, '부가세 별도 약 ' + won(est.ex.typical) + ' (' + won(est.ex.low) + ' ~ ' + won(est.ex.high) + ') — 업체 견적이 ‘부가세 별도’면 이 숫자와 비교하세요'),
@@ -2734,6 +2845,7 @@
             el('span', { class: 'chip' + (est.surchargePct ? ' warn' : ' good') }, '📅 ' + est.dateLabel + (est.surchargePct ? ' +' + r1(est.surchargePct) + '%' : ' 할증 없음')),
             el('span', { class: 'chip' }, '❄️ 에어컨 ' + (acInc ? '포함 (' + est.counts.acN + '대)' : mkAcN ? '제외 (제조사 서비스)' : '제외')))),
         el('div', { class: 'es-hero-side' },
+          contractBox(est.contract),
           lgBlockedCallout(est),
           lg && lg.typical > 0 ? el('div', { class: 'es-lgsum' }, '🔧 ' + (lg.label || '제조사 서비스') + '로 옮기는 가전 ' + lg.count + '대 별도 ', el('b', '약 ' + won(lg.typical)),
             el('span', '(' + won(lg.low) + '~' + won(lg.high) + ') → 이사 전체 약 ' + won(est.totalPay.typical) + ' (부가세 포함 — 이삿짐센터 ' + won(est.pay.typical) + ' + ' + (lg.label || '제조사 서비스') + ')')) : null,
@@ -2934,7 +3046,7 @@
       const mkWho = Array.from(new Set(mkAc.map((it) => MAKERS[makerOf(it)].who))).join('·');
       setKids(acBox,
         el('div', el('b', '❄️ 에어컨 이전 (짐 목록에서 자동): '),
-          est.counts.acN ? AC_T.filter((t) => u[t]).map((t) => AC_LABEL[t] + ' ' + u[t] + '대').join(', ') + ' — 이삿짐센터 협력 기사' : '이삿짐센터가 옮길 에어컨 없음 (에어컨 비용 0원)'),
+          est.counts.acN ? AC_T.filter((t) => u[t]).map((t) => AC_LABEL[t] + ' ' + u[t] + '대').join(', ') + ' — 이삿짐센터가 옮기고, 설치비는 사설 기사 시세로 계산 (우리는 설치 기사를 따로 불러요)' : '이삿짐센터가 옮길 에어컨 없음 (에어컨 비용 0원)'),
         el('div', { class: 'es-note' }, lgAc ? mkWho + '가 옮기는 에어컨 ' + lgAc + '대는 이삿짐센터 짐·비용에서 빠져 있어요. ' : '', '누가 옮길지는 ‘가전 이전 비교’ 탭에서 정해요.'),
         el('div', { class: 'mt-8' }, el('button', { type: 'button', class: 'btn btn-sm', onclick: () => goTab('lg') }, '🔧 가전 이전 비교 →')));
     });
@@ -2942,7 +3054,7 @@
     card.appendChild(el('div', { class: 'es-fgrid mt-8' },
       fieldWrap('에어컨 배관 추가 길이 (대당, m)', numInput('acPipeM', { decimal: true, step: 0.5, max: 30 }), '리서치 계산은 3m 기준 — 제조사 서비스 요금에도 같이 써요')));
     // 삼성 냉매 보충 금액은 계산 기준(ss_ac_gas)에서 바꿀 수 있어 글자도 그 값을 따라감
-    const gasLabel = () => '에어컨 가스(냉매) 충전 포함 (협력 기사 약 5만~8만원 · 삼성은 필요할 때만, 약 4만~9만원(추정), 계산엔 ' + won(coefNow().ss_ac_gas) + ')';
+    const gasLabel = () => '에어컨 가스(냉매) 충전 포함 (사설 기사 약 5만~8만원 · 삼성은 필요할 때만, 약 4만~9만원(추정), 계산엔 ' + won(coefNow().ss_ac_gas) + ')';
     const gasField = checkField('acGas', gasLabel());
     upd(() => { const sp = gasField.querySelector('span'); const t = gasLabel(); if (sp && sp.textContent !== t) sp.textContent = t; }, gasField);
     card.appendChild(el('div', { class: 'mt-8' }, gasField));
@@ -3003,8 +3115,9 @@
           el('tr', el('td', '합계 ', el('span', { class: 'es-vat' }, basisLabel(est.vatIncl))), el('td', { class: 'num es-l-lohi' }, won(est.low)),
             el('td', { class: 'num es-l-typ' }, won(est.typical), el('span', { class: 'es-l-rng' }, won(est.low) + '~' + won(est.high))),
             el('td', { class: 'num es-l-lohi' }, won(est.high))),
-          // 부가세 별도로 보는 중이면 실제로 낼 돈(부가세 포함)을 한 줄 더 — 머리말·히어로·자금 화면과 같은 숫자
-          est.vatIncl ? null : el('tr', { class: 'es-l-pay' }, el('td', '실제로 낼 돈 ', el('span', { class: 'es-vat' }, '부가세 ' + fmtDec(est.coef.vat_pct) + '% 포함')), el('td', { class: 'num es-l-lohi' }, won(est.pay.low)),
+          // 부가세 별도로 보는 중이면 실제로 낼 돈(부가세 포함)을 한 줄 더 — 머리말·히어로·자금 화면과 같은 숫자.
+          // 계약한 업체가 있으면 실제로 낼 돈은 계약 금액이라 이 줄은 '모델 추정(참고)'
+          est.vatIncl ? null : el('tr', { class: 'es-l-pay' }, el('td', est.contract ? '모델 추정 ' : '실제로 낼 돈 ', el('span', { class: 'es-vat' }, '부가세 ' + fmtDec(est.coef.vat_pct) + '% 포함' + (est.contract ? ' · 참고' : ''))), el('td', { class: 'num es-l-lohi' }, won(est.pay.low)),
             el('td', { class: 'num es-l-typ' }, won(est.pay.typical), el('span', { class: 'es-l-rng' }, won(est.pay.low) + '~' + won(est.pay.high))),
             el('td', { class: 'num es-l-lohi' }, won(est.pay.high)))))),
       est.lgCost && est.lgCost.typical > 0 ? el('p', { class: 'small es-muted mt-8 mb-0' }, '🔧 ' + (est.lgCost.label || '제조사 서비스') + '로 옮길 가전 ' + est.lgCost.count + '대(약 ' + won(est.lgCost.typical) + ', 부가세 포함 소비자가)는 위 금액에 없어요 — 제조사에 따로 내요. 둘을 더한 이사 전체는 부가세 포함 약 ' + won(est.totalPay.typical) + '이에요.') : null);
@@ -3019,7 +3132,9 @@
     if (est.next) tips.push('짐이 ' + m3(est.next.headroom) + '(박스 약 ' + est.next.boxes + '개) 넘게 늘면 ' + est.next.label + ' · ' + crewLabel(est.next.crew) + '으로 올라가 약 ' + won(est.next.delta) + ' 더 들어요. 버리기·정리로 줄이면 그만큼 아껴요.');
     if (est.inputs.fromMethod === 'ladder' && est.inputs.fromFloor <= 3 && est.inputs.fromFloor >= 2) tips.push('출발지 ' + est.inputs.fromFloor + '층 사다리차를 빼면 약 ' + won(est.lifts.from.typical - liftCost(est.inputs.fromFloor, 'elevator', est.tons, c).typical) + ' 줄일 수 있어요 (업체에 문의).');
     if (est.counts.acN) tips.push('에어컨을 제조사 서비스(LG·삼성)에 맡기면 이 표에서 빠지고 제조사 요금이 따로 들어요 — ‘가전 이전 비교’ 탭에서 비교하세요.');
-    tips.push('방문견적은 3곳에서 같은 조건표(‘업체에 보낼 짐 목록’)로 받고, 부가세 포함 총액으로 비교하세요.');
+    tips.push(est.contract
+      ? '이사업체는 ' + josa(est.contract.company, '과/와') + ' 계약했어요(' + won(est.contract.pay) + (est.contract.noVat ? ', 부가세 없음' : '') + '). 이 계산은 참고용이니, 짐이 늘면 ‘업체에 보낼 짐 목록’을 업체에 보내 추가요금이 없는지 확인하세요.'
+      : '방문견적은 3곳에서 같은 조건표(‘업체에 보낼 짐 목록’)로 받고, 부가세 포함 총액으로 비교하세요.');
     return el('section', { class: 'card es-why', 'aria-label': '왜 이 금액인가요' },
       sectionHead('💬', '왜 이 금액인가요?'),
       el('ol',
@@ -3030,7 +3145,8 @@
         el('li', el('b', '날짜 할증 ' + (est.surchargePct ? '+' + r1(est.surchargePct) + '%' : '없음')), ' — ' + est.dateLabel + '. 할증은 본비에만 붙어요 (손없는날 ' + c.sohn_pct + '%, 주말 ' + c.weekend_pct + '%, 월말 ' + c.month_end_pct + '%, 월초 ' + c.month_start_pct + '%; 겹치면 가장 큰 값 + ' + c.multi_add_pct + '%포인트).'),
         el('li', el('b', '부대비 ' + won(sum(extras, (l) => l.typical))), extras.length ? ' = ' + extras.map((l) => l.label.replace(/\s*\(.*\)$/, '') + ' ' + won(l.typical)).join(', ') + '.' : ' — 없음.'),
         el('li', el('b', '기준가 ' + won(est.typical) + ' (' + basisLabel(est.vatIncl) + ')'), ' — 하한은 × ' + c.range_low + ' (' + won(est.low) + '), 상한은 × ' + c.range_high + ' (' + won(est.high) + '). 업체마다 인건비·마진·당일 사정이 달라서 범위로 봐요.' + (est.calibFactor !== 1 ? ' 방문견적 중앙값에 맞춘 보정 ' + josa('×' + est.calibFactor.toFixed(2), '이/가') + ' 들어 있어요.' : '')),
-        est.vatIncl ? null : el('li', el('b', '실제로 낼 돈 ' + won(est.pay.typical) + ' (부가세 포함)'), ' = 기준가 × ' + fmtDec(1 + est.coef.vat_pct / 100) + ' (부가세 ' + fmtDec(est.coef.vat_pct) + '%). 범위 ' + won(est.pay.low) + ' ~ ' + won(est.pay.high) + '. 리서치 시세는 부가세 별도라 더했어요 — 머리말·자금 화면은 이 숫자를 써요.')),
+        est.vatIncl ? null : el('li', el('b', (est.contract ? '모델 추정 ' : '실제로 낼 돈 ') + won(est.pay.typical) + (est.contract ? ' (부가세 포함, 참고)' : ' (부가세 포함)')), ' = 기준가 × ' + fmtDec(1 + est.coef.vat_pct / 100) + ' (부가세 ' + fmtDec(est.coef.vat_pct) + '%). 범위 ' + won(est.pay.low) + ' ~ ' + won(est.pay.high) + '. 리서치 시세는 부가세 별도라 더했어요 — ' +
+          (est.contract ? '자금 화면은 계약 금액(' + won(est.contract.pay) + ')을 써요. 이 숫자는 참고용이에요.' : '머리말·자금 화면은 이 숫자를 써요.'))),
       el('h3', { class: 'es-h3' }, '💡 이렇게 하면 달라져요'),
       el('ul', { class: 'es-tips' }, tips.map((t) => el('li', t))),
       est.notes.length ? el('div', { class: 'callout mt-12' }, el('ul', { class: 'es-tips', style: { marginTop: 0 } }, est.notes.map((n) => el('li', n)))) : null);
@@ -3193,17 +3309,28 @@
     const peerDiff = pm ? n.amount / pm - 1 : null;
     out.tooCheap = pm ? (peerDiff < -0.15 || n.amount < est.typical * 0.6) : n.amount < est.low;
     out.tooHigh = pm ? peerDiff > 0.25 : n.amount > est.high;
-    const dTxt = Math.abs(out.diff) < 0.005 ? '모델과 거의 같음' : '모델보다 ' + Math.abs(Math.round(out.diff * 100)) + '% ' + (out.diff < 0 ? '낮음' : '높음');
-    out.badges.push({ t: dTxt, cls: out.tooCheap ? 'bad' : out.tooHigh ? 'warn' : (pm || Math.abs(out.diff) <= 0.15) ? 'good' : '' });
+    const pctTxt = (d) => (Math.abs(d) < 0.005 ? '모델과 거의 같음' : '모델보다 ' + Math.abs(Math.round(d * 100)) + '% ' + (d < 0 ? '낮음' : '높음'));
+    const diffSay = (d) => (Math.abs(d) < 0.005 ? '모델과 거의 같아요' : '모델보다 ' + Math.abs(Math.round(d * 100)) + '% ' + (d < 0 ? '낮아요' : '높아요'));
+    /* 계약한 견적인데 사다리차 포함을 아직 확인 못 함 — 모델의 사다리차 값을 더한 비교라 참고만 (포함이면 차이도 함께 알려 줌) */
+    const ladderAdd = q.contracted ? n.adds.find((a) => a.label === '사다리차') : null;
+    if (q.contracted) out.badges.push({ t: '✅ 계약 확정', cls: 'good' });
+    out.badges.push({ t: pctTxt(out.diff) + (ladderAdd ? ' (참고)' : ''), cls: ladderAdd ? '' : out.tooCheap ? 'bad' : out.tooHigh ? 'warn' : (pm || Math.abs(out.diff) <= 0.15) ? 'good' : '' });
     if (pm && Math.abs(peerDiff) >= 0.005) out.badges.push({ t: '다른 견적 중앙값보다 ' + Math.abs(Math.round(peerDiff * 100)) + '% ' + (peerDiff < 0 ? '낮음' : '높음'), cls: out.tooCheap ? 'bad' : out.tooHigh ? 'warn' : '' });
     if (out.tooCheap) out.warns.push({ t: (pm ? '다른 견적들보다 눈에 띄게 싸요' : '모델 하한(' + won(est.low) + ')보다 싸요') + ' — 당일 ‘짐이 많다’며 증차·증원 추가요금을 요구할 위험이 있어요. 포함 항목을 서면으로 받으세요.', k: 'bad' });
     else if (out.tooHigh) out.warns.push({ t: (pm ? '다른 견적들보다 눈에 띄게 비싸요' : '모델 상한(' + won(est.high) + ')보다 비싸요') + ' — 포함 항목을 다시 확인하고 협상해 보세요.', k: 'warn' });
     else if (!pm && out.diff < -0.15) out.warns.push({ t: '모델 범위 안이지만 꽤 낮은 편이에요. 모델은 신뢰도 낮은 추정치라 견적 3곳이 모이면 서로 비교해 판단하세요.', k: 'info' });
-    if (!q.ladder && raw.parts.ladder > 0) out.warns.push({ t: '사다리차 미포함(또는 미확인) — 약 ' + won(raw.parts.ladder) + ' 더 들 수 있어요 (환산에 더했어요).', k: 'warn' });
-    if (!q.aircon && raw.parts.aircon > 0) out.warns.push({ t: '에어컨 이전 미포함(또는 미확인) — 약 ' + won(raw.parts.aircon) + ' (환산에 더했어요).', k: 'warn' });
+    if (ladderAdd) out.warns.push({ t: '사다리차가 계약에 들어 있는지 아직 몰라요 — 비교에 모델의 사다리차 약 ' + won(raw.parts.ladder) + '을 더해서 위 % 는 참고만 하세요. 들어 있으면 ' + diffSay((n.amount - ladderAdd.v) / est.typical - 1) + '. 계약서로 확인하면 ‘사다리차 포함’을 체크하세요.', k: 'warn' });
+    else if (!q.ladder && raw.parts.ladder > 0) out.warns.push({ t: '사다리차 미포함(또는 미확인) — 약 ' + won(raw.parts.ladder) + ' 더 들 수 있어요 (환산에 더했어요).', k: 'warn' });
+    if (!q.aircon && raw.parts.aircon > 0) {
+      out.warns.push(q.contracted
+        ? { t: '에어컨은 분리·운반까지이고 설치는 따로 부른 기사가 해요 — 비교할 땐 모델의 에어컨 설치비 약 ' + won(raw.parts.aircon) + '을 더했어요 (설치비는 자금 화면 ‘에어컨 설치’ 줄).', k: 'info' }
+        : { t: '에어컨 이전 미포함(또는 미확인) — 약 ' + won(raw.parts.aircon) + ' (환산에 더했어요).', k: 'warn' });
+    }
     if (!q.waste && raw.parts.waste > 0) out.warns.push({ t: '폐기물 처리 미포함 — 약 ' + won(raw.parts.waste) + ' (환산에 더했어요).', k: 'warn' });
     if (!q.arrange && raw.parts.arrange > 0) out.warns.push({ t: '정리 인력 미포함 — 약 ' + won(raw.parts.arrange) + ' (환산에 더했어요).', k: 'warn' });
-    if (q.vatIncluded === false) {
+    if (q.noVat) {
+      out.warns.push({ t: '부가세 없음(현금이체) — 낼 돈은 견적 금액 ' + won(num(q.amount, 0)) + ' 그대로예요. 현금영수증·세금계산서는 못 받을 수 있으니 계약서(견적서)와 이체 내역을 꼭 보관하세요.', k: 'info' });
+    } else if (q.vatIncluded === false) {
       out.warns.push({ t: (raw.vatIncl ? '부가세 별도 견적 → ' + r1(c.vat_pct) + '%를 더해 비교했어요.' : '부가세 별도 견적 — 모델도 부가세 별도라 그대로 비교했어요. 실제로 낼 돈은 약 ' + won(num(q.amount, 0) * raw.vatMul) + '(부가세 포함)이에요.') +
         ' 계약은 ‘부가세 포함 총액, 결제수단 무관’으로 하세요.', k: 'info' });
     }
@@ -3217,12 +3344,14 @@
       if (p < 0.05) out.warns.push({ t: '계약금이 총액의 ' + Math.round(p * 100) + '%예요. 업체가 어기면 받는 배상(계약금의 배수)도 작아져요 — ' + c.deposit_pct + '% 안팎을 권해요.', k: 'warn' });
       else if (p > 0.2) out.warns.push({ t: '계약금이 총액의 ' + Math.round(p * 100) + '%로 많아요 — ' + c.deposit_pct + '% 안팎을 권해요.', k: 'warn' });
     }
-    if (!q.licenseChecked) out.warns.push({ t: '허가증(화물자동차 운송주선사업) 사본 확인 전이에요.', k: 'info' });
-    if (!q.insuranceChecked) out.warns.push({ t: '적재물배상보험 증권 확인 전 — 법정 최저는 사고당 500만원 수준이라 1천만원 이상인지 보세요.', k: 'info' });
-    if (!q.visitDone) out.warns.push({ t: '방문견적 전 금액이에요 — 전화·플랫폼 견적은 당일 추가요금 위험이 커요.', k: 'info' });
+    if (!q.licenseChecked) out.warns.push({ t: '허가증(화물자동차 운송주선사업) 사본 확인 전이에요' + (q.contracted ? ' — 계약했으니 계약서·사업자등록증과 함께 받아 두세요.' : '.'), k: q.contracted ? 'warn' : 'info' });
+    if (!q.insuranceChecked) out.warns.push({ t: '적재물배상보험 증권 확인 전 — 법정 최저는 사고당 500만원 수준이라 1천만원 이상인지 보세요.' + (q.contracted ? ' 파손 보상은 이사화물 표준약관대로인지도 확인하세요.' : ''), k: q.contracted ? 'warn' : 'info' });
+    if (!q.visitDone) out.warns.push({ t: q.contracted ? '방문견적 없이 한 계약이면 계약서에 짐 목록·작업 범위(포장·에어컨 분리·사다리차·엘리베이터)와 ‘사전 동의 없는 추가요금 없음’을 적어 받으세요.' : '방문견적 전 금액이에요 — 전화·플랫폼 견적은 당일 추가요금 위험이 커요.', k: 'info' });
     return out;
   }
   function bestQuote(est, raw) {
+    // 이미 계약한 업체가 있으면 ‘추천’은 보여 주지 않아요
+    if (quotesOf(estSt()).some((q) => q.contracted)) return null;
     const pm = peerMedian(raw);
     const scored = quotesOf(estSt()).map((q) => ({ q, ev: quoteEval(q, est, raw, pm) })).filter((x) => x.ev.n);
     if (scored.length < 2) return null;
@@ -3322,9 +3451,9 @@
     const deposit = MV.ui.moneyInput(isNum(q0.deposit) ? q0.deposit : null, (v) => { blankIfNone(deposit, v); updQuote(id, { deposit: Math.max(0, v) || null }); }, { placeholder: '예: 20만' });
     deposit.input.setAttribute('aria-label', '계약금'); deposit.input.dataset.fk = 'q-' + id + '-deposit';
     const vat = el('select', { class: 'select', 'aria-label': '부가세', 'data-fk': 'q-' + id + '-vat' },
-      el('option', { value: 'in' }, '부가세 포함'), el('option', { value: 'ex' }, '부가세 별도'));
-    vat.value = q0.vatIncluded === false ? 'ex' : 'in';
-    vat.addEventListener('change', () => updQuote(id, { vatIncluded: vat.value !== 'ex' }));
+      el('option', { value: 'in' }, '부가세 포함'), el('option', { value: 'ex' }, '부가세 별도'), el('option', { value: 'none' }, '부가세 없음 (현금이체)'));
+    vat.value = q0.noVat ? 'none' : q0.vatIncluded === false ? 'ex' : 'in';
+    vat.addEventListener('change', () => updQuote(id, { vatIncluded: vat.value === 'in', noVat: vat.value === 'none' }));
     const numF = (key, label, step) => {
       const x = el('input', { class: 'input num', type: 'number', min: '0', step: String(step), inputmode: 'decimal', value: isNum(q0[key]) ? String(q0[key]) : '', 'aria-label': label, 'data-fk': 'q-' + id + '-' + key, placeholder: '—' });
       x.addEventListener('change', () => { const v = parseFloat(x.value); updQuote(id, { [key]: isFinite(v) && v > 0 ? v : null }); });
@@ -3336,6 +3465,21 @@
       x.addEventListener('change', () => updQuote(id, { [key]: x.checked }));
       return el('label', { class: 'check es-check' }, x, el('span', label));
     };
+    /* 계약함 — 한 업체만 (체크하면 다른 견적의 계약 표시는 꺼요) */
+    const contractCb = (() => {
+      const x = el('input', { type: 'checkbox', checked: !!q0.contracted, 'data-fk': 'q-' + id + '-contracted' });
+      x.addEventListener('change', () => {
+        const q = getQuote(id);
+        MV.store.update((st) => {
+          ensureEst(st).quotes.forEach((y) => {
+            if (!y || typeof y !== 'object') return;
+            if (y.id === id) y.contracted = x.checked;
+            else if (x.checked && y.contracted) y.contracted = false;
+          });
+        }, { source: 'es', log: (x.checked ? '이사업체 계약 표시: ' : '이사업체 계약 표시 해제: ') + clip((q && q.company) || '이름 없는 업체', 40) });
+      });
+      return el('label', { class: 'check es-check' }, x, el('span', '계약함'));
+    })();
     const note = el('textarea', { class: 'textarea', rows: '2', placeholder: '메모 (상담한 직원, 특약 가능 여부, 느낌 등)', 'aria-label': '메모', 'data-fk': 'q-' + id + '-note' }, q0.note || '');
     textCommit(note, (v) => updQuote(id, { note: v }));
     const badges = el('div', { class: 'es-qbadges' });
@@ -3354,7 +3498,9 @@
         el('span', { class: 'es-qcl' }, '견적에 포함된 것'),
         cb('ladder', '사다리차'), cb('aircon', '에어컨 이전'), cb('arrange', '정리 인력'), cb('waste', '폐기물'),
         el('span', { class: 'es-qcl' }, '확인한 것'),
-        cb('visitDone', '방문견적 받음'), cb('licenseChecked', '관허(허가증) 확인'), cb('insuranceChecked', '적재물배상보험 확인')),
+        cb('visitDone', '방문견적 받음'), cb('licenseChecked', '관허(허가증) 확인'), cb('insuranceChecked', '적재물배상보험 확인'),
+        el('span', { class: 'es-qcl' }, '계약'),
+        contractCb, cb('depositPaid', '계약금 냄')),
       el('div', { class: 'mt-8' }, note),
       badges, normTxt, warns);
     upd(() => {
@@ -3365,14 +3511,22 @@
       const ev = quoteEval(q, est, raw);
       const best = bestQuote(est, raw);
       card.classList.toggle('is-best', !!best && best.id === id);
-      card.classList.toggle('is-cheap', ev.tooCheap);
+      card.classList.toggle('is-cheap', ev.tooCheap && !q.contracted);
+      card.classList.toggle('is-contract', !!q.contracted);
+      const vv = q.noVat ? 'none' : q.vatIncluded === false ? 'ex' : 'in';
+      if (document.activeElement !== vat && vat.value !== vv) vat.value = vv;
       badges.replaceChildren(...ev.badges.map((b) => el('span', { class: 'chip ' + b.cls }, b.t)),
         ...(best && best.id === id ? [el('span', { class: 'chip good' }, '⭐ 추천')] : []));
       normTxt.textContent = ev.n ? '같은 조건 환산 ' + won(ev.n.amount) + ' (' + basisLabel(raw.vatIncl) + ' 기준' +
         (ev.n.adds.length ? ' = 견적 ' + won(q.amount) + ev.n.adds.map((a) => (a.v < 0 ? ' − ' : ' + ') + a.label.replace(/ 빼기$/, '') + ' ' + won(Math.abs(a.v))).join('') : '') + ') · 모델 기준 ' + won(est.typical) : '';
+      if (q.contracted && num(q.amount, 0) > 0) {
+        const payQ = q.noVat || q.vatIncluded !== false ? num(q.amount, 0) : num(q.amount, 0) * raw.vatMul;
+        const dep = Math.max(0, num(q.deposit, 0));
+        normTxt.textContent = '✅ 계약 확정: 낼 돈 ' + won(payQ) + (q.noVat ? ' (부가세 없음)' : '') + (dep ? ' = 계약금 ' + won(dep) + (q.depositPaid ? ' 냄' : '') + ' + 잔금 ' + won(Math.max(0, payQ - dep)) + (normDate(q.balanceDate) ? ' ' + D.fmt(q.balanceDate) : '') : '') + '. ' + normTxt.textContent;
+      }
       warns.replaceChildren(...ev.warns.map((w) => el('li', { class: 'is-' + w.k }, w.t)));
       if (document.activeElement !== company && company.value !== (q.company || '')) company.value = q.company || '';
-      ['ladder', 'aircon', 'arrange', 'waste', 'visitDone', 'licenseChecked', 'insuranceChecked'].forEach((k) => {
+      ['ladder', 'aircon', 'arrange', 'waste', 'visitDone', 'licenseChecked', 'insuranceChecked', 'contracted', 'depositPaid'].forEach((k) => {
         const x = card.querySelector('[data-fk="q-' + id + '-' + k + '"]'); if (x && x.checked !== !!q[k]) x.checked = !!q[k];
       });
     }, card);
@@ -3427,6 +3581,7 @@
       el('ol', ASK.map((t) => el('li', t))));
   }
   function renderQuotes(body) {
+    body.appendChild(region(() => (R.est.contract ? el('section', { class: 'card', 'aria-label': '계약한 이사업체' }, contractBox(R.est.contract)) : null), 'qcontract'));
     body.appendChild(region(quotesTop, 'qtop'));
     const grid = el('div', { class: 'es-q-grid' });
     const main = el('div', { class: 'es-q-main' });
@@ -3465,6 +3620,14 @@
     const b = compute(st, { inventory: inv.filter((x) => x.id !== it.id) });
     return { a, b, delta: Math.max(0, payK(a, 'typical') - payK(b, 'typical')) };
   }
+  /* 에어컨 설치비 (10/8 결정: 이삿짐센터가 옮기고 설치는 따로 부른 기사) — 자금 화면 '에어컨 설치'('lg') 줄을 직접 입력했으면
+     그 금액, 아직 자금 화면을 안 열었으면(예전 자동 줄) 10/8 추정 40만원 */
+  const AC_INSTALL_EST = 400000;
+  function acInstallAmt() {
+    const fin = stGet().finance;
+    const l = fin && fin.budget && Array.isArray(fin.budget.lines) ? fin.budget.lines.find((x) => x && x.id === 'lg') : null;
+    return l && l.auto === false && num(l.amount, 0) > 0 ? num(l.amount, 0) : AC_INSTALL_EST;
+  }
   /* 누가 언제 어떻게 — 계획 카드의 한 줄 설명 */
   function planWhen(it, on) {
     const kind = lgKind(it);
@@ -3472,14 +3635,14 @@
     const md = D.moveDate();
     const mdTxt = D.fmt(md);
     const w = num(it.w, 0);
-    if (m === '삼성' && isAcKind(kind)) return '이사 전(' + mdTxt + ' 전)에 새 집에 설치 · 지금 예약 (1588-3366) · 운반 포함 여부 확인 · 새 집 집주인·현 거주자 동의 필요';
+    if (m === '삼성' && isAcKind(kind)) return '삼성전자서비스(1588-3366)가 철거·설치 · 운반 포함 여부 확인 · 이사 전에 새 집에 설치하려면 새 집 집주인·현 거주자 동의 필요';
     if (m === '삼성') return '삼성케어플러스(1588-4190)가 철거·설치 · 요금·운반 포함 여부 확인';
     if (m === 'LG') return 'LG 베스트케어(1544-7777)가 철거·운송·설치' + (isAcKind(kind) ? ' · 배관 연장·앵글은 따로' : '');
     if (kind === 'fridge') return mdTxt + ' 이삿짐센터가 세워서 운반' + (w >= 85 ? ' · 폭 ' + r1(w) + 'cm — 현관문·엘리베이터 문 유효 폭이 약 ' + Math.ceil(w + 1.7) + 'cm(넉넉히 95cm)보다 좁으면 문짝 분리' : '') + ' · 세워 옮겼으면 약 5분 뒤 전원 (눕혔으면 2시간)';
     if (kind === 'dryer') return mdTxt + ' 이삿짐센터가 세워서 운반 (눕히지 않기) · 물통·배수호스 물 빼기';
     if (kind === 'washer') return mdTxt + ' 이삿짐센터가 운반 · 호스 물 빼기 (드럼이면 운송볼트)';
     if (kind === 'ac_window') return '직접 떼서 ' + mdTxt + ' 이삿짐센터가 운반';
-    if (isAcKind(kind)) return '이삿짐센터 협력 기사가 철거·설치 (출장비 따로)';
+    if (isAcKind(kind)) return mdTxt + ' 이삿짐센터가 분리·포장·운반 (계약에 분리가 들어 있는지 확인) · 설치는 따로 부른 기사 — ' + mdTxt + ' 짐 들인 뒤 또는 ' + D.fmt(D.add(md, 1)) + ', 약 ' + won(acInstallAmt()) + '(추정)';
     return mdTxt + ' 이삿짐센터가 운반';
   }
   const FATE_PLAN = { buy: '🛒 새로 사서 새 집으로 배송 — 옮기지 않아요', discard: '♻️ 버려요 — 폐가전 무상방문수거 1599-0903 (지금 집에서)', sell: '🤝 판매·나눔 — 옮기지 않아요' };
@@ -3506,22 +3669,36 @@
           el('div', { class: 'es-plan-d' }, planWhen(it, on))),
         el('span', { class: 'chip es-who es-plan-who' + (on ? ' kid' : '') }, on ? '🔧 ' + m.who : '🚚 ' + MOVER_WHO));
     };
-    const sumRows = [el('div', { class: 'es-plan-sr' }, el('span', '🚚 이삿짐센터 (가구·박스 포함 전체)'), el('b', '약 ' + won(est.pay.typical)), el('small', won(est.pay.low) + '~' + won(est.pay.high)))];
+    const ct = est.contract;
+    /* 이삿짐센터가 옮기는 에어컨이 있으면 설치는 따로 부른 기사 (10/8 결정) — 계약 금액과 함께 보여 줌 */
+    const acMover = items.filter((it) => isAircon(it) && lgKind(it) !== 'ac_window' && !lgOn(it));
+    const acAmt = ct && acMover.length ? acInstallAmt() : 0;
+    const sumRows = [ct
+      ? el('div', { class: 'es-plan-sr' }, el('span', '🚚 이삿짐센터 — 계약 확정 (' + ct.company + ')'), el('b', won(ct.pay)), el('small', (ct.noVat ? '부가세 없음 · ' : '') + '모델 추정 약 ' + won(est.pay.typical) + '(참고)'))
+      : el('div', { class: 'es-plan-sr' }, el('span', '🚚 이삿짐센터 (가구·박스 포함 전체)'), el('b', '약 ' + won(est.pay.typical)), el('small', won(est.pay.low) + '~' + won(est.pay.high)))];
+    if (acAmt) sumRows.push(el('div', { class: 'es-plan-sr' }, el('span', '❄️ 에어컨 설치 — 따로 부른 기사 (추정)'), el('b', '약 ' + won(acAmt)), el('small', '자금 화면 ‘에어컨 설치’ 줄')));
     if (lgc && Array.isArray(lgc.makers)) {
       lgc.makers.forEach((m) => {
         const bb = lgc.byBrand[m];
         sumRows.push(el('div', { class: 'es-plan-sr' }, el('span', '🔧 ' + MAKERS[m].who + ' (' + bb.count + '대)'), el('b', '약 ' + won(bb.typical)), el('small', won(bb.low) + '~' + won(bb.high))));
       });
     }
-    sumRows.push(el('div', { class: 'es-plan-sr es-plan-tot' }, el('span', '합계'), el('b', '약 ' + won(est.totalPay.typical)), el('small', won(est.totalPay.low) + '~' + won(est.totalPay.high))));
+    if (ct) {
+      const mk = lgc ? lgc.typical : 0;
+      sumRows.push(el('div', { class: 'es-plan-sr es-plan-tot' }, el('span', '합계'), el('b', '약 ' + won(ct.pay + acAmt + mk)), el('small', '계약 ' + won(ct.pay) + (acAmt ? ' + 에어컨 설치 ' + won(acAmt) : '') + (mk ? ' + 제조사 서비스 ' + won(mk) : ''))));
+    } else {
+      sumRows.push(el('div', { class: 'es-plan-sr es-plan-tot' }, el('span', '합계'), el('b', '약 ' + won(est.totalPay.typical)), el('small', won(est.totalPay.low) + '~' + won(est.totalPay.high))));
+    }
     return el('section', { class: 'card es-plan', 'aria-label': '우리 집 가전 이전 계획' },
       sectionHead('📋', '우리 집 가전 이전 계획', '짐 목록의 ‘제조사 서비스로 옮김’ 표시대로 — 아래에서 바꿀 수 있어요'),
       items.length ? el('ul', { class: 'es-plan-list' }, items.map(row)) : null,
       others.length ? el('ul', { class: 'es-plan-list es-plan-others', 'aria-label': '옮기지 않는 가전' }, others.map((it) => el('li', { class: 'es-plan-i is-other' },
         el('span', { class: 'es-ico', 'aria-hidden': 'true' }, MV.inv.cat(it.cat).icon),
         el('div', { class: 'es-plan-b' }, el('div', { class: 'es-plan-n' }, el('b', nm(it) || '이름 없는 가전'), brandChip(it)), el('div', { class: 'es-plan-d' }, FATE_PLAN[it.fate]))))) : null,
-      el('div', { class: 'es-plan-sum', 'aria-label': '예상 비용 (부가세 포함, 추정)' }, sumRows),
-      el('p', { class: 'small es-muted mt-8 mb-0' }, '모두 부가세 포함(실제로 낼 돈)·추정치예요. 제조사 요금은 소비자가(부가세 포함)이고, 예약 때 문자 견적으로 확정하세요.'));
+      el('div', { class: 'es-plan-sum', 'aria-label': ct ? '이사 비용 (계약 금액 + 추정)' : '예상 비용 (부가세 포함, 추정)' }, sumRows),
+      el('p', { class: 'small es-muted mt-8 mb-0' }, ct
+        ? '이사업체는 계약 금액(실제로 낼 돈)이고, 에어컨 설치·제조사 요금은 추정이에요. 설치 기사·제조사 견적을 문자로 받으면 자금 화면에서 고치세요.'
+        : '모두 부가세 포함(실제로 낼 돈)·추정치예요. 제조사 요금은 소비자가(부가세 포함)이고, 예약 때 문자 견적으로 확정하세요.'));
   }
   function lgTotalsCard() {
     const items = lgCandidates();
@@ -3534,10 +3711,12 @@
     const diff = tot(cur, 'typical') - tot(s.allMover, 'typical');
     const saveMover = payK(s.allMover, 'typical') - payK(cur, 'typical');
     const nBlock = items.filter((it) => !lgEligible(it)).length;
+    /* 계약한 이사업체가 있으면 실제로 낼 돈은 위 계획 카드(계약 금액 + 에어컨 설치) — 여기 금액은 모두 모델 기준 참고 */
+    const ct = cur.contract;
     const scenCard = (title, e, isCur, sub) => {
       const mk = e.lgCost ? e.lgCost.typical : 0;
       return el('div', { class: 'es-scen-c' + (isCur ? ' is-cur' : '') },
-        el('div', { class: 'es-scen-t' }, title, isCur ? el('span', { class: 'chip brand' }, '지금 선택') : null),
+        el('div', { class: 'es-scen-t' }, title, isCur ? el('span', { class: 'chip brand' }, ct ? '지금 선택 (모델)' : '지금 선택') : null),
         el('div', { class: 'es-scen-big' }, '약 ' + won(tot(e, 'typical'))),
         el('div', { class: 'es-scen-l' }, el('span', '🚚 이삿짐센터'), el('span', won(payK(e, 'typical')))),
         el('div', { class: 'es-scen-l' }, el('span', '🔧 제조사 서비스'), el('span', mk ? won(mk) : '0원')),
@@ -3545,12 +3724,13 @@
         sub ? el('div', { class: 'es-scen-r' }, sub) : null);
     };
     return el('section', { class: 'card', 'aria-label': '세 가지 방법 합계 (참고)' },
-      sectionHead('⚖️', '참고: 세 가지 방법 합계', '이삿짐센터 + 제조사 서비스 (기준가 · 부가세 포함)'),
+      sectionHead('⚖️', '참고: 세 가지 방법 합계', ct ? '짐 목록 모델로 계산한 방법별 비교 (모델 기준가 · 부가세 포함)' : '이삿짐센터 + 제조사 서비스 (기준가 · 부가세 포함)'),
+      ct ? el('p', { class: 'small mb-8' }, '이사업체는 ' + josa(ct.company, '과/와') + ' ' + won(ct.pay) + '에 계약해서, 실제로 낼 돈은 위 ‘우리 집 가전 이전 계획’의 합계예요. 아래 금액은 방법끼리 견줘 볼 때만 쓰는 모델 추정이에요.') : null,
       el('div', { class: 'es-scen' },
-        scenCard('🚚 전부 이삿짐센터', s.allMover, isAllMover, '가전도 이삿짐센터가 옮김 (에어컨은 협력 기사)'),
+        scenCard('🚚 전부 이삿짐센터', s.allMover, isAllMover, '가전도 이삿짐센터가 옮김 (에어컨 설치는 사설 기사)'),
         isAllMover || isAllLg ? scenCard('🔀 지금 선택 (혼합)', cur, false, '위에서 가전마다 고르면 바뀌어요') : scenCard('🔀 지금 선택 (혼합)', cur, true, '제조사 서비스 ' + nLg + '개 · 이삿짐센터 ' + (items.length - nLg) + '개'),
         scenCard('🔧 맡길 수 있는 가전 전부 제조사', s.allLg, isAllLg && !isAllMover, nBlock ? '맡길 수 없는 가전 ' + nBlock + '개와 가구·박스는 이삿짐센터' : '이삿짐센터는 가구·박스만')),
-      el('p', { class: 'small es-muted mt-8 mb-0' }, '🧾 모두 부가세 포함(실제로 낼 돈) 기준이에요. ' + (cur.vatIncl ? '' : '이삿짐센터 시세는 부가세 별도라 ' + r1(cur.coef.vat_pct) + '%를 더했고, ') + '제조사 요금은 소비자가(부가세 포함)예요.'),
+      el('p', { class: 'small es-muted mt-8 mb-0' }, '🧾 모두 부가세 포함' + (ct ? ' 모델 금액이에요. ' : '(실제로 낼 돈) 기준이에요. ') + (cur.vatIncl ? '' : '이삿짐센터 시세는 부가세 별도라 ' + r1(cur.coef.vat_pct) + '%를 더했고, ') + '제조사 요금은 소비자가(부가세 포함)예요.'),
       el('p', { class: 'small mt-12 mb-0' }, nLg
         ? '지금 선택이면 이삿짐센터 비용이 약 ' + won(Math.max(0, saveMover)) + ' 줄고 제조사 서비스에 약 ' + josa(won(cur.lgCost ? cur.lgCost.typical : 0), '이/가') + ' 들어, 전부 이삿짐센터보다 합계가 ' + (Math.abs(diff) < 5000 ? '거의 같아요.' : diff > 0 ? '약 ' + won(diff) + ' 더 들어요.' : '약 ' + won(-diff) + ' 덜 들어요.') + ' 돈만이 아니라 하자 책임·일정도 함께 보세요.'
         : '지금은 가전도 모두 이삿짐센터가 옮기는 것으로 계산 중이에요.'));
@@ -3558,6 +3738,7 @@
   function lgItemsCard() {
     const items = lgCandidates();
     if (!items.length) return null;
+    const ct = R.est.contract;
     const st = stGet();
     const inv = (st.inventory || []).filter((x) => x && typeof x === 'object');
     const c = R.est.coef;
@@ -3575,7 +3756,7 @@
       const onLg = lgOn(it);
       const furn = FURN_WITH.test(nm(it)) ? (nm(it).match(FURN_WITH) || [])[1] : null;
       const parts = [];
-      if (a.counts.acN !== b.counts.acN) parts.push('에어컨 이전설치(협력 기사)');
+      if (a.counts.acN !== b.counts.acN) parts.push('에어컨 설치(사설 기사 시세)');
       if (a.counts.fridges !== b.counts.fridges) parts.push('대형 냉장고 추가비');
       if (a.tons !== b.tons) parts.push('차량 ' + tonsLabel(b.tons) + '→' + tonsLabel(a.tons));
       if (!parts.length) parts.push('짐량 안에 포함 (차량 등급 변화 없음)');
@@ -3619,9 +3800,12 @@
           el('div', { class: 'es-lgi-cost' + (onLg ? ' is-on' : '') }, el('small', '🔧 ' + mkWho),
             isWin ? el('b', '0원') : blockLg ? el('b', '맡길 수 없음') : el('b', '약 ' + won(mc.typical)),
             el('small', mkSmall)),
-          el('div', { class: 'es-lgi-cost' + (!onLg ? ' is-on' : '') }, el('small', '🚚 이삿짐센터 (부가세 포함)'),
+          el('div', { class: 'es-lgi-cost' + (!onLg ? ' is-on' : '') }, el('small', ct ? '🚚 이삿짐센터 (모델 기준 참고)' : '🚚 이삿짐센터 (부가세 포함)'),
             el('b', moverDelta ? '+' + won(moverDelta) : '추가 0원'),
-            el('small', parts.join(' · ')))),
+            el('small', parts.join(' · ')),
+            ct ? el('small', isAcKind(kind) && !isWin
+              ? '실제로는 분리·운반이 계약(' + won(ct.pay) + ')에 들어 있고, 설치는 따로 부른 기사 약 ' + won(acInstallAmt()) + '(추정)'
+              : '실제로는 계약 금액(' + won(ct.pay) + ')에 들어 있어요') : null)),
         blockLg && !isWin ? el('div', { class: 'es-lgi-does es-lgi-bad' }, '⛔ ' + blockedWhy(it) + (it.lg ? ' — 견적은 이삿짐센터가 옮기는 것으로 계산했어요' : '') + '. 제조사가 다르면 이름을 눌러 ‘제조사’를 고치세요.') : null,
         !blockLg ? el('div', { class: 'es-lgi-does' }, '🔧 ' + (sv.maker === '삼성' ? (SS_DOES[kind] || '') : LG_DOES[kind])) : null);
     });
@@ -3689,9 +3873,11 @@
       out.push(el('p', { style: { color: 'var(--bad)' } }, el('b', '⚠ ' + names(blocked)), ' — ' + blockedWhy(blocked[0]) + (blocked.length > 1 ? ' (외 ' + (blocked.length - 1) + '개)' : '') + '. 지금은 이삿짐센터가 옮기는 것으로 계산했어요 — 짐 목록의 표시도 이삿짐센터로 바꾸세요.'));
       out.push(el('div', { class: 'row es-reco-fix' }, el('button', { type: 'button', class: 'btn btn-sm btn-primary', 'data-fk': 'lgfix-reco', onclick: () => switchToMover(blocked.map((it) => it.id)) }, '🚚 ' + blocked.length + '개 이삿짐센터로 바꾸기')));
     }
+    /* 10/8 결정: 에어컨은 이삿짐센터가 옮기고(분리·운반) 설치는 따로 부른 기사 */
+    const acMv = mvItems.filter((it) => isAircon(it) && lgKind(it) !== 'ac_window');
     if (!mkItems.length) {
-      const ssAble = items.filter((it) => makerOf(it) === '삼성' && isAircon(it));
-      out.push(el('p', '지금은 가전을 모두 이삿짐센터가 옮기는 것으로 계산 중이에요.' + (ssAble.length ? ' 삼성 에어컨은 삼성전자서비스 이전설치(2in1 기본 ' + won(c.ss_ac_2in1) + ')도 고를 수 있어요 — 위 ‘가전별 비교’에서 고르세요.' : '')));
+      out.push(el('p', el('b', '✅ 우리 결정 (10/8): '), '냉장고·건조기' + (acMv.length ? '·에어컨' : '') + ' 모두 이삿짐센터가 옮겨요.' +
+        (acMv.length ? ' 에어컨은 ' + D.fmt(D.moveDate()) + ' 이삿짐센터가 분리·포장·운반하고, 설치는 따로 부른 기사가 해요 — 짐을 들인 뒤 또는 ' + D.fmt(D.add(D.moveDate(), 1)) + ', 약 ' + won(acInstallAmt()) + '(추정, 자금 화면 ‘에어컨 설치’ 줄). 예전 계획(삼성전자서비스가 이사 전에 새 집에 설치)은 하지 않기로 했어요.' : '')));
     } else {
       out.push(el('p', el('b', '✅ 지금 계획: '),
         mvItems.length ? josa(names(mvItems), '은/는') + ' 이삿짐센터가, ' : '',
@@ -3734,22 +3920,31 @@
         const inv = (st.inventory || []).filter((x) => x && typeof x === 'object');
         const refCost = sum(lgRef, (it) => { const m = makerItemCost(it, c, inp); return m ? m.typical : 0; }) + c.lg_transport;
         const refMv = sum(lgRef, (it) => moverDeltaOf(it, st, inv).delta);
-        out.push(el('p', { class: 'small es-muted' }, '참고: ' + josa(names(lgRef), '을/를') + ' LG 베스트케어로 옮기면 약 ' + won(refCost) + '(운송비 포함, 추정 — 1544-7777)이에요. 지금 계획대로 이삿짐센터가 옮기면 이사비가 약 ' + (refMv ? won(refMv) : '0원') + ' 늘어요.'));
+        out.push(el('p', { class: 'small es-muted' }, '참고: ' + josa(names(lgRef), '을/를') + ' LG 베스트케어로 옮기면 약 ' + won(refCost) + '(운송비 포함, 추정 — 1544-7777)이에요. ' + (est.contract
+          ? '지금 계획대로 이삿짐센터가 옮기는 비용은 계약 금액(' + won(est.contract.pay) + ')에 들어 있어요.'
+          : '지금 계획대로 이삿짐센터가 옮기면 이사비가 약 ' + (refMv ? won(refMv) : '0원') + ' 늘어요.')));
       }
+    }
+    if (acMv.length) {
+      out.push(el('ul', { class: 'small es-acsteps' },
+        el('li', el('b', '이삿짐센터: '), '에어컨 분리(탈거)·포장·운반이 계약에 들어 있는지, 추가 비용이 있는지, 지금 집 배관 구멍 마감은 누가 하는지 확인해요.'),
+        el('li', el('b', '설치 기사: '), '2~3곳에 견적을 문자로 받아요 — 2in1(스탠드+벽걸이) 기본 설치, 배관 연장 1m당 단가, 진공 작업, 가스(냉매) 보충, 실외기 거치대, 벽 타공, 출장비, A/S·보증 기간.'),
+        el('li', el('b', '새 집 사전방문: '), '배관 구멍·실외기 자리·스탠드 옆 콘센트를 사진으로 찍어 설치 기사에게 보내요.'),
+        el('li', el('b', '설치 날: '), '입회해서 시운전(찬바람·물 새는지·실외기 소음)까지 보고 돈을 내요.')));
     }
     const acs = acCompare(items, est);
     const acBlock = acs.length ? el('div', { class: 'es-acmp' },
-      el('div', { class: 'es-acmp-h' }, el('b', '❄️ 에어컨: 제조사와 이삿짐센터 협력 기사 비교'), el('span', { class: 'small es-muted' }, ' 대당·세트당, 부가세 포함, 배관 ' + r1(Math.max(0, num(inp.acPipeM, 0))) + 'm 포함')),
+      el('div', { class: 'es-acmp-h' }, el('b', '❄️ 에어컨 설치: 제조사와 사설 기사 비교 (참고)'), el('span', { class: 'small es-muted' }, ' 대당·세트당, 부가세 포함, 배관 ' + r1(Math.max(0, num(inp.acPipeM, 0))) + 'm 포함')),
       el('ul', { class: 'es-acmp-list' }, acs.map((r) => {
         const d = r.mkU - r.mvU;
         const who = MAKERS[r.maker].who;
         return el('li',
           el('span', { class: 'es-acmp-n' }, nm(r.it) + (r.q > 1 ? ' (' + r.q + '대)' : ''), r.on ? el('span', { class: 'chip kid' }, '지금 ' + who) : el('span', { class: 'chip' }, '지금 이삿짐센터')),
           el('span', { class: 'es-acmp-v' }, '🔧 ' + who + ' 약 ' + won(r.mkU)),
-          el('span', { class: 'es-acmp-v' }, '🚚 협력 기사 약 ' + won(r.mvU)),
-          el('span', { class: 'chip' }, Math.abs(d) < 10000 ? '비슷해요' : (d > 0 ? '협력 기사가 약 ' + won(d) + ' 저렴' : who + '가 약 ' + won(-d) + ' 저렴')));
+          el('span', { class: 'es-acmp-v' }, '🔩 사설 기사 약 ' + won(r.mvU)),
+          el('span', { class: 'chip' }, Math.abs(d) < 10000 ? '비슷해요' : (d > 0 ? '사설 기사가 약 ' + won(d) + ' 저렴' : who + '가 약 ' + won(-d) + ' 저렴')));
       })),
-      el('p', { class: 'small es-muted mb-0' }, '협력 기사 쪽은 2026 사설 시세(설치' + (inp.acGas ? '+가스' : '') + '+배관)이고 출장비 ' + josa(won(c.ac_trip), '이/가') + ' 따로예요. 제조사 공식은 조금 비싸도 정품 자재·공시 단가·하자 접수가 쉬워서 리서치도 권해요. 협력 기사는 싸지만 현장 추가요금·하자 책임이 불분명할 수 있어요.')) : null;
+      el('p', { class: 'small es-muted mb-0' }, (acMv.length ? '우리 계획의 설치비는 자금 화면 ‘에어컨 설치’ 줄(약 ' + won(acInstallAmt()) + ', 추정)이에요 — 이 금액은 시세 비교용 참고예요. ' : '') + '사설 기사 쪽은 2026 사설 시세(설치' + (inp.acGas ? '+가스' : '') + '+배관)이고 출장비 ' + josa(won(c.ac_trip), '이/가') + ' 따로예요. 제조사 공식은 조금 비싸도 정품 자재·공시 단가·하자 접수가 쉬워요. 사설 기사는 싸지만 현장 추가요금·하자 책임이 불분명할 수 있어서, 견적 문자에 추가비 항목과 A/S·보증 기간을 받아 두세요.')) : null;
     const md = D.moveDate();
     return el('section', { class: 'card es-reco tint-kid', 'aria-label': '어떻게 할까요' },
       sectionHead('🧭', '어떻게 할까요?'),
@@ -3822,7 +4017,7 @@
     if (params[0] !== tabId) { try { history.replaceState(null, '', '#/stuff/' + tabId); } catch (e) { /* 무시 */ } }
     // #/stuff/inventory/spec → 짐 목록 탭 안의 '규격 확인' 목록 (휴대폰 탭 줄이 넘치지 않게 탭을 늘리지 않음)
     const sub = tabId === 'inventory' && params[1] === 'spec' ? 'spec' : '';
-    MV.store.ensure('estimate', defaults);
+    ensureEstState();
     R = { root, tab: tabId, sub, regions: [], updaters: [], est: null, raw: null, pending: false, dirty: false };
     const myR = R;
     recompute();
