@@ -368,4 +368,44 @@
     });
     MV.seed.migrations.push({ to: 17, layouts: { new: { add: [], move, stack } } });
   }
+  /* v18(10/25 0시 48분 백업 체크포인트): 백업한 기기 기록에 남아 있던 옛 자리(v17 기본과 다른 21개 — v17 규칙이 옮기지 못한 것)를
+     v17 기본 배치로 옮겨요. 리빙박스 5개는 위 발코니 왼쪽 벽에 쌓아요. 이 자리 그대로인 배치만(다르게 옮긴 배치는 그대로) */
+  const OLD18 = {
+    'pl-new-fridge': [343, 335, 90],
+    'pl-new-washer': [331.8, 0, 180],
+    'pl-new-dryer': [0, 0, 270],
+    'pl-new-hanger': [171, 140, 270],
+    'pl-new-chair-4': [218, 310, 0],
+    'pl-new-toy': [629, 125, 90],
+    'pl-new-vanity': [0, 140, 270],
+    'pl-new-cabinet2': [0, 660, 270],
+    'pl-new-cabinet-1': [0, 740, 270],
+    'pl-new-cabinet-2': [0, 817, 270],
+    'pl-new-alex': [0, 230, 270],
+    'pl-new-desk': [0, 275, 270],
+    'pl-new-kidshelf-2': [340, 650, 270],
+    'pl-new-trolley3': [637, 585, 90],
+    'pl-new-trolley2': [637, 305, 90],
+    'pl-new-kid-desk': [610, 205, 90],
+    'pl-new-box-1': [455, 0, 0],
+    'pl-new-box-2': [508, 0, 0],
+    'pl-new-box-3': [617, 0, 0],
+    'pl-new-box-4': [565, 0, 0],
+    'pl-new-box-5': [455, 40, 0],
+  };
+  if (MV.seed && Array.isArray(MV.seed.migrations)) {
+    const move = {}, stack = {};
+    const at = (id) => ({ x: OLD18[id][0], y: OLD18[id][1], rot: OLD18[id][2] });
+    NEW.forEach(([p, size]) => {
+      if (!OLD18[p.id]) return;
+      if (STACK17[p.id]) {
+        const merge = {};
+        STACK17[p.id].merge.forEach((id) => { if (OLD18[id]) merge[id] = at(id); });
+        stack[p.id] = { from: at(p.id), set: { x: p.x, y: p.y, rot: p.rot }, merge, ifInv: size || undefined };
+        return;
+      }
+      move[p.id] = { from: at(p.id), set: { x: p.x, y: p.y, rot: p.rot }, ifInv: size || undefined };
+    });
+    MV.seed.migrations.push({ to: 18, layouts: { new: { add: [], move, stack } } });
+  }
 })();
