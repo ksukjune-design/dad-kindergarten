@@ -1714,7 +1714,7 @@
   // 통돌이 뚜껑을 열면 세탁기 위로 더 올라오는 높이 (cm) — LG T19MX7(높이 104cm)은 뚜껑 연 높이 약 135.5cm, 넉넉히 150cm (짐 목록·가이드와 같은 값)
   const LID_MIN = 32, LID_MAX = 46;
   /** 세탁기·건조기 규격을 모를 때 쓰는 값 = 새 통돌이 LG T19MX7 19kg(63.2×67×104cm, 10/7 링크) · 가져가는 삼성 그랑데 AI 2021년형 건조기(68.6×87.6×98.4cm, 깊이 추정) */
-  const WASHER_DEF = { w: 63.2, d: 67, h: 104 };
+  const WASHER_DEF = { w: 63.2, d: 67, h: 101.8 }; // LG T17MX3 17kg (10/24 정함)
   const DRYER_DEF = { w: 68.6, d: 87.6, h: 98.4 };
   function laundryCheck(plan, room, washer, dryer, m) {
     const checks = [];
@@ -3610,8 +3610,8 @@
             el('button', { type: 'button', class: 'btn btn-sm fp-b', onclick: () => ui.invEditor(null, { defaults: preset }) }, '+ ' + label + ' 추가')]);
       laundry.appendChild(el('div', { class: 'fp-wd' },
         // 짐 목록에 없을 때 넣는 기본값 = 가족 결정(10/6·10/7): 새 통돌이 LG T19MX7 19kg(이사 뒤 11/4~11/6 배송) · 가져가는 삼성 그랑데 AI 건조기(이삿짐센터)
-        appliance(washer, '세탁기', { name: '통돌이 세탁기 (구매 예정, LG 19kg)', cat: 'appliance', tag: 'washer', fate: 'buy', w: WASHER_DEF.w, d: WASHER_DEF.d, h: WASHER_DEF.h, roomNew: room ? room.name : '다용도실', assumed: true,
-          note: '약 50만원, 이사 뒤 11/4~11/6 배송. 크기는 LG 통돌이 19kg T19MX7(63.2×67×104cm) — 다른 모델을 사면 그 규격으로 바꿔 주세요. 뚜껑을 열면 바닥에서 약 135.5cm까지 올라가요.' }),
+        appliance(washer, '세탁기', { name: '통돌이 세탁기 (구매 예정, LG T17MX3 17kg)', cat: 'appliance', tag: 'washer', fate: 'buy', w: WASHER_DEF.w, d: WASHER_DEF.d, h: WASHER_DEF.h, roomNew: room ? room.name : '다용도실', assumed: true,
+          note: '약 52만원(11번가 LG 공식 521,000원), 이사 뒤 11/4~11/6 배송. 크기는 LG 통돌이 T17MX3 17kg(63.2×67×101.8cm). 뚜껑을 열면 바닥에서 약 135cm까지 올라가요(추정).' }),
         appliance(dryer, '건조기', { name: '건조기 (삼성 그랑데 AI)', cat: 'appliance', tag: 'dryer', fate: 'move', w: DRYER_DEF.w, d: DRYER_DEF.d, h: DRYER_DEF.h, roomNew: room ? room.name : '다용도실', brand: '삼성', lg: false,
           note: '이삿짐센터가 옮겨요(물통·배수호스 물 빼고 세워서). 통돌이 위에는 올릴 수 없어 나란히 놓아요.' })));
       if (!room) return;

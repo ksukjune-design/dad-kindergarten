@@ -466,7 +466,8 @@
             + ' — 까닭은 각 항목 메모에 있어요(아직 남은 일이면 체크를 풀면 돼요).');
         }
       }
-      // 기본 항목 지우기: { removeItems: [id | { id, keepNote? }] }
+      // 기본 항목 지우기: { removeItems: [id | { id, keepNote? } | { id, force: true }] }
+      //  · force: 가족이 '모두 지워 줘'라고 한 항목 — 완료·메모·고친 것과 상관없이 지워요 (예: v11 취학 항목)
       //  · id(글자): 완료 표시도 메모도 없는 기본 항목을 지워요 (예전 버전 규칙 그대로)
       //  · { id, keepNote }: 손대지 않은 기본 항목(완료·메모 없음, 한 번도 고치지 않았거나 글이 직전 기본값 그대로 — itemsFrom)만
       //    지워요. 손댄 항목은 남기고, 완료가 아니면 keepNote 를 메모로 한 번 더해요(지울지 사용자가 정하게 — 메모 id 고정이라
@@ -479,10 +480,11 @@
         const idx = state.items.findIndex((x) => x.id === iid);
         if (idx < 0) return;
         const it = state.items[idx];
-        if (!it.seed || it.done) return;
+        const force = strict && r.force === true;
+        if (!it.seed || (it.done && !force)) return;
         const hasNotes = !!(it.notes && it.notes.length);
         const touched = hasNotes || (strict && !(it.updatedAt === it.createdAt || (prev.has(iid) && prev.get(iid).has(itemPrint(it)))));
-        if (!touched) {
+        if (!touched || force) {
           state.items.splice(idx, 1);
           state.meta.deletedSeed = state.meta.deletedSeed || [];
           if (state.meta.deletedSeed.indexOf(iid) < 0) state.meta.deletedSeed.push(iid);

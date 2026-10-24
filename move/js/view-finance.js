@@ -356,7 +356,7 @@
   const GROUPS = [
     { id: 'essential', icon: '🚚', label: '꼭 드는 이사 비용', short: '꼭 드는 비용', what: '이사 날 전후로 반드시 나가는 돈 — 11/3 남는 돈으로 낼 수 있어야 해요. 이미 낸 이사업체 계약금(10만원)은 아직 낼 돈에서 빠져요',
       desc: '이사 날 전후로 반드시 나가는 돈이에요 (이사업체 잔금 — 아정당, 냉장고·건조기·에어컨 운반 포함, 에어컨 설치 — 별도 기사, 엘리베이터 사용료, 대형폐기물, 인터넷 이전). 이미 낸 계약금은 빼고 셈해요. 11/3에 남는 돈으로 이걸 낼 수 있는지가 가장 중요해요.' },
-    { id: 'purchase', icon: '🛒', label: '새로 사는 살림', short: '살림 구입', what: '새로 사는 물건 — 고장 난 세탁기 대신 통돌이(약 50만원, 이사 후 배송), (필요하면) 이동식 행거·보관용품. 커튼·소품은 지금 것을 가져가요',
+    { id: 'purchase', icon: '🛒', label: '새로 사는 살림', short: '살림 구입', what: '새로 사는 물건 — 고장 난 세탁기 대신 통돌이(LG T17MX3, 약 52만원, 이사 후 배송), (필요하면) 이동식 행거·보관용품. 커튼·소품은 지금 것을 가져가요',
       desc: '이사비가 아니라 새로 사는 물건이에요. 고장 난 세탁기 대신 통돌이 세탁기(약 50만원)를 이사 후 11/4~11/6에 배송받아요. (필요하면) 이동식 행거·보관용품은 지금 간이옷장이 모자랄 때만 사요(0원으로 잡음). 커튼·소품은 지금 것을 가져가서 0원이에요. 카드 할부로 나눠 낼 수도 있어요.' },
     { id: 'optional', icon: '🗂', label: '선택·나중에', short: '선택·나중에', what: '이사 뒤에 정하거나 내는 돈 — 간이 옷장(이사 후 실측하고 구매), HUG 보증료(전입 후 11월 중 가입할 때)',
       desc: '이사 뒤에 정해도 되는 돈이에요. 간이 옷장(약 20만원, 추정)은 이사 후 실측하고 이케아 등에서 사고, HUG 보증료는 전입·확정일자 뒤 11월 중 가입할 때 내요. 11/3 현금에는 넣지 않아요.' },
@@ -389,6 +389,9 @@
   const MOVER_MEMO = '총 190만원 = 계약금 10만원(냈음) + 잔금 180만원. 짐을 다 내리고 점검한 뒤 이체, 이체 내역 보관';
   const MOVER_DEPOSIT_MEMO = '10/8까지 냄 (총 190만원 중)';
   const AC_MEMO = '추정 — 설치 기사 견적 받으면 고치기, 배관 연장·진공·가스 보충 추가비 확인';
+  /* 통돌이 (10/24 모델 정함 — v11) */
+  const WASHER_LABEL = '통돌이 세탁기 LG T17MX3 17kg (이사 후 배송)';
+  const WASHER_MEMO = '11번가 LG전자 공식 521,000원(쿠폰 다 쓰면 502,460원) · 11/4~11/6 배송으로 주문';
   const DEFAULT_LINES = [
     { id: 'mover', label: '이사업체 잔금 — 아정당 (11/3 현금이체, 부가세 없음)', amount: MOVER_CONTRACT.balance, auto: false, date: MOVER_CONTRACT.balanceDate, group: 'essential', memo: MOVER_MEMO },
     { id: 'mover-deposit', label: '이사업체 계약금 — 아정당 (냈음)', amount: MOVER_CONTRACT.deposit, auto: false, paid: true, date: MOVER_CONTRACT.depositDate, group: 'essential', memo: MOVER_DEPOSIT_MEMO },
@@ -397,7 +400,7 @@
     { id: 'waste', label: '대형폐기물 스티커', amount: 50000, group: 'essential' },
     { id: 'elevator', label: '엘리베이터 사용료 (두 단지)', amount: 200000, group: 'essential' },
     { id: 'internet', label: '인터넷 이전설치', amount: 36000, group: 'essential' },
-    { id: 'washer', label: '통돌이 세탁기 (이사 후 배송)', amount: 500000, group: 'purchase', memo: '11/4~11/6 배송으로 주문' },
+    { id: 'washer', label: WASHER_LABEL, amount: 521000, group: 'purchase', memo: WASHER_MEMO },
     { id: 'wardrobe-extra', label: '이동식 행거·보관용품 (필요하면, 이사 전)', amount: 0, group: 'purchase', memo: "살 때만 금액을 넣어요. 그만큼 '간이 옷장 (이사 후)' 줄에서 빼요" },
     { id: 'wardrobe', label: '간이 옷장 (이사 후, 이케아 등)', amount: 200000, group: 'optional', memo: '이사 후 실측하고 구매. 이사 전에 이동식 행거·보관용품을 샀다면 그만큼 빼요' },
     { id: 'hug', label: '전세보증금반환보증 보증료 (HUG 2년)', amount: 684800, group: 'optional' },
@@ -522,8 +525,19 @@
      8: 제조사 서비스를 '삼성 에어컨 (이사 전)' 줄과 '제조사 서비스 이전 (LG 등, 이사 날)' 줄로 나눔 — 새 줄만 더함 (V7_NEW_LINES),
      9: 장기수선충당금 줄 이름을 '11/3 보증금과 함께 받기'로 (10/7) — 옛 기본 이름·금액 그대로이고 받음·메모가 없는 줄만.
         받음(got)으로 표시한 들어올 돈은 남는 돈 계산(net·netEssential·netWithPurchases)에 더해요 — 받기 전에는 넣지 않음,
-     10: 이사업체 계약 확정(아정당 잔금 180만원 + 계약금 10만원 냄)·에어컨 설치(별도 기사 40만원, 이사 뒤) — 확정값 덮어쓰기(migrateV10) */
-  const FIN_V = 10;
+     10: 이사업체 계약 확정(아정당 잔금 180만원 + 계약금 10만원 냄)·에어컨 설치(별도 기사 40만원, 이사 뒤) — 확정값 덮어쓰기(migrateV10),
+     11: 통돌이 모델 정함(10/24 LG T17MX3, 521,000원) — 안 고친 통돌이 줄만 (migrateV11) */
+  const FIN_V = 11;
+  /* v11: 기본값 그대로(50만원)인 통돌이 줄만 새 모델 값으로 — 이름·메모도 옛 기본 그대로일 때만 바꿈 */
+  function migrateV11(lines) {
+    return lines.map((l) => {
+      if (!l || l.id !== 'washer' || num(l.amount) !== 500000) return l;
+      const o = Object.assign({}, l, { amount: 521000 });
+      if (l.label === '통돌이 세탁기 (이사 후 배송)') o.label = WASHER_LABEL;
+      if (!l.memo || l.memo === '11/4~11/6 배송으로 주문') o.memo = WASHER_MEMO;
+      return o;
+    });
+  }
   /* 저장된 11/3 단계 시각 중 예전 기본값 그대로인 것만 새 기본 시각으로 (고친 시각은 그대로).
      고친 시각과 섞여 단계 순서가 새로 뒤바뀌면(앞 단계보다 빨라짐) 이 기록은 통째로 그대로 둠 */
   function timeAt(t, id) { return t && typeof t[id] === 'string' ? t[id] : (DEFAULT_TIMES[id] || ''); }
@@ -610,6 +624,8 @@
     if (rawV < 8) raw = addMissingLines(raw, V7_NEW_LINES);
     /* v10: 이사업체 계약(아정당)·에어컨 설치(별도 기사) 확정값 — 고친 줄이어도 덮어쓰고 메모만 지킴, 계약금 줄은 없을 때만 더함 */
     if (rawV < 10) raw = migrateV10(raw);
+    /* v11: 통돌이 LG T17MX3 (521,000원) — 50만원 기본값 그대로인 줄만 */
+    if (rawV < 11) raw = migrateV11(raw);
     f.budget.lines = raw.map(normLine);
     f.v = Math.max(rawV, FIN_V);
     f.budget.refunds = (Array.isArray(f.budget.refunds) ? f.budget.refunds : []).filter((x) => x && typeof x === 'object').map(normRefund);
