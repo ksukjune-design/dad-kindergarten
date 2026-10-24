@@ -343,6 +343,33 @@
     });
     return done;
   }
+  /* 가족이 남긴 메모 되살리기 (migrations 의 itemNotes: { 항목id: [{ id, text, at }] } · onlyCreated? 는 completeItems 와 같음)
+     · 그 항목이 있을 때만 — 같은 메모 id 나 같은 글이 이미 있으면 다시 더하지 않음(두 기기가 같이 맞춰도 한 번). 지운 항목은 되살리지 않음
+     · 메모 id·시각이 정해진 값이라 공유 기록에서 글자 하나까지 같아요. 고친 시각(updatedAt)은 completeItems 와 같은 규칙
+     → 메모를 더한 항목 수 */
+  function addSeedNotes(state, m, seed) {
+    if (!m.itemNotes) return 0;
+    if (Array.isArray(m.onlyCreated) && !m.onlyCreated.includes(String((state.meta && state.meta.createdAt) || ''))) return 0;
+    const at = seedAt(seed);
+    let k = 0;
+    Object.keys(m.itemNotes).forEach((iid) => {
+      const it = (state.items || []).find((x) => x && x.id === iid);
+      if (!it) return;
+      let added = false;
+      (Array.isArray(m.itemNotes[iid]) ? m.itemNotes[iid] : [m.itemNotes[iid]]).forEach((nt) => {
+        const text = String((nt && nt.text) || '').trim();
+        if (!nt || !nt.id || !text) return;
+        if (!Array.isArray(it.notes)) it.notes = [];
+        if (it.notes.some((x) => x && (x.id === nt.id || String(x.text || '').trim() === text))) return;
+        it.notes.push({ id: String(nt.id), text, at: typeof nt.at === 'string' && nt.at ? nt.at : ruleDay(m, seed) });
+        added = true;
+      });
+      if (!added) return;
+      if (!(typeof it.updatedAt === 'string' && it.updatedAt > at)) it.updatedAt = at;
+      k++;
+    });
+    return k;
+  }
   function freshState() {
     const seed = MV.seed || { version: 0, parts: [], items: [], inventory: [] };
     const now = MV.nowISO();
@@ -360,6 +387,7 @@
     };
     // 이미 끝난 일(migrations 의 completeItems — 예: 10/8 이사업체 계약)은 새로 여는 기기에서도 완료로 (기록이 있는 기기와 같은 모습)
     (seed.migrations || []).forEach((m) => { if (m && m.completeItems && m.to <= (seed.version || 0)) completeSeedItems(st, m, seed); });
+    (seed.migrations || []).forEach((m) => { if (m && m.itemNotes && m.to <= (seed.version || 0)) addSeedNotes(st, m, seed); });
     return st;
   }
   /* 도면 배치가 바닥에서 차지하는 사각형 (view-floorplan 의 foot·rectOf 와 같은 규칙, 벽걸이 에어컨은 null)
@@ -468,6 +496,8 @@
         ['name', 'emoji', 'group', 'desc', 'guide'].forEach((k) => { if (sp[k] !== undefined) p[k] = sp[k]; });
         n++;
       });
+      // 가족 메모 되살리기: { itemNotes: { id: [{ id, text, at }] } } (addSeedNotes 머리말)
+      n += addSeedNotes(state, m, seed);
       // 이미 끝난 일을 완료로: { completeItems: { id: '메모 한 줄' }, doneAt?: 'YYYY-MM-DD' } (completeSeedItems 머리말)
       if (m.completeItems) {
         const done = completeSeedItems(state, m, seed);
