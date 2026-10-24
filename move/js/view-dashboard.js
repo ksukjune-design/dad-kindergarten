@@ -696,7 +696,7 @@ button.db-wk-head:hover { background:var(--bg-3); }
       el('span', { 'aria-hidden': 'true' }, '⏰'),
       el('span', '그중 ', el('b', MV.fmt.krw(amount)), '은 이사 전에 지금 통장에서 나가요' + (what ? ' (' + what + ')' : '')));
   }
-  // '이사비 190만원 확정 — 계약금 10만원은 냈고(빠짐), 잔금 180만원은 11/3' — 낸 돈을 꼭 필요한 현금에 다시 넣지 않았다고 알려 줌
+  // '이사비 190만원 확정 — 계약금 10만원은 현금으로 냈고(빠짐), 잔금 180만원은 11/3' — 낸 돈을 꼭 필요한 현금에 다시 넣지 않았다고 알려 줌
   function moverNote(mv, when) {
     if (!mv || !isNum(mv.total) || !(mv.total > 0)) return null;
     const paid = isNum(mv.paid) ? mv.paid : 0;

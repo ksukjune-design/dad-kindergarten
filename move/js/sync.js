@@ -1010,7 +1010,15 @@
     unreachable: ['⚠', '공유 저장소에 연결하지 못했어요 — 지금은 이 기기에만 저장돼요'],
     error: ['⚠', '공유 저장소 오류'],
     login: ['🔑', '로그인하면 부부가 같은 기록을 봐요'],
+    local: ['💾', '이 브라우저에만 저장 중 — 함께 쓰기에 연결되지 않았어요. 눌러서 확인하세요'],
   };
+  /* 'local'(연결 안 됨) 칩: 깃허브 페이지 버전에서 이 브라우저에 함께 쓰기 설정이 없을 때(파이어베이스 off)나
+     클로드 공유 버전에서 공유 저장소를 못 쓸 때만 — 설정이 있으면 곧 연결 중·로그인 칩으로 바뀌니 깜빡이지 않게 숨김 */
+  function localChip() {
+    if (Y.backend === 'claude') return true;
+    const fb = MV.fb;
+    return !!(fb && fb.available && fb.state === 'off');
+  }
   /** ⋯ 메뉴 '함께 쓰기' 칸에 쓸 긴 설명 (app.js 에 아직 없는 상태만) */
   Y.statusText = function statusText(st) {
     st = st || Y.status;
@@ -1042,7 +1050,7 @@
     const top = document.querySelector('.topbar');
     if (!top) return;
     let chip = document.getElementById('sync-chip');
-    const info = CHIP[Y.status];
+    const info = Y.status === 'local' && !localChip() ? null : CHIP[Y.status];
     if (!info) { if (chip) chip.remove(); return; }
     if (!chip) {
       chip = document.createElement('button');
@@ -1106,7 +1114,7 @@
   }
   async function connect() {
     const c = global.claude;
-    if (!c || typeof c.use !== 'function') return; // GitHub Pages 등: sync-firebase.js 가 따로 붙임 (설정 전에는 이 기기만)
+    if (!c || typeof c.use !== 'function') return; // GitHub Pages 등: sync-firebase.js 가 따로 붙임 (설정 전에는 이 기기만 — 'fb' 알림으로 '이 브라우저에만' 칩)
     Y.backend = 'claude';
     Y.mode = 'connecting';
     setStatus('connecting');
@@ -1212,6 +1220,7 @@
   S.afterPersist.push(diffAndWrite);
   S.afterPersist.push(saveBaseSoon);
   S.on('sync', saveBaseSoon);         // 서버 내용(srv)이 바뀐 뒤 (쓰기 확인·받은 변경)
+  S.on('fb', () => { if (Y.status === 'local') renderChip(); }); // 함께 쓰기 설정이 없다고 알게 되면 '이 브라우저에만' 칩
   // 연결 안 된 동안 '처음부터 다시'·백업 복원(이 기기만이라고 안내함) → 다시 연결되면 합치지 않고 공유 기록으로 맞춤
   S.on('change', (e) => {
     if (e && e.reset && (e.log === 'reset' || e.log === 'import') && Y.mode !== 'shared' && baseId) { srv.clear(); hist.clear(); clearSeedPre(); saveBaseSoon(); }
@@ -1221,7 +1230,7 @@
   MV.css('sync', `
     .sync-chip { flex: 0 0 auto; padding: 0 8px; font-size: 1rem; }
     .sync-chip[data-status="offline"], .sync-chip[data-status="error"], .sync-chip[data-status="partial"],
-    .sync-chip[data-status="revoked"], .sync-chip[data-status="unreachable"] { color: var(--warn); }
+    .sync-chip[data-status="revoked"], .sync-chip[data-status="unreachable"], .sync-chip[data-status="local"] { color: var(--warn); }
   `);
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => { connect(); });
   else setTimeout(connect, 0);
