@@ -43,6 +43,7 @@
             이 화면에서 연 창(방·크기·확인)은 화면을 떠나면(뒤로 가기 포함) 함께 닫힘
    제공     MV.calc.planSummary() → { new:{placed,needed,bad,warn}, old:{...}, closet:{...} }
             MV.calc.planUse(key) → { margin, rows:[가구별 쓰임 공간·확보 여부], msgs } · MV.calc.useOf(짐) · MV.calc.USE_DEFAULTS
+            MV.calc.plan3d(key) → 3D 보기용 도면·배치 자료 (view-plan3d.js)
    ============================================================ */
 (function () {
   'use strict';
@@ -2683,6 +2684,8 @@
       syncStageMode(); refresh();
     }, { 'aria-pressed': 'false', title: '방 치수 고치기 · 방 그리기/삭제 · 문 추가/삭제 · 전체 크기' });
     const bExport = btn('⬇ 이미지 저장', () => doExport(), { title: '그림 파일로 저장' });
+    // 3D 보기 (view-plan3d.js) — 고치기는 이 2D 도면에서, 3D 는 보기만
+    const b3d = MV.plan3d ? btn('🧊 3D로 보기', () => MV.plan3d.open(key), { title: '지금 배치를 입체로 돌려 보기 (고치기는 2D 도면에서)' }) : null;
     const bUse = btn('🧭 쓰임 공간', () => { setPref('useView', !prefs().useView); refresh(); },
       { 'aria-pressed': 'true', title: '서랍·문·앉는 자리처럼 가구를 쓸 때 필요한 공간을 빗금으로 보기' });
     const selMargin = el('select', { class: 'select fp-msel', 'aria-label': '오차 여유 (가구 둘레에 비워 둘 거리)', title: '실측 오차를 흡수하려고 가구 둘레에 비워 둘 거리 — 점선 상자로 보여요' },
@@ -2697,7 +2700,7 @@
         btn('맞춤', () => setZoom(1), { title: '화면에 맞추기' }),
         btn('+', () => setZoom(curZoom() * 1.25), { class: 'btn fp-b btn-icon', 'aria-label': '확대' }),
         zoomV),
-      bGrid, bSnap, bUse, marginBox, bEdit, bBg, bExport);
+      b3d, bGrid, bSnap, bUse, marginBox, bEdit, bBg, bExport);
     if (headRow) headRow.appendChild(tb);
     const chips = el('div', { class: 'fp-chips' });
     const bgBar = el('div', { class: 'fp-bgbar', role: 'region', 'aria-label': PLAN_LABEL[key] + ' 평면도 사진' });
@@ -5199,6 +5202,39 @@
         msgs: v.msgs.map((m) => ({ level: m.level, kind: m.kind || '', text: m.text, pid: m.pid })),
       };
     } catch (e) { console.error('[plan] use', e); return null; }
+  };
+  /**
+   * 3D 보기용 도면 자료 (view-plan3d.js) — 2D 도면과 같은 값(실측 수정·배치 그대로)을 넘겨요.
+   * MV.calc.plan3d('new') → { key, name, width, depth, bounds, rooms, doors:[{x,y,w,v,gap}], openings, windows, fixtures,
+   *                          items:[{ pid, invId, name, cat, tag, fate, rot, x, y, w, h, hgt, dw, dd, wall, room, url, front }] } | null
+   */
+  MV.calc.plan3d = function plan3d(key) {
+    key = key === 'old' ? 'old' : 'new';
+    try {
+      initState();
+      const plan = getPlan(key);
+      if (!plan) return null;
+      const inv = invMap();
+      const items = [];
+      pls(key).forEach((p) => {
+        const it = inv.get(p.invId);
+        if (!it || !eligible(key, it)) return;
+        const rot = rotOf(p), r = rectOf(p, it);
+        items.push({ pid: p.id, invId: it.id, name: String(it.name || ''), cat: String(it.cat || 'misc'), tag: String(it.tag || ''), fate: fateOf(it),
+          rot, x: r.x, y: r.y, w: r.w, h: r.h, dw: Math.max(5, num(it.w, 60)), dd: Math.max(5, num(it.d, 60)),
+          hgt: Math.max(3, num(it.h, 0) || 60), wall: wallMounted(it), img: typeof it.img === 'string' ? it.img : '',
+          room: String(it[roomField(key)] || ''), url: typeof it.url === 'string' ? it.url : '', front: FRONT_WORD[rot] });
+      });
+      return {
+        key, name: plan.name, width: plan.width, depth: plan.depth, bounds: plan.bounds,
+        rooms: plan.rooms.filter((r) => r.w > 0 && r.h > 0).map((r) => ({ id: r.id, name: r.name, kind: r.kind, x: r.x, y: r.y, w: r.w, h: r.h })),
+        doors: plan.doors.map((d) => { const g = doorGeom(d); return { x: num(d.x, 0), y: num(d.y, 0), w: g.w, v: d.orientation === 'v', swing: d.swing, hinge: d.hinge, open: g.open, hingeAt: g.hinge }; }),
+        openings: plan.openings.map((o) => ({ x: num(o.x, 0), y: num(o.y, 0), w: Math.max(0, num(o.width, 0)), v: o.orientation === 'v' })),
+        windows: plan.windows.map((w) => ({ x: num(w.x, 0), y: num(w.y, 0), w: Math.max(0, num(w.length, 0)), v: w.orientation === 'v', note: String(w.note || '') })),
+        fixtures: plan.fixtures.map((f) => Object.assign({ kind: String(f.kind || ''), name: String(f.name || '') }, fxRect(f))).filter((f) => f.w > 0 && f.h > 0),
+        items,
+      };
+    } catch (e) { console.error('[plan] 3d', e); return null; }
   };
   /** 짐 하나의 쓰임 공간 (짐의 use, 없으면 기본값표) — 짐 목록·가이드에서 같은 값을 쓰도록 */
   MV.calc.useOf = (it) => { const u = useOf(it); return u ? Object.assign({}, u, { label: USE_LABEL[u.kind], summary: useSummary(u) }) : null; };
