@@ -15,6 +15,9 @@ open(os.path.join(OUT, 'page.html'), 'w', encoding='utf-8').write(page)
 files = {'css/app.css': os.path.join(ROOT, 'css/app.css'), 'icon.svg': os.path.join(ROOT, 'icon.svg')}
 for s in scripts:
     files[s] = os.path.join(ROOT, s)
+# 3D 보기가 처음 열 때 불러오는 three.js (move/vendor/)
+for v in ('vendor/three-r147.min.js', 'vendor/three-r147-orbit.js'):
+    files[v] = os.path.join(ROOT, v)
 for k, v in files.items():
     assert os.path.exists(v), v
 json.dump(files, open(os.path.join(OUT, 'files.json'), 'w'), ensure_ascii=False, indent=1)

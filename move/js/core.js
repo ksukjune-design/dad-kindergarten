@@ -378,7 +378,10 @@
     const h = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
     return w > 1 && h > 1;
   }
+  /** 배치 하나에 쌓은 개수 (리빙박스처럼 쌓는 짐 — placement.n, 없으면 1) */
+  const plN = (p) => { const v = Math.round(+(p && p.n)); return v >= 2 ? Math.min(v, 99) : 1; };
   /** 이 짐(invId)의 배치가 개수(qty)보다 많으면 남는 것을 모든 도면에서 빼요 → 뺀 수.
+      쌓은 배치는 개수(n)대로 세고, 쌓은 것부터 하나씩 내려요.
       v7 기본 배치(pl-new-*·pl-old-*)가 아닌 것부터, 나중에 놓은 것(배열 뒤)부터 */
   function trimPlacements(state, iid, qty) {
     if (!state.layouts || typeof state.layouts !== 'object') return 0;
@@ -387,14 +390,16 @@
       const L = state.layouts[lk];
       if (!L || !Array.isArray(L.placements)) return;
       const mine = L.placements.filter((p) => p && p.invId === iid);
-      let extra = mine.length - Math.max(0, qty);
+      let extra = mine.reduce((s, p) => s + plN(p), 0) - Math.max(0, qty);
       if (extra <= 0) return;
       const isSeedPl = (p) => /^pl-(new|old)-/.test(String(p.id || ''));
       const order = mine.slice().reverse().sort((a, b) => (isSeedPl(a) ? 1 : 0) - (isSeedPl(b) ? 1 : 0));
       const drop = new Set();
-      order.forEach((p) => { if (extra > 0) { drop.add(p); extra--; } });
+      order.forEach((p) => {
+        while (extra > 0 && plN(p) > 1) { p.n = plN(p) - 1; if (p.n < 2) delete p.n; extra--; cut++; }
+        if (extra > 0) { drop.add(p); extra--; cut++; }
+      });
       L.placements = L.placements.filter((p) => !drop.has(p));
-      cut += drop.size;
     });
     return cut;
   }
@@ -666,6 +671,29 @@
           moved.add(p.id);
           n++;
         });
+        // stack: 쌓는 짐(리빙박스)을 한 자리에 쌓기 — { 배치id: { from, set, merge: { 합칠 배치id: {x,y,rot}, … }, ifInv? } }
+        //  · 그 배치와 합칠 배치가 모두 아직 기본 자리에 한 개씩(쌓지 않은 채) 있을 때만 — 하나라도 옮겼거나 없으면 그대로 둬요
+        //  · 쌓을 자리(set)에 다른 짐(이 규칙이 합치는 배치 말고)이 있으면 그대로 둬요
+        const stackIds = new Set();
+        Object.keys(rule.stack || {}).forEach((pid) => { stackIds.add(pid); Object.keys((rule.stack[pid] || {}).merge || {}).forEach((id) => stackIds.add(id)); });
+        Object.keys(rule.stack || {}).forEach((pid) => {
+          const sk = rule.stack[pid] || {};
+          const p = pls.find((x) => x && x.id === pid);
+          const it = p && invOf(p.invId);
+          if (!p || !it || !sk.from || !sk.set || plN(p) !== 1 || !same(p, sk.from) || !sizeOk(it, sk.ifInv)) return;
+          const mates = Object.keys(sk.merge || {}).map((id) => ({ id, at: sk.merge[id], q: pls.find((x) => x && x.id === id) }));
+          if (mates.some((m2) => !m2.q || m2.q.invId !== p.invId || plN(m2.q) !== 1 || !same(m2.q, m2.at))) return;
+          const r = rectOfPl({ x: sk.set.x, y: sk.set.y, rot: plRot(sk.set.rot) }, it);
+          if (r && pls.some((x) => x && !stackIds.has(x.id) && (() => { const o = rectOfPl(x, invOf(x.invId)); return o && rectHit(r, o); })())) {
+            kept.push(String(it.name || p.invId).slice(0, 24));
+            return;
+          }
+          p.x = sk.set.x; p.y = sk.set.y; p.rot = plRot(sk.set.rot);
+          if (mates.length) p.n = 1 + mates.length;
+          mates.forEach((m2) => { const i = pls.indexOf(m2.q); if (i >= 0) pls.splice(i, 1); });
+          moved.add(pid);
+          n++;
+        });
         if (kept.length) noteOnce('seed-v' + m.to + '-keep-' + key, '도면 초안 자리에 다른 짐이 있어 옮기지 않았어요(지금 자리 그대로): ' + kept.join(', ') + '.');
         // 정면 뜻이 생기기 전에 놓은 배치(초안이 옮기지 않은 것)는 등을 댄 벽을 보고 정면을 한 번 정해요
         if (rule.fixFront) {
@@ -688,7 +716,7 @@
             if (!t || (at && !same(t, at))) { if (!t && blocked.has(pl.needs)) skip(pl, it); return; }
           }
           const qty = Math.max(0, Math.round(+it.qty || 0));
-          if (pls.filter((x) => x && x.invId === pl.invId).length >= qty) return;
+          if (pls.filter((x) => x && x.invId === pl.invId).reduce((t, x) => t + plN(x), 0) >= qty) return;
           const np = { id: pl.id, invId: pl.invId, x: pl.x, y: pl.y, rot: plRot(pl.rot) };
           const r = rectOfPl(np, it);
           if (r && pls.some((x) => { const o = x && rectOfPl(x, invOf(x.invId)); return o && rectHit(r, o); })) { skip(pl, it); return; }
