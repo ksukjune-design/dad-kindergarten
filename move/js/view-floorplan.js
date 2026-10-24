@@ -3599,7 +3599,7 @@
       const pick = (it) => (it ? [it.id, it.name, it.note, it.w, it.d, it.h, it.fate] : null);
       const sg = [validRooms(plan).map((r) => [r.id, r.name, r.kind, r.x, r.y, r.w, r.h]), room && room.id, !!chosen, pick(washer), pick(dryer), cands.map((r) => r.id),
         plan.fixtures.map((f) => [f.x, f.y, f.w, f.h]), plan.doors.map((d) => d._key + d.width + d.swing), plan.openings.length, marginNow(),
-        [washer, dryer].map((it) => (it ? JSON.stringify(useOf(it)) : ''))];
+        [washer, dryer].map((it) => (it ? JSON.stringify(useOf(it)) : '')), laundryHome(washer, dryer).map((s) => s.off)];
       if (!changed('laundry', sg) && !force) return;
       laundry.textContent = '';
       const res = room && washer && dryer ? laundryCheck(plan, room, washer, dryer, marginNow()) : null;
@@ -3633,9 +3633,45 @@
       laundry.appendChild(el('div', { class: 'small strong mt-8' }, '💡 이렇게 해 보세요'));
       laundry.appendChild(el('ul', { class: 'fp-sugg' }, res.sugg.map((s) => el('li', s))));
       const noSpot = !res.spot;
+      // 기본 배치(가족 배치 그림) 자리에서 옮겨졌으면 한 번에 되돌리기 — 이때는 이 버튼을 앞세움
+      const home = laundryHome(washer, dryer);
+      const offHome = home.some((h) => h.off);
       laundry.appendChild(el('div', { class: 'row mt-12' },
-        el('button', { type: 'button', class: 'btn fp-b ' + (noSpot ? '' : 'btn-primary'), onclick: () => placeLaundry(room, washer, dryer) }, '📐 ' + room.name + '에 ' + (noSpot ? '그래도 ' : '') + '놓아보기'),
+        el('button', { type: 'button', class: 'btn fp-b ' + (noSpot || offHome ? '' : 'btn-primary'), onclick: () => placeLaundry(room, washer, dryer) }, '📐 ' + room.name + '에 ' + (noSpot ? '그래도 ' : '') + '놓아보기'),
         noSpot ? el('span', { class: 'tiny muted' }, '자리가 없어 겹쳐 놓일 수 있어요') : null));
+      if (offHome) {
+        laundry.appendChild(el('div', { class: 'row mt-8' },
+          el('button', { type: 'button', class: 'btn fp-b btn-primary', onclick: () => backHome(home) }, '↩ 기본 배치 자리로'),
+          el('span', { class: 'tiny muted' }, '지금 자리가 기본 배치(10/24 저녁 가족 배치 그림)와 달라요')));
+      }
+    }
+    /** 세탁기·건조기의 기본 배치 자리(data-layouts.js 새 집 기본 배치)와 지금 자리가 다른지 */
+    function laundryHome(washer, dryer) {
+      const S = (MV.seedLayouts && MV.seedLayouts.new && MV.seedLayouts.new.placements) || [];
+      return [washer, dryer].map((it) => {
+        const s = it && S.find((z) => z.invId === it.id);
+        if (!s) return null;
+        const o = cur.items.find((x) => x.it.id === it.id);
+        return { it, s, off: !o || o.p.x !== s.x || o.p.y !== s.y || o.p.rot !== s.rot };
+      }).filter(Boolean);
+    }
+    function backHome(home) {
+      let firstId = null;
+      MV.store.update((st) => {
+        const P = layoutsOf(st).new.placements;
+        home.forEach(({ it, s }) => {
+          let p = P.find((z) => z.invId === it.id);
+          if (p) Object.assign(p, { x: s.x, y: s.y, rot: s.rot });
+          else { p = { id: MV.uid('pl'), invId: it.id, x: s.x, y: s.y, rot: s.rot }; P.push(p); }
+          if (!firstId) firstId = p.id;
+          const iv = (st.inventory || []).find((z) => z.id === it.id);
+          const sv = ((MV.seed && MV.seed.inventory) || []).find((z) => z.id === it.id);
+          if (iv && sv && sv.roomNew) iv.roomNew = sv.roomNew;
+        });
+        sel = firstId;
+      }, { log: '📐 세탁기·건조기를 기본 배치 자리로' });
+      toast('세탁기·건조기를 기본 배치 자리로 옮겼어요', { action: window.innerWidth < 1100 ? { label: '보기', onClick: revealSel } : null });
+      if (window.innerWidth >= 1100) revealSel();
     }
     /** 예전 방식(벽 쪽 한 줄로 단순 배치) — 문·고정물 때문에 laundrySpot 이 자리를 못 찾을 때만 */
     function simplePair(plan, room, washer, dryer) {
