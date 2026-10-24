@@ -145,6 +145,79 @@
     f.classList.add('has-photo');
     f.appendChild(img);
   }
+  /* ---------------- 문·서랍 열기 (열림 보기) ----------------
+     it.open = { kind, need(정면 쓰임 공간 cm), free(벽·다른 가구·설비에 닿기 전까지 열 수 있는 cm), by(처음 닿는 것), top }
+     · 여닫이(hinged)·앞문(front-door): 문짝을 경첩에서 바깥으로 — 앞이 free 만큼만 비면 그만큼만(조금) 열어요(θ = asin(free / 문짝 폭))
+       문짝 수: 정면 쓰임 공간이 폭의 절반보다 크면 한 짝(건조기), 아니면 두 짝(옷장·냉장고 양문)
+     · 서랍(drawer): 위 서랍 하나를 free 만큼 빼요(장난감장은 수납함 한 칸)
+     · 뚜껑(lid): 통돌이 뚜껑을 뒤쪽 경첩에서 위로
+     · 의자(seat): 닫힘은 식탁 밑으로 넣은 모습, 열림은 빼 둔 모습(도면 자리 그대로)
+     · 어린이 책상 세트: 의자를 책상 밑에 넣음 / free 만큼 뺌 */
+  const DOOR_KINDS = ['hinged', 'front-door'];
+  const openAmount = (op) => (op ? Math.max(0, Math.min(op.free, op.need)) : 0);
+  const limited = (op) => !!op && op.free < op.need - 0.5;
+  function tagFace(f, o, extra) {
+    if (o.cls) o.cls.split(' ').forEach((c) => c && f.classList.add(c));
+    if (extra) f.classList.add(extra);
+    if (o.pid) f.dataset.pid = o.pid;
+    return f;
+  }
+  /** 문짝 하나: 정면 선(ly = dd) 위 경첩 hx 에서 dir(+1: 오른쪽으로 닫힘 · −1: 왼쪽으로 닫힘) 쪽 문짝을 θ 만큼 앞으로 연 모습 */
+  function leaf(world, it, o, hx, dir, len, theta, z0, z1, cls) {
+    const a = toWorld(it, hx, it.dd), b = toWorld(it, hx + dir * len * Math.cos(theta), it.dd + len * Math.sin(theta));
+    const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1;
+    const f = face('p3-leaf', len, Math.max(1, z1 - z0), [dx / L, dy / L, 0], [0, 0, -1], [a[0], a[1], z1], { bg: o.bg });
+    world.appendChild(tagFace(f, o, cls));
+    return f;
+  }
+  /** 뚜껑: 뒤(ly = 3) 경첩에서 위로 θ 만큼 연 판 */
+  function lid(world, it, o, theta, zTop) {
+    const p0 = toWorld(it, 3, 3), px = toWorld(it, 4, 3), py = toWorld(it, 3, 4);
+    const U = [px[0] - p0[0], px[1] - p0[1], 0], ly = [py[0] - p0[0], py[1] - p0[1]];
+    const V = [ly[0] * Math.cos(theta), ly[1] * Math.cos(theta), Math.sin(theta)];
+    const f = face('p3-leaf p3-lid', Math.max(1, it.dw - 6), Math.max(1, it.dd - 6), U, V, [p0[0], p0[1], zTop + 0.6], { bg: 'var(--p3-glass)' });
+    world.appendChild(tagFace(f, o));
+    return f;
+  }
+  function addOpen(world, it, o, faces, ctx) {
+    const op = it.open;
+    if (!op) return [];
+    const z0 = it.z0 || 0, H = Math.max(3, it.hgt);
+    const amt = openAmount(op);
+    const cls = limited(op) ? 'is-limited' : '';
+    const out = [];
+    const front = faces.find((f) => f.dataset.side === FRONT_SIDE[it.rot]);
+    if (DOOR_KINDS.includes(op.kind)) {
+      const single = op.need > it.dw / 2 + 8;
+      const len = single ? Math.min(op.need, it.dw - 4) : it.dw / 2 - 1;
+      const theta = Math.asin(Math.min(1, amt / Math.max(1, len)));
+      // 세탁기·건조기 둥근 문은 가운데 높이만, 나머지는 거의 전체 높이
+      const za = single && it.cat === 'appliance' ? z0 + H * 0.18 : z0 + 2, zb = single && it.cat === 'appliance' ? z0 + H * 0.82 : z0 + H - 2;
+      if (front && theta > 0.02) { front.classList.add('is-inside'); const img = front.querySelector('.p3-photo'); if (img) img.remove(); }
+      if (single) out.push(leaf(world, it, o, 2, 1, len, theta, za, zb, cls));
+      else { out.push(leaf(world, it, o, 1, 1, len, theta, za, zb, cls)); out.push(leaf(world, it, o, it.dw - 1, -1, len, theta, za, zb, cls)); }
+    } else if (op.kind === 'drawer' && amt > 0.5) {
+      const two = /2x5|2×5/.test(it.name || '');
+      const w = two ? it.dw / 2 - 4 : it.dw - 6;
+      const za = z0 + H * 0.66, zb = z0 + H * 0.84;
+      box(world, localBox(it, 3, it.dd, w, amt, za, zb), Object.assign({}, o, { bg: 'var(--p3-drawer)' })).forEach((f) => { if (cls) f.classList.add(cls); out.push(f); });
+    } else if (op.kind === 'lid') {
+      out.push(lid(world, it, o, (78 * Math.PI) / 180, z0 + H));
+    }
+    return out;
+  }
+  /** 정보 카드 한 줄: 문·서랍을 열 때 필요한 앞 공간과, 이 자리에서 실제로 열 수 있는 만큼 */
+  const OPEN_WORD = { hinged: '문을 열면', 'front-door': '문을 열면', drawer: '서랍을 빼면', lid: '뚜껑을 열면', table: '의자를 빼고 앉으면',
+    seat: '앉으면', open: '물건을 꺼낼 때', bed: '오르내릴 때', airflow: '바람 앞' };
+  function openLine(it) {
+    if (shapeOf(it) === 'chair') return it.tuck ? '문 닫힘 보기: 식탁 밑으로 넣은 모습 · 문 열림 보기: 빼 둔 모습(식탁에서 ' + Math.round(it.dd) + 'cm)' : '';
+    const op = it.open;
+    if (!op) return '';
+    if (op.kind === 'lid') return '뚜껑을 열면 위로 약 ' + Math.round(op.top || 0) + 'cm 더 필요해요' + (op.need > 0.5 ? ' · 앞 ' + Math.round(op.need) + 'cm' : '');
+    const head = (OPEN_WORD[op.kind] || '쓸 때') + ' 앞 ' + Math.round(op.need) + 'cm';
+    if (!limited(op)) return head + ' — 이 자리에서 다 돼요';
+    return head + ' — 이 자리에서는 ' + Math.round(op.free) + 'cm만 돼요' + (op.by ? '(「' + op.by + '」에 닿아요)' : '');
+  }
   function drawItem(world, it, ctx) {
     const col = colorOf(it);
     const pid = it.pid;
@@ -161,18 +234,31 @@
       [[0, 0], [it.dw - leg, 0], [0, it.dd - leg], [it.dw - leg, it.dd - leg]].forEach(([lx, ly]) => {
         parts = parts.concat(box(world, localBox(it, lx, ly, leg, leg, z0, z0 + H - top), Object.assign({}, o, { top: false })));
       });
-      // 책상 서랍·상판 아래 가림판이 있는 책상은 뒤쪽 가림판
+      // 책상 뒤쪽 가림판
       if (it.tag === 'desk') parts = parts.concat(box(world, localBox(it, leg, 0, it.dw - 2 * leg, 2, z0 + H * 0.45, z0 + H - top), Object.assign({}, o, { top: false })));
+      // 어린이 책상 세트: 의자 — 닫힘은 책상 밑, 열림은 앞으로 뺀 만큼
+      if (it.tag === 'desk' && it.cat === 'kids') {
+        const cw = Math.min(36, it.dw * 0.45), cd = Math.min(32, it.dd * 0.5), cx = (it.dw - cw) / 2;
+        const ly0 = it.dd - cd + (ctx.open ? openAmount(it.open) : 0);
+        const co = Object.assign({}, o, { bg: 'var(--p3-kids)' });
+        parts = parts.concat(box(world, localBox(it, cx, ly0, cw, cd, z0 + H * 0.52, z0 + H * 0.58), co));
+        parts = parts.concat(box(world, localBox(it, cx, ly0 + cd - 3, cw, 3, z0 + H * 0.58, z0 + H * 1.05), co));
+        [[cx, ly0], [cx + cw - 3, ly0], [cx, ly0 + cd - 3], [cx + cw - 3, ly0 + cd - 3]].forEach(([lx, ly]) => {
+          parts = parts.concat(box(world, localBox(it, lx, ly, 3, 3, z0, z0 + H * 0.52), Object.assign({}, co, { top: false })));
+        });
+      }
     } else if (shape === 'chair') {
+      // 닫힘: 식탁 밑으로 넣은 모습(it.tuck — 식탁 쪽으로 의자 깊이 − 12cm) · 열림: 빼 둔 모습(도면 자리)
+      const sh = !ctx.open && it.tuck ? it.tuck : 0;
       const seatZ = Math.min(45, H * 0.62), leg = 4, back = Math.min(7, it.dd * 0.16);
-      parts = parts.concat(box(world, localBox(it, 0, 0, it.dw, it.dd, z0 + seatZ - 5, z0 + seatZ), o));
+      const lb = (lx, ly, lw, ld, za, zb) => localBox(it, lx, ly + sh, lw, ld, za, zb);
+      parts = parts.concat(box(world, lb(0, 0, it.dw, it.dd, z0 + seatZ - 5, z0 + seatZ), o));
       [[1, 1], [it.dw - leg - 1, 1], [1, it.dd - leg - 1], [it.dw - leg - 1, it.dd - leg - 1]].forEach(([lx, ly]) => {
-        parts = parts.concat(box(world, localBox(it, lx, ly, leg, leg, z0, z0 + seatZ - 5), Object.assign({}, o, { top: false })));
+        parts = parts.concat(box(world, lb(lx, ly, leg, leg, z0, z0 + seatZ - 5), Object.assign({}, o, { top: false })));
       });
-      parts = parts.concat(box(world, localBox(it, 0, 0, it.dw, back, z0 + seatZ, z0 + H), o));
-      // 팔걸이
+      parts = parts.concat(box(world, lb(0, 0, it.dw, back, z0 + seatZ, z0 + H), o));
       if (/팔걸이/.test(it.name || '')) {
-        [0, it.dw - 4].forEach((lx) => { parts = parts.concat(box(world, localBox(it, lx, back, 4, it.dd * 0.7, z0 + seatZ, z0 + seatZ + 20), o)); });
+        [0, it.dw - 4].forEach((lx) => { parts = parts.concat(box(world, lb(lx, back, 4, it.dd * 0.7, z0 + seatZ, z0 + seatZ + 20), o)); });
       }
     } else if (shape === 'sofa') {
       const seatZ = Math.min(42, H * 0.55), backD = Math.min(22, it.dd * 0.28), arm = Math.min(16, it.dw * 0.1);
@@ -199,8 +285,8 @@
       parts = parts.concat(faces);
       const front = faces.find((f) => f.dataset.side === fs);
       if (url) putPhoto(front, url);
-      else if (front) front.classList.add('is-front');
-      // 정면 표시(사진이 없을 때): 손잡이 줄
+      else if (front) front.classList.add('is-front');   // 사진이 없을 때: 정면에 손잡이 줄
+      if (ctx.open) parts = parts.concat(addOpen(world, it, o, faces, ctx));
     }
     // 이름표 (위 면)
     const top = parts.find((f) => f.dataset.side === 'top');
@@ -311,7 +397,7 @@
     world.textContent = '';
     const wallH = WALL_H[opt.walls] != null ? WALL_H[opt.walls] : WALL_H.low;
     const B = P.bounds;
-    const ctx = { photos: opt.photos, labels: true, font: opt.font };
+    const ctx = { photos: opt.photos, labels: true, font: opt.font, open: !!opt.open };
     // 바탕(구조체) + 방 바닥
     world.appendChild(face('p3-base', B.w + 40, B.h + 40, [1, 0, 0], [0, 1, 0], [B.x - 20, B.y - 20, -1]));
     P.rooms.forEach((r) => {
@@ -336,12 +422,13 @@
       box(world, Object.assign({}, r, s.v ? { x: s.at - 1.5, w: 3 } : { y: s.at - 1.5, d: 3 }, { z0: sill, z1: gTop }), { bg: 'var(--p3-glass)', cls: 'p3-glass' });
       if (wallH > gTop + 1) box(world, Object.assign({}, r, { z0: gTop, z1: wallH }), { bg: 'var(--p3-wall)', topBg: 'var(--p3-wall-top)', cls: 'p3-wall' });
     });
-    // 문 위 벽(천장까지일 때) · 열린 문짝
+    // 문 위 벽(천장까지일 때) · 문짝 — 열림 보기는 활짝 연 모습, 닫힘 보기는 닫은 모습
     P.doors.forEach((d) => {
       const r = d.v ? { x: d.x - t / 2, y: d.y, w: t, d: d.w } : { x: d.x, y: d.y - t / 2, w: d.w, d: t };
       if (wallH > DOOR_H + 1) box(world, Object.assign({}, r, { z0: DOOR_H, z1: wallH }), { bg: 'var(--p3-wall)', topBg: 'var(--p3-wall-top)', cls: 'p3-wall' });
-      if (wallH <= 0 || !d.hingeAt || !d.open) return;
-      const [hx, hy] = d.hingeAt, [ox, oy] = d.open;
+      const end = opt.open ? d.open : d.shut;
+      if (wallH <= 0 || !d.hingeAt || !end) return;
+      const [hx, hy] = d.hingeAt, [ox, oy] = end;
       const len = Math.hypot(ox - hx, oy - hy);
       if (!(len > 5)) return;
       const U = [(ox - hx) / len, (oy - hy) / len, 0];
@@ -366,26 +453,35 @@
       const parts = box(world, { x: f.x, y: f.y, w: f.w, d: f.h, z0, z1 }, { bg, cls: 'p3-fx' });
       parts.forEach((p) => { p.title = n; });
     });
-    // 짐
+    // 짐 — 식탁 앞에 붙은 의자는 닫힘 보기에서 식탁 밑으로 넣어요(it.tuck)
+    const tables = P.items.filter((x) => x.tag === 'table');
+    P.items.forEach((it) => {
+      if (shapeOf(it) !== 'chair') return;
+      const d = 4, b = it.rot === 180 ? { x: it.x, y: it.y - d, w: it.w, h: d } : it.rot === 90 ? { x: it.x - d, y: it.y, w: d, h: it.h }
+        : it.rot === 270 ? { x: it.x + it.w, y: it.y, w: d, h: it.h } : { x: it.x, y: it.y + it.h, w: it.w, h: d };
+      const hit = tables.some((t) => b.x < t.x + t.w && t.x < b.x + b.w && b.y < t.y + t.h && t.y < b.y + b.h);
+      it.tuck = hit ? Math.max(0, it.dd - 12) : 0;
+    });
     const byInv = {};
     P.items.forEach((it) => {
       const parts = drawItem(world, it, ctx);
       parts.forEach((p) => { p.dataset.pid = it.pid; });
       byInv[it.invId] = byInv[it.invId] || it;
     });
-    // 다른 짐 위에 올리는 짐 (전자레인지 → 전자레인지 수납장 위)
-    (opt.onTop || []).forEach((t) => {
-      const base = byInv[ON_TOP[t.id]];
+    // 다른 짐 위에 올리는 짐 (전자레인지 → 전자레인지 수납장 위) — 정면은 받침 짐과 같은 쪽, 열림 보기에서는 문도 열어요
+    (P.extras || []).forEach((t) => {
+      const base = byInv[ON_TOP[t.invId]];
       if (!base) return;
-      const dw = Math.min(num(t.w, 40), base.dw), dd = Math.min(num(t.d, 30), base.dd);
-      const it = Object.assign({}, base, { pid: 'top-' + t.id, invId: t.id, name: t.name, cat: t.cat, tag: t.tag || '', fate: t.fate, dw, dd, hgt: num(t.h, 20), z0: base.hgt });
-      // 받침 짐 가운데, 정면은 같은 쪽
+      const dw = Math.min(t.dw, base.dw), dd = Math.min(t.dd, base.dd);
       const lx = (base.dw - dw) / 2, ly = base.dd - dd;
       const a = toWorld(base, lx, ly), b = toWorld(base, lx + dw, ly + dd);
-      Object.assign(it, { x: Math.min(a[0], b[0]), y: Math.min(a[1], b[1]), w: Math.abs(b[0] - a[0]), h: Math.abs(b[1] - a[1]), onTop: base.name });
-      // toWorld 는 짐 왼쪽 위 기준이라 받침 짐 안쪽 좌표로 다시 계산
-      it.x = Math.min(a[0], b[0]); it.y = Math.min(a[1], b[1]);
-      const parts = drawItem(world, Object.assign({}, it, { rot: base.rot, dw, dd, x: it.x, y: it.y }), ctx);
+      const need = t.use && t.use.front > 0.5 ? t.use.front : Math.round(dd * 0.9);
+      const it = { pid: 'top-' + t.invId, invId: t.invId, name: t.name, cat: t.cat, tag: t.tag, fate: t.fate, url: t.url, room: base.room, front: base.front,
+        rot: base.rot, dw, dd, hgt: t.hgt, z0: (base.z0 || 0) + base.hgt, onTop: base.name,
+        x: Math.min(a[0], b[0]), y: Math.min(a[1], b[1]), w: Math.abs(b[0] - a[0]), h: Math.abs(b[1] - a[1]),
+        // 전자레인지 문: 한 짝(왼쪽 경첩), 받침 짐 앞이 막혔으면 그만큼만
+        open: { kind: 'front-door', need, free: base.open ? Math.min(need, base.open.free) : need, by: base.open ? base.open.by : '', top: 0 } };
+      const parts = drawItem(world, it, ctx);
       parts.forEach((p) => { p.dataset.pid = it.pid; });
       opt.extra[it.pid] = it;
     });
@@ -400,18 +496,17 @@
     if (!P) { if (MV.ui && MV.ui.toast) MV.ui.toast('도면 자료를 불러오지 못했어요.'); return; }
     injectCss();
     const prefs = loadPrefs();
-    const st = { yaw: -24, pitch: 52, zoom: 1, cx: P.bounds.x + P.bounds.w / 2, cy: P.bounds.y + P.bounds.h / 2, walls: prefs.walls, photos: prefs.photos };
+    const st = { yaw: -24, pitch: 52, zoom: 1, cx: P.bounds.x + P.bounds.w / 2, cy: P.bounds.y + P.bounds.h / 2, walls: prefs.walls, photos: prefs.photos, open: prefs.open };
     const items = {};
     P.items.forEach((it) => { items[it.pid] = it; });
     const extra = {};
-    const onTop = MV.inv && MV.inv.list ? MV.inv.list((it) => ON_TOP[it.id] && it.floor === false && it.fate !== 'discard' && it.fate !== 'sell') : [];
 
     const world = el('div', { class: 'p3-world' });
     const cam = el('div', { class: 'p3-cam' }, world);
     const stage = el('div', { class: 'p3-stage', tabindex: '0', 'aria-label': '3D 도면 — 끌어서 돌리고 휠이나 두 손가락으로 확대해요' }, cam);
     const card = el('div', { class: 'p3-card', hidden: true, role: 'region', 'aria-live': 'polite', 'aria-label': '고른 짐 정보' });
     stage.appendChild(card);
-    const hint = el('div', { class: 'p3-hint' }, '끌어서 돌리고 · 휠이나 두 손가락으로 확대 · 쉬프트+끌기(두 손가락 끌기)로 옮기기 · 짐을 누르면 정보가 나와요. 고치기는 2D 도면에서 해요.');
+    const hint = el('div', { class: 'p3-hint' }, '끌어서 돌리고 · 휠이나 두 손가락으로 확대 · 쉬프트+끌기(두 손가락 끌기)로 옮기기 · 짐을 누르면 정보가 나와요. 「문 열림」은 문·서랍·뚜껑을 연 모습이고, 앞이 막혀 끝까지 못 여는 것은 열 수 있는 만큼만 열고 주황 테두리로 보여요. 고치기는 2D 도면에서 해요.');
     stage.appendChild(hint);
 
     const presetBtns = PRESETS.map(([id, label, pitch, yaw]) => el('button', { type: 'button', class: 'btn p3-b', 'data-preset': id, onclick: () => { st.pitch = pitch; st.yaw = yaw; apply(true); } }, label));
@@ -423,6 +518,17 @@
       el('option', { value: '' }, '집 전체'),
       P.rooms.filter((r) => r.w >= 60 && r.h >= 60).map((r) => el('option', { value: r.id }, r.name)));
     selRoom.addEventListener('change', () => focusRoom(selRoom.value));
+    // 문 닫힘 / 열림 — 두 모습을 바꿔 봐요 (의자는 닫힘: 식탁 밑으로 넣음 · 열림: 빼 둠)
+    const bShut = el('button', { type: 'button', class: 'btn p3-b', 'aria-pressed': String(!st.open), onclick: () => setOpen(false) }, '🚪 문 닫힘');
+    const bOpen = el('button', { type: 'button', class: 'btn p3-b', 'aria-pressed': String(st.open), onclick: () => setOpen(true) }, '🚪 문 열림');
+    const openGrp = el('div', { class: 'p3-grp', role: 'group', 'aria-label': '가구·가전 문' }, bShut, bOpen);
+    function setOpen(v) {
+      st.open = !!v;
+      savePrefs({ open: st.open });
+      bShut.setAttribute('aria-pressed', String(!st.open));
+      bOpen.setAttribute('aria-pressed', String(st.open));
+      rebuild();
+    }
     const bPhoto = el('button', { type: 'button', class: 'btn p3-b', 'aria-pressed': String(st.photos), onclick: () => { st.photos = !st.photos; savePrefs({ photos: st.photos }); bPhoto.setAttribute('aria-pressed', String(st.photos)); rebuild(); } }, '🖼 상품 사진');
     const zoomBtns = el('div', { class: 'p3-grp' },
       el('button', { type: 'button', class: 'btn p3-b btn-icon', 'aria-label': '축소', onclick: () => { st.zoom = clamp(st.zoom / 1.25, 0.35, 6); apply(); } }, '−'),
@@ -430,7 +536,7 @@
     const head = el('div', { class: 'p3-head' },
       el('h2', { class: 'p3-title' }, '🧊 ' + (P.name || '새 집') + ' 3D 보기'),
       el('button', { type: 'button', class: 'btn btn-ghost btn-icon p3-x', 'aria-label': '3D 보기 닫기', onclick: () => close() }, '✕'));
-    const tools = el('div', { class: 'p3-tools', role: 'toolbar', 'aria-label': '3D 보기 도구' }, el('div', { class: 'p3-grp' }, presetBtns), zoomBtns, selRoom, selWalls, bPhoto);
+    const tools = el('div', { class: 'p3-tools', role: 'toolbar', 'aria-label': '3D 보기 도구' }, openGrp, el('div', { class: 'p3-grp' }, presetBtns), zoomBtns, selRoom, selWalls, bPhoto);
     const foot = el('p', { class: 'p3-foot' }, '상품 사진은 인터넷에서 찾은 같은·비슷한 모델 사진이라 실제와 다를 수 있어요. 사진이 안 뜨면 색 상자로 보여요(공유 버전은 바깥 사진을 막아서 늘 색 상자예요). 크기·자리는 2D 도면과 같아요.');
     const panel = el('div', { class: 'p3', role: 'dialog', 'aria-modal': 'true', 'aria-label': (P.name || '새 집') + ' 3D 보기' }, head, tools, stage, foot);
     const back = el('div', { class: 'p3-back' }, panel);
@@ -449,7 +555,7 @@
     }
     function rebuild() {
       measure();
-      build(world, P, { walls: st.walls, photos: st.photos, font: clamp(13 / fit, 12, 60), onTop, extra });
+      build(world, P, { walls: st.walls, photos: st.photos, open: st.open, font: clamp(13 / fit, 12, 60), extra });
       apply();
       if (selPid) select(selPid);
     }
@@ -486,6 +592,7 @@
           el('strong', { class: 'p3-card-name' }, it.name),
           el('div', { class: 'tiny muted num' }, Math.round(it.dw) + ' × ' + Math.round(it.dd) + ' × ' + Math.round(it.hgt) + 'cm' + (fate ? ' · ' + fate.label : '') + (it.room ? ' · ' + it.room : '')),
           it.onTop ? el('div', { class: 'tiny muted' }, '「' + shortName(it.onTop, 14) + '」 위에 올려요') : el('div', { class: 'tiny muted' }, '정면(문·서랍·앉는 쪽): ' + (it.front || '')),
+          openLine(it) ? el('div', { class: 'tiny' + (limited(it.open) ? ' p3-card-warn' : '') }, openLine(it)) : '',
           it.url ? el('a', { class: 'tiny', href: it.url, target: '_blank', rel: 'noopener noreferrer' }, '상품 보기 ↗') : ''),
         el('button', { type: 'button', class: 'btn btn-ghost btn-icon p3-card-x', 'aria-label': '정보 닫기', onclick: () => select(null) }, '✕'));
       card.hidden = false;
@@ -592,7 +699,7 @@
   function loadPrefs() {
     let p = {};
     try { p = JSON.parse(localStorage.getItem(PREF_KEY) || '{}') || {}; } catch (e) { p = {}; }
-    return { walls: WALL_H[p.walls] != null ? p.walls : 'low', photos: p.photos !== false };
+    return { walls: WALL_H[p.walls] != null ? p.walls : 'low', photos: p.photos !== false, open: p.open === true };
   }
   function savePrefs(patch) {
     try { localStorage.setItem(PREF_KEY, JSON.stringify(Object.assign(loadPrefs(), patch))); } catch (e) { /* 저장 못 해도 보기는 그대로 */ }
@@ -604,10 +711,11 @@
 :root { --p3-floor:#f4efe6; --p3-wet:#dde9ee; --p3-balc:#e9e4da; --p3-base:#8a8178; --p3-wall:#e8e2d8; --p3-wall-top:#5b544c;
   --p3-glass:rgba(125,185,220,.45); --p3-fixture:#d9d4cc; --p3-dark:#2b2a2e; --p3-white:#f7f7f5; --p3-wood:#b98b62; --p3-wood-dk:#8a5a3b;
   --p3-wood-lt:#dcc6a6; --p3-steel:#c9ccd1; --p3-fabric:#9aa5b5; --p3-bed:#f3efe8; --p3-sheet:#fbf9f5; --p3-pillow:#ffffff; --p3-duvet:#cfe0ec;
-  --p3-kids:#f2c46d; --p3-box:rgba(200,222,238,.92); --p3-misc:#b9b4ab; --p3-door:rgba(185,139,98,.55); --p3-stage:#ece7de; --p3-label:#4a443d; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --p3-floor:#3a3833; --p3-wet:#2f3d44; --p3-balc:#35322d; --p3-base:#121115;
+  --p3-kids:#f2c46d; --p3-box:rgba(200,222,238,.92); --p3-misc:#b9b4ab; --p3-door:rgba(185,139,98,.55); --p3-stage:#ece7de; --p3-label:#4a443d;
+  --p3-inside:#d8d2c8; --p3-drawer:#e6d7bf; --p3-limit:#f08c00; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --p3-floor:#3a3833; --p3-inside:#4a4640; --p3-drawer:#6b5c49; --p3-limit:#ffa94d; --p3-wet:#2f3d44; --p3-balc:#35322d; --p3-base:#121115;
   --p3-wall:#59544e; --p3-wall-top:#cfc7bb; --p3-fixture:#5d5953; --p3-stage:#1b1a1f; --p3-label:#e8e2d8; --p3-bed:#d9d4cc; --p3-sheet:#e5e1da; } }
-:root[data-theme="dark"] { --p3-floor:#3a3833; --p3-wet:#2f3d44; --p3-balc:#35322d; --p3-base:#121115;
+:root[data-theme="dark"] { --p3-floor:#3a3833; --p3-inside:#4a4640; --p3-drawer:#6b5c49; --p3-limit:#ffa94d; --p3-wet:#2f3d44; --p3-balc:#35322d; --p3-base:#121115;
   --p3-wall:#59544e; --p3-wall-top:#cfc7bb; --p3-fixture:#5d5953; --p3-stage:#1b1a1f; --p3-label:#e8e2d8; --p3-bed:#d9d4cc; --p3-sheet:#e5e1da; }
 body.p3-lock { overflow: hidden; }
 .p3-back { position: fixed; inset: 0; z-index: 80; background: rgba(20,18,16,.55); display: flex; align-items: stretch; justify-content: center;
@@ -641,6 +749,13 @@ body.p3-lock { overflow: hidden; }
 .p3-item.is-buy { opacity: .78; border-style: dashed; }
 .p3-item.is-sel { outline: 3px solid var(--brand, #c2410c); outline-offset: -3px; }
 .p3-item.is-front::before { content: ''; position: absolute; left: 12%; right: 12%; top: 10%; height: 3px; background: rgba(0,0,0,.28); border-radius: 2px; }
+.p3-leaf { border: 1px solid rgba(0,0,0,.28); backface-visibility: visible; cursor: pointer; }
+.p3-lid { opacity: .85; }
+.p3-item.is-inside { background: var(--p3-inside) !important; }
+.p3-item.is-inside::before { content: ''; position: absolute; left: 6%; right: 6%; top: 8%; bottom: 8%; pointer-events: none;
+  background: repeating-linear-gradient(to bottom, transparent 0 22%, rgba(0,0,0,.18) 22% 24%); }
+.p3-item.is-limited, .p3-leaf.is-limited { outline: 3px solid var(--p3-limit); outline-offset: -2px; }
+.p3-card-warn { color: var(--warn, #a16207); font-weight: 600; }
 .p3-photo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #fff; pointer-events: none; }
 .p3-tag { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 2px;
   color: #2b2724; font-weight: 700; line-height: 1.1; word-break: keep-all; overflow: hidden; pointer-events: none; }

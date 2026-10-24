@@ -65,8 +65,9 @@
 (function () {
   'use strict';
   const P = (id, invId, x, y, rot) => ({ id, invId, x, y, rot: rot || 0 });
-  // 새 집 배치 초안 (version 15 — 10/24 실측 도면 + 같은 날 가족 실측표·배치 가이드) — [배치, 짐 크기 { w, d }]
-  const NEW = [
+  // 새 집 배치 초안 v15 (10/24 실측 도면 + 같은 날 가족 실측표·배치 가이드) — [배치, 짐 크기 { w, d }]
+  // v8·v14·v15 이전 규칙이 쓰는 목록이라 그대로 둬요 (지금 기본 배치는 아래 NEW — v16)
+  const NEW15 = [
     // 세탁 발코니 왼쪽 끝 옆벽: 냉장고 정면 오른쪽(270) — 가족 말 '세탁기·건조기를 넣어도 발코니에 들어가면 발코니'. 창 쪽 옆 10cm
     [P('pl-new-fridge', 'inv-fridge', 5, 10, 270), { w: 91, d: 95 }],
     // 세탁 발코니 가운데: 건조기 정면 오른쪽(주방 문 쪽) — 주방 문(x 245~) 왼쪽에서 끝
@@ -122,6 +123,65 @@
     [P('pl-new-box-9', 'inv-living-box', 455, 80, 0), { w: 53, d: 40 }],
     [P('pl-new-box-10', 'inv-living-box', 508, 80, 0), { w: 53, d: 40 }],
   ];
+  // 새 집 배치 v16 — 가족이 공유 버전에서 직접 옮긴 배치(10/24 저녁 그림·공유 기록)를 그대로 쓰고 쓰임 공간만 미세 조정
+  const NEW = [
+    // 세탁 발코니: 건조기 왼쪽(정면 오른쪽) — 뒤 배기·호스 10cm 띄움(가족 배치 x 0 → 10) · 전자레인지 수납장 가운데 창 쪽 벽(정면 아래) ·
+    // 통돌이 70x73 칸(정면 왼쪽, 뒤 호스 10cm)
+    [P('pl-new-dryer', 'inv-dryer', 10, 20, 270), { w: 70, d: 90 }],
+    [P('pl-new-mwcab', 'inv-microwave-cabinet', 190, 0, 0), { w: 60, d: 41 }],
+    [P('pl-new-washer', 'inv-washer-new', 315, 0, 90), { w: 64, d: 70 }],
+    // 주방: 냉장고는 조리대(싱크대) 끝에 붙여 같은 방향(정면 왼쪽) — 조리대와 10cm(문 열림), 뒤 5cm(가족 배치 x 343 → 338). 복도 쪽으로 약 38cm 나와요
+    [P('pl-new-fridge', 'inv-fridge', 338, 345, 90), { w: 91, d: 95 }],
+    // 식탁은 왼쪽 벽에 긴 변, 의자 ㄷ자(위 1·통로 쪽 2·아래 1 — 아래 의자는 가족 배치대로 왼쪽 벽 쪽: 작은방2 문 앞이라 식사 뒤엔 식탁 밑으로)
+    [P('pl-new-dining', 'inv-dining', 218, 175, 90), { w: 135, d: 80 }],
+    [P('pl-new-chair-1', 'inv-dining-chair', 218, 125, 0), { w: 45, d: 50 }],
+    [P('pl-new-chair-2', 'inv-dining-chair', 298, 190, 90), { w: 45, d: 50 }],
+    [P('pl-new-chair-3', 'inv-dining-chair', 298, 250, 90), { w: 45, d: 50 }],
+    [P('pl-new-chair-4', 'inv-dining-chair', 218, 310, 180), { w: 45, d: 50 }],
+    [P('pl-new-trash', 'inv-trash', 341, 125, 0), { w: 27, d: 17 }],
+    // 복도: 빨래바구니 욕실 문 바로 위 벽
+    [P('pl-new-basket', 'inv-laundry-basket', 218, 465, 270), { w: 40, d: 35 }],
+    // 거실 왼쪽(안방 쪽) 벽: 어린이 책장 3개 + 맨 아래 책장 5단(정면 오른쪽)
+    [P('pl-new-kidshelf-1', 'inv-bookshelf-kid', 340, 563, 270), { w: 80, d: 29 }],
+    [P('pl-new-kidshelf-2', 'inv-bookshelf-kid', 340, 645, 270), { w: 80, d: 29 }],
+    [P('pl-new-kidshelf-3', 'inv-bookshelf-kid', 340, 730, 270), { w: 80, d: 29 }],
+    [P('pl-new-bookshelf', 'inv-bookshelf', 340, 813, 270), { w: 80, d: 29 }],
+    // 거실 오른쪽 벽(정면 왼쪽): 위에서부터 트롤리 3단 · 소파 · 에어컨 스탠드(아래 벽에서 10cm — 가족 배치 y 853 → 843, 소파·트롤리도 그만큼 위로)
+    [P('pl-new-trolley3', 'inv-trolley-3', 637, 618, 90), { w: 45, d: 33 }],
+    [P('pl-new-sofa', 'inv-sofa', 587, 663, 90), { w: 170, d: 83 }],
+    [P('pl-new-ac', 'inv-ac-stand', 640, 843, 90), { w: 40, d: 30 }],
+    // 안방 왼쪽 벽 한 줄: 캐비닛장 3개 + 체스트랙(정면 오른쪽) · 매트리스 오른쪽·아래 벽(머리는 창 쪽)
+    [P('pl-new-cabinet2', 'inv-cabinet-2', 0, 593, 270), { w: 76, d: 52 }],
+    [P('pl-new-cabinet-1', 'inv-cabinet', 0, 669, 270), { w: 76, d: 52 }],
+    [P('pl-new-cabinet-2', 'inv-cabinet', 0, 745, 270), { w: 76, d: 52 }],
+    [P('pl-new-chest', 'inv-chest-rack', 0, 831, 270), { w: 62, d: 40 }],
+    [P('pl-new-bed', 'inv-bed-master', 135, 688, 180), { w: 205, d: 205 }],
+    // 작은방2 왼쪽 벽(정면 오른쪽): 위에서부터 화장대 · 알렉스 · 데스커 책상 · 오른쪽 위(창 쪽 끝) 이동식 간이 행거(정면 왼쪽)
+    [P('pl-new-vanity', 'inv-vanity', 0, 145, 270), { w: 85, d: 47 }],
+    [P('pl-new-alex', 'inv-desk-drawer', 0, 230, 270), { w: 37, d: 59 }],
+    [P('pl-new-desk', 'inv-desk-adult', 0, 275, 270), { w: 120, d: 60 }],
+    [P('pl-new-hanger', 'inv-hanger', 171, 125, 90), { w: 85, d: 47 }],
+    // 작은방1: 왼쪽 벽 위에서부터 장난감장 · 어린이 책상 세트(가로 80 × 깊이 60 — 가족이 고친 크기) · 오른쪽 아래 구석 트롤리 2단(정면 위)
+    [P('pl-new-toy', 'inv-toy-storage', 457, 125, 270), { w: 67, d: 41 }],
+    [P('pl-new-kid-desk', 'inv-kid-desk', 457, 195, 270), { w: 80, d: 60 }],
+    [P('pl-new-trolley2', 'inv-trolley-2', 625, 365, 180), { w: 45, d: 33 }],
+    // 위 발코니(가족 말 '우측 상단 발코니'): 리빙박스 10개 — 4 + 4 + 2 줄
+    [P('pl-new-box-1', 'inv-living-box', 455, 0, 0), { w: 53, d: 40 }],
+    [P('pl-new-box-2', 'inv-living-box', 508, 0, 0), { w: 53, d: 40 }],
+    [P('pl-new-box-3', 'inv-living-box', 561, 0, 0), { w: 53, d: 40 }],
+    [P('pl-new-box-4', 'inv-living-box', 614, 0, 0), { w: 53, d: 40 }],
+    [P('pl-new-box-5', 'inv-living-box', 455, 40, 0), { w: 53, d: 40 }],
+    [P('pl-new-box-6', 'inv-living-box', 508, 40, 0), { w: 53, d: 40 }],
+    [P('pl-new-box-7', 'inv-living-box', 561, 40, 0), { w: 53, d: 40 }],
+    [P('pl-new-box-8', 'inv-living-box', 614, 40, 0), { w: 53, d: 40 }],
+    [P('pl-new-box-9', 'inv-living-box', 455, 80, 0), { w: 53, d: 40 }],
+    [P('pl-new-box-10', 'inv-living-box', 508, 80, 0), { w: 53, d: 40 }],
+  ];
+  /* 10/24 저녁 가족이 공유 버전에서 직접 옮긴 자리(공유 기록 그대로) — v16 에서 이 자리에 그대로 있는 배치만 미세 조정한 자리로 옮겨요 */
+  const FAMILY_AT = {
+    'pl-new-dryer': [0, 20, 270], 'pl-new-fridge': [343, 345, 90], 'pl-new-ac': [640, 853, 90], 'pl-new-sofa': [587, 675, 90],
+    'pl-new-trolley3': [637, 625, 90], 'pl-new-box-10': [510, 85, 0],
+  };
   /* v14 기본 자리 (실측 도면 첫 초안) — v15 에서 이 자리에 그대로 있는 배치만 새 초안 자리로 옮겨요 */
   const V14_AT = {
     'pl-new-fridge': [223, 175, 270], 'pl-new-washer': [318, 3, 90], 'pl-new-dryer': [10, 3, 270], 'pl-new-ac': [340, 847, 270],
@@ -199,12 +259,12 @@
     return out;
   }
   if (MV.seed && Array.isArray(MV.seed.migrations)) {
-    MV.seed.migrations.push({ to: 8, layouts: { new: rules(NEW, 'new'), old: rules(OLD, 'old') } });
+    MV.seed.migrations.push({ to: 8, layouts: { new: rules(NEW15, 'new'), old: rules(OLD, 'old') } });
   }
   /* v14: 새 집 도면을 10/24 실측으로 다시 그림 → v8 초안 자리에 그대로 있는 배치만 새 자리로 (사용자가 옮긴 배치·크기를 고친 짐은 그대로) */
   if (MV.seed && Array.isArray(MV.seed.migrations)) {
     const move = {};
-    NEW.forEach(([p, size]) => {
+    NEW15.forEach(([p, size]) => {
       const was = V8_AT[p.id];
       if (!was) return;
       move[p.id] = { from: { x: was[0], y: was[1], rot: was[2] }, set: { x: p.x, y: p.y, rot: p.rot }, ifInv: size || undefined };
@@ -215,7 +275,7 @@
      (크기는 같은 버전의 짐 목록 이전 규칙(data-seed.js to: 15, fact)이 먼저 새 값으로 맞춰서 ifInv 는 새 크기) */
   if (MV.seed && Array.isArray(MV.seed.migrations)) {
     const move = {}, add = [];
-    NEW.forEach(([p, size]) => {
+    NEW15.forEach(([p, size]) => {
       const was = V14_AT[p.id];
       const clear = clearOf(p, size, 'new');
       if (was) {
@@ -225,5 +285,23 @@
       }
     });
     MV.seed.migrations.push({ to: 15, layouts: { new: { add, move } } });
+  }
+  /* v16: 가족이 직접 옮긴 배치를 기본으로 — ① v15 초안 자리에 그대로 있는 배치는 v16 자리로, ② 가족이 옮긴 자리 그대로인 배치는
+     미세 조정한 자리로(냉장고 뒤 5 · 건조기 뒤 10 · 에어컨 옆 10 · 소파·트롤리 3단 · 리빙박스 줄). 크기는 같은 버전의 짐 목록 규칙(fact)이
+     먼저 맞춰서 ifInv 는 v16 크기(어린이 책상 세트 80×60). 사용자가 다르게 옮긴 배치는 그대로 둬요 */
+  if (MV.seed && Array.isArray(MV.seed.migrations)) {
+    const at15 = {};
+    NEW15.forEach(([p]) => { at15[p.id] = [p.x, p.y, p.rot]; });
+    const moveFrom = (AT) => {
+      const move = {};
+      NEW.forEach(([p, size]) => {
+        const was = AT[p.id];
+        if (!was || (was[0] === p.x && was[1] === p.y && was[2] === p.rot)) return;
+        move[p.id] = { from: { x: was[0], y: was[1], rot: was[2] }, set: { x: p.x, y: p.y, rot: p.rot }, ifInv: size || undefined };
+      });
+      return move;
+    };
+    MV.seed.migrations.push({ to: 16, layouts: { new: { add: [], move: moveFrom(at15) } } });
+    MV.seed.migrations.push({ to: 16, layouts: { new: { add: [], move: moveFrom(FAMILY_AT) } } });
   }
 })();

@@ -311,7 +311,8 @@
   const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
   /** 이전 규칙이 메모·완료에 적는 날짜 (migrations 의 doneAt, 없으면 기본 데이터 버전의 날) — 날짜만 'YYYY-MM-DD' */
   const ruleDay = (m, seed) => (m && typeof m.doneAt === 'string' && DAY_RE.test(m.doneAt) ? m.doneAt : seedAt(seed).slice(0, 10));
-  /* 이미 끝난 일을 완료로 (migrations 의 completeItems: { id: '메모 한 줄' } · doneAt?: 'YYYY-MM-DD')
+  /* 이미 끝난 일을 완료로 (migrations 의 completeItems: { id: '메모 한 줄' | { note?, at? } } · doneAt?: 'YYYY-MM-DD' · completeNote?: 활동 기록 글({n} 개수·{list} 목록)
+     · onlyCreated?: ['meta.createdAt', …] — 그 기록일 때만(가족 기록의 백업 되살리기 등))
      · 그 항목이 있고 아직 완료가 아닐 때만: done = true, doneAt = 그날(날짜만), 메모 끝에 한 줄
        (같은 글이나 같은 메모 id 가 이미 있으면 다시 더하지 않음)
      · 사용자가 고친 항목이어도 완료 표시와 메모만 더해요 — 제목·설명·날짜·중요도는 그대로
@@ -324,12 +325,17 @@
     const at = seedAt(seed);
     const nid = 'nt_seed_v' + m.to + '_done';
     const done = [];
+    // onlyCreated: 이 기록(meta.createdAt)일 때만 — 우리 가족 기록의 백업에서 되살리는 완료 표시를 새로 여는 기기·다른 기록엔 하지 않게
+    if (Array.isArray(m.onlyCreated) && !m.onlyCreated.includes(String((state.meta && state.meta.createdAt) || ''))) return done;
     Object.keys(m.completeItems || {}).forEach((iid) => {
       const it = (state.items || []).find((x) => x && x.id === iid);
       if (!it || it.done) return;
-      const text = String(m.completeItems[iid] || '').trim();
+      // 값: '메모 한 줄' 또는 { note?: '메모', at?: 'ISO 시각' } — at 이 있으면 그 시각을 완료 시각으로 (예: 백업에 남은 체크 시각)
+      const v = m.completeItems[iid];
+      const obj = v && typeof v === 'object';
+      const text = String((obj ? v.note : v) || '').trim();
       it.done = true;
-      it.doneAt = day;
+      it.doneAt = obj && typeof v.at === 'string' && v.at ? v.at : day;
       if (!Array.isArray(it.notes)) it.notes = [];
       if (text && !it.notes.some((x) => x && (x.id === nid || String(x.text || '').trim() === text))) it.notes.push({ id: nid, text, at: day });
       if (!(typeof it.updatedAt === 'string' && it.updatedAt > at)) it.updatedAt = at;
@@ -462,8 +468,9 @@
         const done = completeSeedItems(state, m, seed);
         if (done.length) {
           n += done.length;
-          noteOnce('seed-v' + m.to + '-done', '이미 끝난 할 일 ' + done.length + '개를 완료로 표시했어요: ' + done.map((it) => '「' + String(it.title || it.id).slice(0, 26) + '」').join(', ')
-            + ' — 까닭은 각 항목 메모에 있어요(아직 남은 일이면 체크를 풀면 돼요).');
+          const shown = done.slice(0, 8).map((it) => '「' + String(it.title || it.id).slice(0, 26) + '」').join(', ') + (done.length > 8 ? ' 외 ' + (done.length - 8) + '개' : '');
+          noteOnce('seed-v' + m.to + '-done', (m.completeNote || ('이미 끝난 할 일 ' + done.length + '개를 완료로 표시했어요: ' + shown
+            + ' — 까닭은 각 항목 메모에 있어요(아직 남은 일이면 체크를 풀면 돼요).')).replace('{n}', String(done.length)).replace('{list}', shown));
         }
       }
       // 기본 항목 지우기: { removeItems: [id | { id, keepNote? } | { id, force: true }] }
@@ -502,7 +509,11 @@
       // 칸 값이 없으면(옛 기록에 model 칸이 없을 때 등) normInv 기본값과 비교해요
       const invDef = normInv({ id: '_' }, true);
       const cur = (it, k) => (it[k] === undefined ? invDef[k] : it[k]);
-      const sameVal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+      // 칸 순서와 상관없이 비교 — 공유 기록을 거친 객체(쓰임 공간 use 등)는 키가 가나다순으로 돌아와서
+      // JSON.stringify 끼리 비교하면 같은 값도 '고친 값'으로 보여 이전 규칙이 건너뛰어졌어요(v15 쓰임 공간)
+      const ordered = (v) => (Array.isArray(v) ? v.map(ordered)
+        : v && typeof v === 'object' ? Object.keys(v).sort().reduce((o, k) => { o[k] = ordered(v[k]); return o; }, {}) : v);
+      const sameVal = (a, b) => JSON.stringify(ordered(a)) === JSON.stringify(ordered(b));
       // 기본 짐을 목록에서 뺀 경우: { removeInventory: [id | { id, from: { 칸: 옛 기본값 }, keepNote: '메모 앞 글' }] }
       //  · 기본 짐(seed)이고 지금 값이 from 과 모두 같을 때만(사용자가 고치지 않았을 때만) 지우고 meta.deletedSeed 에 넣어요
       //    (다시 추가되지 않게). 그 짐을 가리키는 도면 배치도 모든 도면에서 함께 지워요(없는 짐을 가리키는 배치가 남지 않게)
@@ -561,7 +572,7 @@
           if (factNote && note.indexOf(factNote) < 0) { it.note = note.trim() ? note.replace(/\s+$/, '') + ' ' + factNote : factNote; c = 1; }
           return c;
         };
-        if (!keys.every((k) => JSON.stringify(cur(it, k)) === JSON.stringify(f[k]))) {
+        if (!keys.every((k) => sameVal(cur(it, k), f[k]))) {
           // 사용자가 고쳐서 바꾸지 않은 짐: keptNote 가 있으면 메모 앞에 한 번만 (예: 짐을 둘로 나눠 새 짐이 더해진 경우 — 두 번 세지 않게 안내)
           const kn = typeof rule.keptNote === 'string' ? rule.keptNote : '';
           const note = String(it.note || '');
@@ -582,7 +593,7 @@
           });
         }
         const tk = Object.keys(target);
-        if (tk.every((k) => JSON.stringify(cur(it, k)) === JSON.stringify(target[k]))) { n += applyFact(); return; }
+        if (tk.every((k) => sameVal(cur(it, k), target[k]))) { n += applyFact(); return; }
         const qty0 = Math.round(+cur(it, 'qty') || 0);
         tk.forEach((k) => { it[k] = MV.clone(target[k]); });
         n++;
