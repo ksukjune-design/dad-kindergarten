@@ -458,7 +458,7 @@
       if (!s.win) { box(world, Object.assign({}, r, { z0: 0, z1: wallH }), { bg: 'var(--p3-wall)', topBg: 'var(--p3-wall-top)', cls: 'p3-wall' }); return; }
       // 바닥까지 내려오는 문(거실 분합문 등)은 바닥부터 유리
       const w = (P.windows || []).find((x) => x.v === s.v && Math.abs((x.v ? x.x : x.y) - s.at) < 3 && (x.v ? x.y : x.x) <= s.a + 1 && (x.v ? x.y : x.x) + x.w >= s.b - 1);
-      const sill = w && /분합문|미닫이|나가는 문|바닥까지 문/.test(w.note || '') ? 0 : Math.min(WIN_SILL, wallH - 6);
+      const sill = w && /분합문|미닫이|나가는 문|바닥까지 문/.test(w.note || '') && !/인지 확인/.test(w.note || '') ? 0 : Math.min(WIN_SILL, wallH - 6);
       if (sill > 0) box(world, Object.assign({}, r, { z0: 0, z1: sill }), { bg: 'var(--p3-wall)', topBg: 'var(--p3-wall-top)', cls: 'p3-wall' });
       const gTop = Math.min(WIN_TOP, wallH);
       box(world, Object.assign({}, r, s.v ? { x: s.at - 1.5, w: 3 } : { y: s.at - 1.5, d: 3 }, { z0: sill, z1: gTop }), { bg: 'var(--p3-glass)', cls: 'p3-glass' });
@@ -662,6 +662,7 @@
         el('div', { class: 'p3-grp', role: 'group', 'aria-label': '벽' }, el('span', { class: 'p3-lab' }, '벽'), wBtns),
         bLabel);
       stage.addEventListener('contextmenu', (e) => e.preventDefault());
+      stage.addEventListener('keydown', (e) => { if (!e.ctrlKey && !e.metaKey && !e.altKey && E.nudge(e.key)) { e.preventDefault(); hint.hidden = true; } });
       engineClose = () => { E.dispose(); };
       cur.gl = E;
       return true;
@@ -853,7 +854,7 @@ body.p3-lock { overflow: hidden; }
 .p3-b { padding: 6px 10px; font-size: .85rem; min-height: 34px; }
 .p3-b[aria-pressed="true"] { background: var(--ink, #222); color: var(--bg-2, #fff); border-color: var(--ink, #222); }
 .p3-sel { width: auto; min-height: 34px; padding: 4px 8px; font-size: .85rem; }
-.p3-stage { position: relative; flex: 1 1 auto; min-height: 280px; overflow: hidden; border-radius: var(--radius, 14px); background: var(--p3-stage);
+.p3-stage { position: relative; flex: 1 1 auto; min-height: min(280px, 45dvh); overflow: hidden; border-radius: var(--radius, 14px); background: var(--p3-stage);
   touch-action: none; cursor: grab; user-select: none; -webkit-user-select: none; outline: none; }
 .p3-stage:focus-visible { box-shadow: inset 0 0 0 2px var(--brand, #c2410c); }
 .p3-stage:active { cursor: grabbing; }
@@ -912,6 +913,12 @@ body.p3-lock { overflow: hidden; }
   .p3 { border-radius: 0; padding: 10px 10px max(10px, env(safe-area-inset-bottom)); }
   .p3-hint { display: none; }
   .p3-b { padding: 6px 8px; }
+}
+@media (max-height: 520px) {
+  .p3-back { padding: 0; }
+  .p3 { border-radius: 0; padding: 6px 10px; gap: 4px; }
+  .p3-stage { min-height: 150px; }
+  .p3-hint, .p3-foot { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { .p3-cam.is-anim { transition: none; } }
 `);

@@ -77,8 +77,19 @@
       pos[i + 2] = box.z * Math.sign(p.z) + n.z * radius;
       nor[i] = n.x; nor[i + 1] = n.y; nor[i + 2] = n.z;
     }
+    // 무늬 좌표: BoxGeometry 의 면 순서(+x −x +y −y +z −z)대로 면마다 평평하게 다시 — 원래 좌표는 가운데 칸(1/7)만 써서 무늬가 뭉개져요
+    const uv = g.attributes.uv.array, per = segments * segments * 6, TILE = 0.6;
+    for (let i = 0, v = 0; i < pos.length; i += 3, v++) {
+      const side = Math.floor(v / per), x = pos[i], y = pos[i + 1], z = pos[i + 2];
+      let u, w;
+      if (side < 2) { u = side === 0 ? -z : z; w = y; }
+      else if (side < 4) { u = x; w = side === 2 ? -z : z; }
+      else { u = side === 4 ? x : -x; w = y; }
+      uv[v * 2] = u / TILE + 0.5; uv[v * 2 + 1] = w / TILE + 0.5;
+    }
     g.attributes.position.needsUpdate = true;
     g.attributes.normal.needsUpdate = true;
+    g.attributes.uv.needsUpdate = true;
     return g;
   }
 
@@ -108,7 +119,14 @@
     const torus = (parent, r, t, x, y, z, material) => put(parent, torGeo(r, t), material, x, y, z);
     /** 테두리 선(주황: 끝까지 못 여는 문·서랍) */
     const edges = (mesh, color) => {
-      const l = new T.LineSegments(new T.EdgesGeometry(mesh.geometry, 30), line(color));
+      const gg = mesh.geometry;
+      if (!gg.boundingBox) gg.computeBoundingBox();
+      const sz = gg.boundingBox.getSize(new T.Vector3()), c = gg.boundingBox.getCenter(new T.Vector3());
+      const bg = new T.BoxGeometry(sz.x * 1.01 + 0.002, sz.y * 1.01 + 0.002, sz.z * 1.01 + 0.002);
+      const eg = new T.EdgesGeometry(bg);
+      bg.dispose();
+      eg.translate(c.x, c.y, c.z);
+      const l = new T.LineSegments(eg, line(color));
       l.userData.ownGeo = true;
       l.visible = false;
       mesh.add(l);
@@ -246,23 +264,32 @@
 
     if (kind === 'fridge') {
       // LG 디오스 오브제컬렉션 양문형 — 몸체 + 문 두 짝(왼쪽 디스펜서), 열면 안쪽 선반
-      const bodyD = d * 0.8, bz = -d / 2 + bodyD / 2, zf = bz + bodyD / 2;
-      rbox(g, w, h, bodyD, 0.012, 0, h / 2, bz, std(C.fridgeBody, 0.45, 0.2));
-      box(g, w - 0.04, h - 0.06, 0.01, 0, h / 2, zf + 0.002, std('#f7f8f8', 0.6));
-      for (let i = 1; i < 6; i++) box(g, w - 0.06, 0.008, 0.08, 0, (h * i) / 6, zf - 0.03, glass('#dfe9ef', 0.7), { noCast: true });
-      box(g, 0.012, h - 0.08, 0.06, 0, h / 2, zf - 0.02, std(C.fridgeBody, 0.5));
-      box(g, w - 0.02, 0.02, 0.02, 0, h - 0.012, zf - 0.012, std('#9a958c', 0.4, 0.3), { noCast: true });   // 위 띠(몸체 앞면)
-      const dt = d * 0.12, lw = w / 2 - 0.004, doorMat = std(C.fridge, 0.3, 0.25);
+      const dt = d * 0.12, bodyD = d - dt - 0.03, bz = -d / 2 + bodyD / 2, zf = bz + bodyD / 2, sh = 0.03;
+      const bm = std(C.fridgeBody, 0.45, 0.2), inMat = std('#f3f5f6', 0.55);
+      [-1, 1].forEach((sx) => rbox(g, sh, h, bodyD, 0.006, sx * (w / 2 - sh / 2), h / 2, bz, bm));
+      box(g, w - 2 * sh, sh, bodyD, 0, h - sh / 2, bz, bm);
+      box(g, w - 2 * sh, 0.06, bodyD, 0, 0.03, bz, bm);
+      const ih = h - sh - 0.06, iy = 0.06 + ih / 2, back = -d / 2;
+      box(g, w - 2 * sh, ih, sh, 0, iy, back + sh / 2, bm);
+      box(g, w - 2 * sh, ih, 0.006, 0, iy, back + sh + 0.003, inMat);   // 안쪽 뒤판(밝게)
+      [-1, 1].forEach((sx) => box(g, 0.004, ih, bodyD - sh, sx * (w / 2 - sh - 0.002), iy, bz + sh / 2, inMat, { noCast: true }));
+      box(g, 0.014, ih, bodyD - sh - 0.01, 0, iy, bz + sh / 2 - 0.005, inMat);   // 가운데 칸막이(냉동 | 냉장)
+      const cw = w / 2 - sh - 0.012, sdp = bodyD - sh - 0.06;
+      for (let i = 1; i < 6; i++) [-1, 1].forEach((sx) => box(g, cw, 0.008, sdp, sx * (sh / 2 + 0.003 + cw / 2 + 0.004), 0.06 + (ih * i) / 6, back + sh + 0.008 + sdp / 2, glass('#dfe9ef', 0.6), { noCast: true }));
+      const lw = w / 2 - 0.004, doorMat = std(C.fridge, 0.3, 0.25);
+      const bins = (p, x0) => { for (let i = 0; i < 4; i++) box(p, lw - 0.08, 0.06, 0.05, x0, h * (0.2 + i * 0.19), -0.025, std('#e4eaee', 0.4, 0, { transparent: true, opacity: 0.85 }), { noCast: true }); };
       leaf(-w / 2, zf, 1, lw, 0.02, h - 0.03, dt, doorMat, 105, (p) => {
         rbox(p, 0.022, h * 0.42, 0.03, 0.008, lw - 0.03, h * 0.5, dt + 0.015, std(C.chrome, 0.2, 0.85));
         rbox(p, lw * 0.42, h * 0.16, 0.006, 0.004, lw * 0.5, h * 0.62, dt + 0.003, std(C.panel, 0.25, 0.3));
+        bins(p, lw / 2);   // 문 안쪽 칸
       });
       leaf(w / 2, zf, -1, lw, 0.02, h - 0.03, dt, doorMat, 105, (p) => {
         rbox(p, 0.022, h * 0.42, 0.03, 0.008, -lw + 0.03, h * 0.5, dt + 0.015, std(C.chrome, 0.2, 0.85));
+        bins(p, -lw / 2);
       });
     } else if (kind === 'dryer') {
       // 삼성 그랑데 AI 건조기 — 위 조작부 · 둥근 유리문(왼쪽 경첩) · 아래 필터 덮개
-      const bodyD = d * 0.9, bz = -d / 2 + bodyD / 2, zf = bz + bodyD / 2;
+      const bodyD = d - 0.05, bz = -d / 2 + bodyD / 2, zf = bz + bodyD / 2;
       rbox(g, w, h, bodyD, 0.015, 0, h / 2, bz, std('#e9e8e4', 0.35, 0.1));
       rbox(g, w * 0.96, h * 0.16, 0.02, 0.005, 0, h * 0.89, zf + 0.01, std(C.panel, 0.3, 0.3));
       box(g, w * 0.2, h * 0.07, 0.006, w * 0.18, h * 0.89, zf + 0.022, std('#5ad1ff', 0.2, 0, { emissive: new T.Color('#1d6f8f'), emissiveIntensity: 0.6 }));
@@ -288,9 +315,12 @@
       pivot.position.set(0, bodyH + 0.006, -d / 2 + d * 0.2);
       g.add(pivot);
       const ld = d * 0.78;
-      const frame = rbox(pivot, w * 0.94, 0.02, ld, 0.006, 0, 0.01, ld / 2, std('#d3d7dc', 0.3, 0.2));
-      box(pivot, w * 0.62, 0.022, ld * 0.62, 0, 0.012, ld * 0.5, glass('#3b4b5c', 0.7));
-      movers.push({ rot: pivot, axis: 'x', sign: -1, max: deg(80), safe: deg(80), lim: edges(frame, LIM), warn: false });
+      const fm = std('#d3d7dc', 0.3, 0.2), fw = w * 0.94, gw = w * 0.62, gd = ld * 0.62, rim = (ld - gd) / 2;
+      const frame = rbox(pivot, fw, 0.02, rim, 0.006, 0, 0.01, rim / 2, fm);
+      rbox(pivot, fw, 0.02, rim, 0.006, 0, 0.01, ld - rim / 2, fm);
+      [-1, 1].forEach((sx) => rbox(pivot, (fw - gw) / 2, 0.02, gd, 0.004, sx * (fw + gw) / 4, 0.01, ld / 2, fm));
+      box(pivot, gw, 0.008, gd, 0, 0.01, ld / 2, glass('#1f2a36', 0.55));
+      movers.push({ rot: pivot, axis: 'x', sign: -1, max: deg(80), safe: deg(80), lim: edges(frame, LIM), warn });
     } else if (kind === 'microwave') {
       rbox(g, w, h, d, 0.01, 0, h / 2, 0, std('#e9e9e6', 0.4, 0.2));
       box(g, w * 0.64, h * 0.74, 0.004, -w * 0.13, h / 2, front + 0.001, std('#2a2d33', 0.8));   // 문 뒤 안쪽
@@ -305,7 +335,7 @@
       box(g, w, t, d, 0, h - t / 2, 0, bodyMat); box(g, w, t, d, 0, t / 2 + 0.04, 0, bodyMat);
       box(g, w - 2 * t, h - 0.06, 0.008, 0, h / 2, -d / 2 + 0.004, std('#e6e3dc', 0.7));
       box(g, w - 2 * t, t, d - 0.02, 0, h * 0.55, 0.01, bodyMat);
-      box(g, w, 0.04, d * 0.9, 0, 0.02, -0.01, std('#d4d0c8', 0.7));
+      box(g, w - 2 * t, 0.04, d * 0.9 - 0.02, 0, 0.02, -0.02, std('#d4d0c8', 0.7));
       const dh = h * 0.5 - 0.06;
       [-1, 1].forEach((s) => leaf(s * (w / 2), front - 0.016, -s, w / 2 - 0.004, 0.045, dh, 0.016, bodyMat, 90, (p) => {
         rbox(p, 0.012, 0.08, 0.014, 0.004, -s * (w / 2 - 0.04), dh * 0.8, 0.022, std(C.dark, 0.4, 0.3));
@@ -336,7 +366,7 @@
     } else if (kind === 'desk' || kind === 'kiddesk') {
       // 데스커 책상(흰 상판 · 철제 다리 · 뒤 가림판) · 어린이 책상 세트(작은 의자 포함)
       const kid = kind === 'kiddesk';
-      const deskD = kid ? d * 0.72 : d, dz = kid ? -d / 2 + deskD / 2 : 0, top = 0.025;
+      const deskD = kid ? d - 0.03 : d, dz = kid ? -d / 2 + deskD / 2 : 0, top = 0.025;
       const topMat = std(kid ? '#f6efe2' : '#f3f2ee', 0.45), legMat = std(kid ? '#9fc7a8' : '#3a3d42', 0.4, kid ? 0.05 : 0.5);
       rbox(g, w, top, deskD, 0.006, 0, h - top / 2, dz, topMat);
       [-1, 1].forEach((sx) => {
@@ -348,11 +378,11 @@
       if (kid) {
         // 작은 의자: 닫힘 = 책상 밑, 열림 = 앞으로 뺌 — 의자 앞이 책상 모서리에 닿을 만큼(앞이 막히면 그만큼만)
         const ch = new T.Group(); g.add(ch);
-        const cw = Math.min(0.36, w * 0.45), cd = 0.3, sh = h * 0.6, cz = dz + deskD / 2 - cd / 2 + 0.02;
+        const cw = Math.min(0.36, w * 0.45), cd = Math.min(0.32, d * 0.5), sh = h * 0.6, cz = d / 2 - cd / 2;
         const seat = rbox(ch, cw, 0.03, cd, 0.01, 0, sh, cz, std('#f2b8a2', 0.7));
-        [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([sx, sz]) => box(ch, 0.025, sh, 0.025, sx * (cw / 2 - 0.02), sh / 2, cz + sz * (cd / 2 - 0.02), std('#9fc7a8', 0.5)));
-        rbox(ch, cw, 0.18, 0.02, 0.008, 0, sh + 0.12, cz + cd / 2 - 0.01, std('#f2b8a2', 0.7));
-        const want = Math.min(op ? op.need : 35, Math.round((cd + 0.02) * 100));
+        [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([sx, sz]) => { const lh = sz > 0 ? sh + 0.2 : sh; box(ch, 0.025, lh, 0.025, sx * (cw / 2 - 0.02), lh / 2, cz + sz * (cd / 2 - 0.02), std('#9fc7a8', 0.5)); });
+        rbox(ch, cw, 0.16, 0.02, 0.008, 0, sh + 0.115, cz + cd / 2 - 0.02, std('#f2b8a2', 0.7));
+        const want = op && op.need > 0 ? op.need : 35;   // 의자 등이 2D 의 '앞 공간' 끝까지
         movers.push({ slide: ch, base: 0, max: want / 100, safe: safePull(op, want), lim: edges(seat, LIM), warn });
       }
     } else if (kind === 'vanity') {
@@ -381,19 +411,21 @@
       }
     } else if (kind === 'bed') {
       // 라지킹 매트리스(프레임 없음) — 매트리스(둥근 모서리) · 베개 2 · 이불(아래 60%, 옆으로 내려옴) · 머리는 뒤(-Z)
-      rbox(g, w, h, d, 0.05, 0, h / 2, 0, std(C.linen, 0.85));
-      box(g, w + 0.004, 0.012, d + 0.004, 0, h * 0.5, 0, std('#e8e1d4', 0.8), { noCast: true });
-      [-1, 1].forEach((sx) => rbox(g, w * 0.36, 0.13, 0.44, 0.055, sx * w * 0.235, h + 0.06, -d / 2 + 0.28, std(C.pillow, 0.9)));
-      const dz = d / 2 - d * 0.31, dl = d * 0.62, duv = std(C.duvet, 0.92, 0, { map: tex.fabric });
-      rbox(g, w + 0.04, 0.06, dl, 0.025, 0, h + 0.025, dz, duv);
-      [-1, 1].forEach((sx) => box(g, 0.025, 0.16, dl, sx * (w / 2 + 0.02), h - 0.055, dz, duv));
-      box(g, w + 0.04, 0.16, 0.025, 0, h - 0.055, d / 2 + 0.02, duv);
-      rbox(g, w * 0.98, 0.05, 0.14, 0.02, 0, h + 0.04, d / 2 - dl + 0.07, std('#e9f0f5', 0.9));
+      // 이불이 옆·발끝으로 내려와도 도면 자리(w×d) 안에 머물게 매트리스를 조금 작게(벽에 붙은 침대가 벽 속으로 안 들어가요)
+      const mw = w - 0.05, md = d - 0.025, mz = -0.0125;
+      rbox(g, mw, h, md, 0.05, 0, h / 2, mz, std(C.linen, 0.85));
+      box(g, mw + 0.004, 0.012, md + 0.004, 0, h * 0.5, mz, std('#e8e1d4', 0.8), { noCast: true });
+      [-1, 1].forEach((sx) => rbox(g, mw * 0.36, 0.13, 0.44, 0.055, sx * mw * 0.235, h + 0.06, -d / 2 + 0.28, std(C.pillow, 0.9)));
+      const dl = md * 0.62, dz = mz + md / 2 - dl / 2, duv = std(C.duvet, 0.92, 0, { map: tex.fabric });
+      rbox(g, w - 0.002, 0.06, dl, 0.025, 0, h + 0.025, dz, duv);
+      [-1, 1].forEach((sx) => box(g, 0.022, 0.16, dl, sx * (w / 2 - 0.012), h - 0.055, dz, duv));
+      box(g, w - 0.002, 0.16, 0.022, 0, h - 0.055, d / 2 - 0.012, duv);
+      rbox(g, mw * 0.98, 0.05, 0.14, 0.02, 0, h + 0.04, dz - dl / 2 + 0.07, std('#e9f0f5', 0.9));
     } else if (kind === 'wardrobe') {
       // 마켓비 피도르 캐비닛장 — 몸체 · 받침 · 문 두 짝(손잡이), 열면 안쪽(행어형: 옷걸이 봉·옷 / 수납형: 선반·상자)
       const bodyMat = std(C.white, 0.5, 0.05), dt = 0.02, bodyD = d - dt, bz = -dt / 2, t = 0.018;
       box(g, t, h, bodyD, -w / 2 + t / 2, h / 2, bz, bodyMat); box(g, t, h, bodyD, w / 2 - t / 2, h / 2, bz, bodyMat);
-      box(g, w, t, bodyD, 0, h - t / 2, bz, bodyMat); box(g, w, 0.06, bodyD, 0, 0.03, bz, std('#e4e1da', 0.6));
+      box(g, w, t, bodyD, 0, h - t / 2, bz, bodyMat); box(g, w - 2 * t, 0.06, bodyD - 0.01, 0, 0.03, bz - 0.005, std('#e4e1da', 0.6));
       box(g, w - 2 * t, h - 0.08, 0.008, 0, h / 2 + 0.02, -d / 2 + 0.006, std('#dcd7cd', 0.8));
       const hanger = /행어|2단 옷장|옷장/.test(it.name || '') && !/수납형/.test(it.name || '');
       const R = rng(it.pid);
@@ -556,7 +588,7 @@
     outer.traverse((o) => { o.userData.pid = it.pid; });
     let chair = null;
     if (kind === 'chair' && it.tuck > 0) chair = { tuck: it.tuck / 100, dx: (it.tuckDx || 0) / 100, dy: (it.tuckDy || 0) / 100, base: outer.position.clone() };
-    const limited = warn || movers.some((m) => m.safe < m.max - 0.01);
+    const limited = movers.length > 0 && (warn || movers.some((m) => m.safe < m.max - 0.01));   // 여닫는 데가 있는 짐만(주황 테두리가 보이는 것)
     function update(ratio) {
       movers.forEach((m) => {
         const want = ratio * m.max, v = Math.min(want, m.safe);
@@ -612,22 +644,27 @@
     const white = std('#f8f8f6', 0.2, 0.05);
     if (k === 'sink') {
       // 하부장(문짝) · 상판(구멍) · 움푹한 개수대 · 수전
-      const H = 0.85, top = 0.035;
-      box(g, w, H - 0.1, d - 0.04, 0, (H - 0.1) / 2 + 0.1, -0.02, std(C.cabinet, 0.5));
+      const H = 0.85, top = 0.035, sd = 0.18;
+      const bw = Math.min(0.8, w * 0.38), bd = Math.min(0.45, d * 0.62), bx = w * 0.12, bz = 0.01;
+      const cab = std(C.cabinet, 0.5), low = H + top - sd - 0.012;
+      box(g, w, low - 0.1, d - 0.04, 0, (low - 0.1) / 2 + 0.1, -0.02, cab);
+      const lw = w / 2 + bx - bw / 2, rw = w / 2 - bx - bw / 2;
+      box(g, lw, H - low, d - 0.04, -w / 2 + lw / 2, (H + low) / 2, -0.02, cab);
+      box(g, rw, H - low, d - 0.04, w / 2 - rw / 2, (H + low) / 2, -0.02, cab);
+      box(g, bw, H - low, 0.02, bx, (H + low) / 2, fr - 0.05, cab);
       box(g, w, 0.1, d - 0.08, 0, 0.05, -0.04, std('#d9d5cd', 0.7));
       const nd = Math.max(1, Math.round(w / 0.5));
       for (let i = 0; i < nd; i++) rbox(g, w / nd - 0.006, H - 0.16, 0.018, 0.004, -w / 2 + (w / nd) * (i + 0.5), 0.1 + (H - 0.16) / 2 + 0.01, fr - 0.04, std('#f6f5f1', 0.4));
-      const bw = Math.min(0.8, w * 0.38), bd = Math.min(0.45, d * 0.62), bx = w * 0.12, bz = 0.01;
       const cm = std(C.counter, 0.3, 0, { map: tex.marble });
       const ty = H + top / 2;
       box(g, bx - bw / 2 + w / 2, top, d, (-w / 2 + bx - bw / 2) / 2, ty, 0, cm);
       box(g, w / 2 - bx - bw / 2, top, d, (w / 2 + bx + bw / 2) / 2, ty, 0, cm);
-      box(g, bw, top, d / 2 + bz - bd / 2, bx, ty, (d / 2 + bz + bd / 2) / 2, cm);
-      box(g, bw, top, d / 2 - bz - bd / 2, bx, ty, (-d / 2 + bz - bd / 2) / 2, cm);
-      const st = std('#b9c0c7', 0.3, 0.6), sd = 0.18;
+      box(g, bw, top, d / 2 - bz - bd / 2, bx, ty, (d / 2 + bz + bd / 2) / 2, cm);
+      box(g, bw, top, d / 2 + bz - bd / 2, bx, ty, (-d / 2 + bz - bd / 2) / 2, cm);
+      const st = std('#a9b1b9', 0.25, 0.85), wh = sd - 0.004, wy = H + top - sd / 2 - 0.002;
       box(g, bw, 0.01, bd, bx, H + top - sd, bz, st);
-      [[bx - bw / 2, bz, 0.01, bd], [bx + bw / 2, bz, 0.01, bd]].forEach(([x, z, ww, dd]) => box(g, ww, sd, dd, x, H + top - sd / 2, z, st));
-      [[bz - bd / 2], [bz + bd / 2]].forEach(([z]) => box(g, bw, sd, 0.01, bx, H + top - sd / 2, z, st));
+      [[bx - bw / 2, bz, 0.01, bd], [bx + bw / 2, bz, 0.01, bd]].forEach(([x, z, ww, dd]) => box(g, ww, wh, dd, x, wy, z, st));
+      [[bz - bd / 2], [bz + bd / 2]].forEach(([z]) => box(g, bw, wh, 0.01, bx, wy, z, st));
       cyl(g, 0.025, 0.025, 0.004, bx, H + top - sd + 0.007, bz, std('#3b4048', 0.5, 0.4));
       const fz = -d / 2 + 0.06;
       cyl(g, 0.016, 0.02, 0.3, bx, H + top + 0.15, fz, std(C.chrome, 0.15, 0.8));
@@ -646,16 +683,26 @@
       // 물탱크(벽 쪽, 바닥부터) · 몸통 · 타원 시트 · 뚜껑
       const tz = -d / 2 + d * 0.12;
       rbox(g, w * 0.85, 0.78, d * 0.24, 0.02, 0, 0.39, tz, white);
-      const bz2 = -d / 2 + d * 0.24 + w * 0.32;
-      const body = cyl(g, w * 0.32, w * 0.26, 0.38, 0, 0.19, bz2, white, 28); body.scale.z = 1.25;
-      const seat = K.torus(g, w * 0.3, 0.028, 0, 0.4, bz2, std('#ffffff', 0.3)); seat.rotation.x = Math.PI / 2; seat.scale.y = 1.25;
-      const lid = cyl(g, w * 0.32, w * 0.32, 0.015, 0, 0.415, bz2, std('#fbfbfa', 0.3), 28); lid.scale.z = 1.25;
+      const tankD = d * 0.24, br = w * 0.4, half = (d - tankD) / 2 - 0.01, bz2 = -d / 2 + tankD + half, sz = half / br;
+      const body = cyl(g, br, br * 0.8, 0.38, 0, 0.19, bz2, white, 28); body.scale.z = sz;
+      const seat = K.torus(g, br * 0.92, 0.028, 0, 0.4, bz2, std('#ffffff', 0.3)); seat.rotation.x = Math.PI / 2; seat.scale.y = sz;
+      const lid = cyl(g, br, br, 0.015, 0, 0.415, bz2, std('#fbfbfa', 0.3), 28); lid.scale.z = sz;
     } else if (k === 'basin') {
       // 상판 + 움푹한 그릇(아래 반구) + 받침 + 수전
-      rbox(g, w, 0.04, d, 0.01, 0, 0.84, 0, white);
-      const bowl = K.put(g, new T.SphereGeometry(Math.min(w, d) * 0.36, 24, 12, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), std('#eef2f4', 0.15, 0.05, { side: T.DoubleSide }), 0, 0.861, 0.02);
-      bowl.geometry.userData = {}; bowl.userData.ownGeo = true; bowl.scale.y = 0.6;
-      box(g, w * 0.3, 0.82, d * 0.3, 0, 0.41, -d * 0.2, std('#f1f1ee', 0.3));
+      const br = Math.min(w, d) * 0.36;
+      const sh = new T.Shape();
+      sh.moveTo(-w / 2, -d / 2); sh.lineTo(w / 2, -d / 2); sh.lineTo(w / 2, d / 2); sh.lineTo(-w / 2, d / 2); sh.lineTo(-w / 2, -d / 2);
+      const hole = new T.Path();
+      hole.absellipse(0, -0.02, br, br * 0.85, 0, Math.PI * 2, true);
+      sh.holes.push(hole);
+      const tg = new T.ExtrudeGeometry(sh, { depth: 0.04, bevelEnabled: false, curveSegments: 28 });
+      tg.rotateX(-Math.PI / 2);   // 모양 y → −z, 두께는 위로 (0.82~0.86m)
+      K.put(g, tg, white, 0, 0.82, 0).userData.ownGeo = true;
+      const bowl = K.put(g, new T.SphereGeometry(br, 24, 12, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), std('#eef2f4', 0.15, 0.05, { side: T.DoubleSide }), 0, 0.859, 0.02);
+      bowl.userData.ownGeo = true; bowl.scale.set(1, 0.6, 0.85);
+      cyl(g, 0.018, 0.018, 0.004, 0, 0.859 - br * 0.6 + 0.004, 0.02, std('#3b4048', 0.5, 0.4));
+      const ph = 0.859 - br * 0.6 - 0.012;   // 받침은 그릇 바닥 아래까지만(그릇 안에 안 보이게)
+      box(g, w * 0.3, ph, d * 0.3, 0, ph / 2, -d * 0.2, std('#f1f1ee', 0.3));
       cyl(g, 0.012, 0.012, 0.16, 0, 0.92, -d / 2 + 0.06, std(C.chrome, 0.15, 0.8));
     } else if (k === 'shoe') {
       const H = num(f.hgt, 0) > 0 ? f.hgt / 100 : 1.2;
@@ -776,7 +823,8 @@
 
     // 주변 반사(환경광): 위는 밝고 아래는 따뜻한 회색인 하늘 공 → 금속·거울·유리가 실제처럼 비쳐요
     let envRT = null;
-    try {
+    function makeEnv() {
+      try {
       const pm = new T.PMREMGenerator(renderer);
       const es = new T.Scene();
       const sky = K.canvasTex(16, 256, (c, Wd, Hd) => { const gr = c.createLinearGradient(0, 0, 0, Hd); gr.addColorStop(0, '#ffffff'); gr.addColorStop(0.45, '#eef0f2'); gr.addColorStop(0.55, '#d8d0c4'); gr.addColorStop(1, '#6b5e4e'); c.fillStyle = gr; c.fillRect(0, 0, Wd, Hd); });
@@ -786,7 +834,9 @@
       envRT = pm.fromScene(es, 0.04);
       scene.environment = envRT.texture;
       pm.dispose(); sg.dispose(); sm.dispose();
-    } catch (e) { envRT = null; }
+      } catch (e) { envRT = null; }
+    }
+    makeEnv();
 
     // 빛: 은은한 전체 빛 + 해(그림자) + 푸른 보조광
     scene.add(new T.AmbientLight('#ffffff', envRT ? 0.18 : 0.32));
@@ -900,10 +950,16 @@
       s.shift = s.outer && in1 !== in2 ? (in1 ? 1 : -1) * WALL_T / 2 : 0;   // 방이 없는 쪽으로
       if (s.win) {
         const w = P.windows.find((x) => x.v === s.v && Math.abs((x.v ? x.x : x.y) - s.at) < 3 && (x.v ? x.y : x.x) <= s.a + 1 && (x.v ? x.y : x.x) + x.w >= s.b - 1);
-        s.door = !!w && /분합문|미닫이|나가는 문|바닥까지 문/.test(w.note || '');
+        s.door = !!w && /분합문|미닫이|나가는 문|바닥까지 문/.test(w.note || '') && !/인지 확인/.test(w.note || '');   // 확인 전인 창은 보통 창(턱 0.9m)
       }
     });
     const voidRects = geo.voids ? geo.voids(P) : [];
+    /** 바깥 벽 위 문(현관)은 벽과 같이 방이 없는 쪽으로 반 두께 옮겨요 (m) */
+    const doorShift = (dr) => {
+      const m = dr.v ? dr.y + dr.w / 2 : dr.x + dr.w / 2, at = dr.v ? dr.x : dr.y;
+      const a = dr.v ? inRoom(at - 8, m) : inRoom(m, at - 8), b = dr.v ? inRoom(at + 8, m) : inRoom(m, at + 8);
+      return a !== b ? (a ? 1 : -1) * WALL_T / 2 : 0;
+    };
     let wallMode = opt.walls || 'cut';
     function wallMats(mode) {
       if (mode === 'glass') { const m = K.std('#94a3b8', 0.3, 0.05, { transparent: true, opacity: 0.22, depthWrite: false }); return { inner: m, outer: m }; }
@@ -934,7 +990,8 @@
       wallLike.forEach((f) => add((f.x + f.w / 2) / 100, 0, (f.y + f.h / 2) / 100, f.w / 100, vh, f.h / 100, M.inner, solid));
       // 문 위 벽(전체 보기)
       if (wallMode !== 'cut') P.doors.forEach((dr) => {
-        const r = dr.v ? { x: dr.x / 100, z: (dr.y + dr.w / 2) / 100, w: WALL_T, d: dr.w / 100 } : { x: (dr.x + dr.w / 2) / 100, z: dr.y / 100, w: dr.w / 100, d: WALL_T };
+        const sh = doorShift(dr);
+        const r = dr.v ? { x: dr.x / 100 + sh, z: (dr.y + dr.w / 2) / 100, w: WALL_T, d: dr.w / 100 } : { x: (dr.x + dr.w / 2) / 100, z: dr.y / 100 + sh, w: dr.w / 100, d: WALL_T };
         add(r.x, DOOR_H, r.z, r.w, FULL_H - DOOR_H, r.d, M.inner, false);
       });
       buildDoors();
@@ -947,11 +1004,12 @@
       P.doors.forEach((dr) => {
         if (!dr.hingeAt || !dr.shut || !dr.open) return;
         const [hx, hy] = dr.hingeAt;
+        const sh = doorShift(dr);
         const a0 = Math.atan2(dr.shut[1] - hy, dr.shut[0] - hx), a1 = Math.atan2(dr.open[1] - hy, dr.open[0] - hx);
         const len = Math.hypot(dr.shut[0] - hx, dr.shut[1] - hy) / 100;
         if (!(len > 0.05)) return;
         const pivot = new T.Group();
-        pivot.position.set(hx / 100, 0, hy / 100);
+        pivot.position.set(hx / 100 + (dr.v ? sh : 0), 0, hy / 100 + (dr.v ? 0 : sh));
         const leafMat = wallMode === 'glass' ? K.std(C.door, 0.5, 0, { transparent: true, opacity: 0.4, depthWrite: false }) : K.std(C.door, 0.5, 0, { map: tex.grain });
         const lm = K.rbox(pivot, len, H, 0.04, 0.006, len / 2, H / 2, 0, leafMat);
         if (H > 1) K.cyl(lm, 0.012, 0.012, 0.1, len / 2 - 0.07, 0, 0.04, K.std(C.chrome, 0.2, 0.8)).rotation.x = Math.PI / 2;
@@ -987,10 +1045,16 @@
       if (!bases.length) return;
       const qty = Math.max(1, Math.round(num(t.qty, 1)));
       bases.slice(0, t.invId === 'inv-microwave' ? 1 : qty).forEach((base, i) => {
-        const dw = Math.min(t.dw, base.dw), dd = Math.min(t.dd, base.dd);
+        const topBox = t.invId === 'inv-top-box';
+        const dw = Math.min(t.dw, base.dw), dd = topBox ? t.dd : Math.min(t.dd, base.dd);
+        const q = base.rot % 180 !== 0, bw = q ? dd : dw, bh = q ? dw : dd;
+        // 뒤에 붙이기(간이박스) 또는 앞에 맞추기(전자레인지) — 정면 0 남 · 90 서 · 180 북 · 270 동
+        const back = topBox;
+        const x = base.rot === 90 ? (back ? base.x + base.w - bw : base.x) : base.rot === 270 ? (back ? base.x : base.x + base.w - bw) : base.x + (base.w - bw) / 2;
+        const y = base.rot === 0 ? (back ? base.y : base.y + base.h - bh) : base.rot === 180 ? (back ? base.y + base.h - bh : base.y) : base.y + (base.h - bh) / 2;
         const it = { pid: 'top-' + t.invId + (i ? '-' + i : ''), invId: t.invId, name: t.name, cat: t.cat, tag: t.tag, fate: t.fate, url: t.url, room: base.room, front: base.front,
-          rot: base.rot, dw, dd, hgt: t.hgt, z0: (base.z0 || 0) + base.hgt * Math.max(1, base.n || 1), onTop: base.name, x: base.x + (base.w - (base.rot % 180 ? dd : dw)) / 2, y: base.y + (base.h - (base.rot % 180 ? dw : dd)) / 2,
-          w: base.rot % 180 ? dd : dw, h: base.rot % 180 ? dw : dd,
+          rot: base.rot, dw, dd, hgt: t.hgt, z0: (base.z0 || 0) + base.hgt * Math.max(1, base.n || 1), onTop: base.name, x, y,
+          w: bw, h: bh,
           open: t.invId === 'inv-microwave' ? { kind: 'front-door', need: Math.round(dd * 0.9), free: base.open ? Math.min(Math.round(dd * 0.9), base.open.free) : Math.round(dd * 0.9), by: base.open ? base.open.by : '', top: 0 } : null };
         try {
           const m = buildModel(K, it, tex);
@@ -1046,7 +1110,7 @@
       elx.className = 'p3gl-label';
       elx.textContent = shortName(it.name, 9) + (total > 1 ? ' ×' + total : '');
       labelLayer.appendChild(elx);
-      labels.push({ el: elx, anchor: m.inner, y: ((it.z0 || 0) / 100) + m.top + 0.08, rank: m.top, w: 0, h: 0 });
+      labels.push({ el: elx, pid, anchor: m.inner, y: m.obj.position.y + m.top + 0.08, rank: m.top, w: 0, h: 0 });
     });
     labels.sort((a, b) => b.rank - a.rank);
     const v3 = new T.Vector3();
@@ -1060,9 +1124,10 @@
         v3.y = L.y;
         v3.project(camera);
         let vis = v3.z < 1 && Math.abs(v3.x) < 1.05 && Math.abs(v3.y) < 1.05;
-        const sx = (v3.x * 0.5 + 0.5) * Wd, sy = (-v3.y * 0.5 + 0.5) * Hd;
+        let sx = (v3.x * 0.5 + 0.5) * Wd, sy = (-v3.y * 0.5 + 0.5) * Hd;
         if (vis) {
           if (!L.w) { L.el.style.display = ''; L.w = L.el.offsetWidth || 60; L.h = L.el.offsetHeight || 18; }
+          sx = clamp(sx, L.w / 2 + 2, Wd - L.w / 2 - 2); sy = clamp(sy, L.h + 2, Hd - 2);   // 가장자리에서 잘리지 않게 안으로
           const r = { x: sx - L.w / 2, y: sy - L.h, w: L.w, h: L.h };
           if (taken.some((t) => r.x < t.x + t.w + 2 && t.x < r.x + r.w + 2 && r.y < t.y + t.h + 1 && t.y < r.y + r.h + 1)) vis = false;
           else taken.push(r);
@@ -1079,14 +1144,28 @@
       need();
     }
     /** 내려다보는 각도 pitch(°), 바라보는 쪽(dir: 카메라가 있는 쪽 0 남 · 90 서 · 180 북 · 270 동)에서 가로 aw·세로 ad(m)가 화면에 다 들어오는 자리 */
+    const fitCam = new T.PerspectiveCamera(), fitV = new T.Vector3();
     function fitView(tx, tz, aw, ad, pitchDeg, dir, hgt) {
       const tv = Math.tan(deg(camera.fov / 2)), th = tv * camera.aspect, pitch = deg(pitchDeg);
       const side = dir === 90 || dir === 270;
       const across = side ? ad : aw, along = side ? aw : ad;
-      const dist = Math.max(across / 2 / th, (along * Math.sin(pitch) + hgt * Math.cos(pitch)) / 2 / tv) * 1.08 + 0.4;
+      let dist = Math.max(across / 2 / th, (along * Math.sin(pitch) + hgt * Math.cos(pitch)) / 2 / tv) * 1.08 + 0.4;
       const a = deg(dir), ox = -Math.sin(a), oz = Math.cos(a);   // 0 → +Z(남), 90 → −X(서), 180 → −Z(북), 270 → +X(동)
-      const y = dist * Math.sin(pitch), hd = dist * Math.cos(pitch);
-      return [new T.Vector3(tx + ox * hd, y, tz + oz * hd), new T.Vector3(tx, 0, tz)];
+      const at = (d) => new T.Vector3(tx + ox * d * Math.cos(pitch), d * Math.sin(pitch), tz + oz * d * Math.cos(pitch));
+      // 카메라 가까운 쪽 모서리는 더 크게 보여서(원근), 상자 꼭짓점 8개가 화면 안(±0.94)에 다 들어올 때까지 물러나요 — 좁은 휴대폰 화면
+      fitCam.fov = camera.fov; fitCam.aspect = camera.aspect; fitCam.near = camera.near; fitCam.far = camera.far; fitCam.updateProjectionMatrix();
+      const tgt = new T.Vector3(tx, 0, tz);
+      for (let i = 0; i < 24; i++) {
+        fitCam.position.copy(at(dist)); fitCam.lookAt(tgt); fitCam.updateMatrixWorld(true);
+        let mx = 0;
+        [-1, 1].forEach((sx) => [-1, 1].forEach((sz) => [0, hgt].forEach((yy) => {
+          fitV.set(tx + sx * aw / 2, yy, tz + sz * ad / 2).project(fitCam);
+          mx = Math.max(mx, Math.abs(fitV.x), Math.abs(fitV.y));
+        })));
+        if (mx <= 0.94) break;
+        dist *= 1 + Math.min(0.25, (mx - 0.94) * 0.6 + 0.02);
+      }
+      return [at(dist), tgt];
     }
     function view(id, ms) {
       lastView = id || 'all';
@@ -1151,12 +1230,32 @@
     }
 
     // 고르기(누르기 — 끌지 않았을 때): 짐·고정물·벽 가운데 처음 맞은 불투명한 것이 짐일 때만 (가려진 짐은 안 골라요)
+    // 두 손가락(확대·옮기기)을 뗄 때는 고르지 않아요. 이름표를 누르면 그 짐을 골라요
     const ray = new T.Raycaster(), pt = new T.Vector2();
-    let down = null;
-    const onDown = (e) => { down = { x: e.clientX, y: e.clientY }; if (opt.onTouch) opt.onTouch(); };
+    let down = null, multi = false;
+    const act = new Set();
+    const onDown = (e) => {
+      act.add(e.pointerId);
+      if (act.size > 1) multi = true;
+      down = act.size === 1 ? { x: e.clientX, y: e.clientY, id: e.pointerId } : null;
+      if (opt.onTouch) opt.onTouch();
+    };
+    const onCancel = (e) => { act.delete(e.pointerId); if (!act.size) multi = false; down = null; };
     const onUp = (e) => {
-      if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 6) { down = null; return; }
+      act.delete(e.pointerId);
+      const wasMulti = multi;
+      if (!act.size) multi = false;
+      if (wasMulti || !down || down.id !== e.pointerId || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 6) { down = null; viewBeforeDrag = null; return; }
       down = null;
+      if (viewBeforeDrag) lastView = viewBeforeDrag;   // 누르기만 했으면 시점은 그대로(창 크기가 바뀌면 다시 맞춰요)
+      viewBeforeDrag = null;
+      if (labelsOn) {
+        for (const L of labels) {
+          if (L.el.style.display === 'none') continue;
+          const b = L.el.getBoundingClientRect();
+          if (e.clientX >= b.left && e.clientX <= b.right && e.clientY >= b.top && e.clientY <= b.bottom) { if (opt.onPick) opt.onPick(L.pid); return; }
+        }
+      }
       const r = canvas.getBoundingClientRect();
       pt.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
       ray.setFromCamera(pt, camera);
@@ -1166,6 +1265,7 @@
     };
     canvas.addEventListener('pointerdown', onDown);
     canvas.addEventListener('pointerup', onUp);
+    canvas.addEventListener('pointercancel', onCancel);
 
     function resize() {
       const Wd = Math.max(50, host.clientWidth), Hd = Math.max(50, host.clientHeight);
@@ -1178,16 +1278,27 @@
     }
     const ro = window.ResizeObserver ? new ResizeObserver(resize) : null;
     if (ro) ro.observe(host);
-    const onLost = (e) => { e.preventDefault(); if (alive && opt.onLost) opt.onLost(); };
+    // 그림 문맥을 잃으면(기기 메모리 부족 등) 브라우저가 되살릴 때까지 3초 기다리고, 안 돌아오면 알려요. 돌아오면 환경광·그림자를 다시
+    let lostT = 0;
+    const onLost = (e) => { e.preventDefault(); clearTimeout(lostT); if (alive && opt.onLost) lostT = setTimeout(() => { if (alive) opt.onLost(); }, 3000); };
+    const onRestored = () => { clearTimeout(lostT); if (!alive) return; envRT = null; makeEnv(); need(true); };   // 잃은 문맥의 옛 환경광은 이미 사라져서 버리기만
     canvas.addEventListener('webglcontextlost', onLost);
+    canvas.addEventListener('webglcontextrestored', onRestored);
     // 손으로 돌리면 '마지막 시점'은 잊어요(창 크기가 바뀌어도 손으로 맞춘 시점을 지켜요)
-    controls.addEventListener('start', () => { lastView = null; anim = null; });
+    let viewBeforeDrag = null;
+    controls.addEventListener('start', () => { viewBeforeDrag = lastView; lastView = null; anim = null; });
+    const onWheel = () => { viewBeforeDrag = null; };   // 휠 확대는 손으로 맞춘 시점
+    canvas.addEventListener('wheel', onWheel, { passive: true });
 
     function dispose() {
       alive = false;
       cancelAnimationFrame(raf);
       if (ro) ro.disconnect();
+      clearTimeout(lostT);
       canvas.removeEventListener('webglcontextlost', onLost);
+      canvas.removeEventListener('webglcontextrestored', onRestored);
+      canvas.removeEventListener('pointercancel', onCancel);
+      canvas.removeEventListener('wheel', onWheel);
       canvas.removeEventListener('pointerdown', onDown);
       canvas.removeEventListener('pointerup', onUp);
       controls.dispose();
@@ -1195,6 +1306,7 @@
       if (selBox) { selBox.geometry.dispose(); selBox.material.dispose(); }
       ground.geometry.dispose(); ground.material.dispose();
       if (envRT) envRT.dispose();
+      sun.dispose();
       K.dispose();
       renderer.dispose();
       if (renderer.forceContextLoss) try { renderer.forceContextLoss(); } catch (e) { /* 무시 */ }
@@ -1202,9 +1314,27 @@
       labelLayer.remove();
     }
 
+    // 키보드: ←→ 돌리기 · ↑↓ 위아래 각도 · +− 확대 (CSS 그림과 같은 키)
+    const sph = new T.Spherical(), off = new T.Vector3();
+    function nudge(k) {
+      off.copy(camera.position).sub(controls.target);
+      sph.setFromVector3(off);
+      if (k === 'ArrowLeft') sph.theta -= deg(10);
+      else if (k === 'ArrowRight') sph.theta += deg(10);
+      else if (k === 'ArrowUp') sph.phi = clamp(sph.phi - deg(6), 0.05, controls.maxPolarAngle);
+      else if (k === 'ArrowDown') sph.phi = clamp(sph.phi + deg(6), 0.05, controls.maxPolarAngle);
+      else if (k === '+' || k === '=') sph.radius = clamp(sph.radius / 1.2, controls.minDistance, controls.maxDistance);
+      else if (k === '-') sph.radius = clamp(sph.radius * 1.2, controls.minDistance, controls.maxDistance);
+      else return false;
+      off.setFromSpherical(sph);
+      camera.position.copy(controls.target).add(off);
+      anim = null; lastView = null; viewBeforeDrag = null;
+      controls.update(); need();
+      return true;
+    }
     const limitedItems = () => Array.from(itemObjs.values()).filter((m) => m.limited);
     return {
-      setRatio, view, select,
+      setRatio, view, select, nudge,
       setWalls(m) { wallMode = m === 'glass' || m === 'full' ? m : 'cut'; buildWalls(); },
       setLabels(on) { labelsOn = !!on; need(); },
       items: extraItems,
