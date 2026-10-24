@@ -305,13 +305,28 @@ textarea { min-height: 70px; font-size: .95rem; }
     { id: 'dining', name: '주방·식당', x: 240, y: 150, w: 195, d: 480, door: '', win: '',
       walls: { top: '발코니 쪽', right: '조리대 쪽', bottom: '거실·안방 쪽 (트임)', left: '작은방(욕실 쪽) 벽' },
       hint: '오른쪽 벽 위쪽 3m가 조리대예요(싱크·가스레인지 자리). 가로는 조리대 앞 바닥 공간 기준.' },
+    { id: 'balTop1', name: '위 발코니(왼쪽)', kind: 'balcony', x: 0, y: 0, w: 410, d: 150, door: '', win: '',
+      walls: { top: '바깥 창 쪽', right: '작은 칸 쪽', bottom: '작은방·식당 쪽', left: '바깥벽' },
+      hint: '작은방(욕실 쪽)과 식당 앞 발코니예요. 세탁기·건조기를 둘 수 있는지 수전·배수구·콘센트 위치와 높이도 메모해요(세탁 B).' },
+    { id: 'balTopBox', name: '작은 칸(위)', kind: 'balcony', x: 410, y: 0, w: 70, d: 150, door: '', win: '',
+      walls: { top: '바깥 쪽', right: '오른쪽 발코니 쪽', bottom: '조리대 쪽', left: '왼쪽 발코니 쪽' },
+      hint: '조리대 위쪽 끝에 붙은 작은 칸이에요. 무엇에 쓰는 칸인지(창고·보일러·실외기) 보고 크기를 재요(세탁 C).' },
+    { id: 'balTop2', name: '위 발코니(오른쪽)', kind: 'balcony', x: 480, y: 0, w: 240, d: 150, door: '', win: '',
+      walls: { top: '바깥 창 쪽', right: '복도 쪽', bottom: '작은방(현관 쪽) 쪽', left: '작은 칸 쪽' },
+      hint: '작은방(현관 쪽) 앞 발코니예요.' },
+    { id: 'balBig', name: '큰 발코니', kind: 'balcony', x: 110, y: 960, w: 610, d: 150, door: '', win: '',
+      walls: { top: '안방·거실 쪽', right: '복도 쪽', bottom: '바깥 창 쪽', left: '작은 칸 쪽' },
+      hint: '안방·거실 앞 큰 발코니예요. 실외기 자리·수전·배수구가 있으면 위치를 메모해요.' },
+    { id: 'balBox', name: '작은 칸(큰 발코니 끝)', kind: 'balcony', x: 0, y: 970, w: 110, d: 140, door: '', win: '',
+      walls: { top: '안방 쪽', right: '큰 발코니 쪽 (문)', bottom: '바깥 쪽', left: '바깥벽' },
+      hint: '큰 발코니 끝의 문 달린 작은 칸이에요. 세탁기·건조기 자리인지(수전·배수구·콘센트) 보고 크기를 재요(세탁 A).' },
   ];
   var SPOTS = [
     { id: 'fridge', mk: [[458, 490, '냉장고']], name: '냉장고 자리', hint: '우리 냉장고 91.3 × 73.5 × 179cm → 폭 93cm 이상(권장 101cm). 위에 장이 있으면 그 아래까지 높이.', f: [['w', '폭'], ['d', '깊이'], ['h', '높이']], c: [['outlet', '콘센트 있음']] },
-    { id: 'laundry', mk: [[55, 1040, '세탁 A'], [205, 75, '세탁 B'], [445, 75, '세탁 C']], name: '세탁기·건조기 자리', hint: '어디인지 먼저 찾아요(수전·배수구가 있는 곳 — 도면의 A 왼쪽 아래 작은 칸, B·C 위쪽 발코니·작은 칸). 통돌이 63.2 + 건조기 68.6 = 나란히 약 140cm 이상, 깊이 약 95cm, 높이는 위 선반·창틀까지(통돌이 뚜껑 열면 약 135cm).', where: true, f: [['w', '벽 폭'], ['d', '깊이'], ['h', '선반·창틀까지 높이'], ['door', '들어가는 문 폭']], c: [['water', '수전'], ['drain', '배수구'], ['outlet', '콘센트']] },
+    { id: 'laundry', mk: [[55, 1080, '세탁 A', 1], [330, 75, '세탁 B'], [445, 95, '세탁 C', 1]], name: '세탁기·건조기 자리', hint: '어디인지 먼저 찾아요(수전·배수구가 있는 곳 — 도면의 A 왼쪽 아래 작은 칸, B·C 위쪽 발코니·작은 칸). 통돌이 63.2 + 건조기 68.6 = 나란히 약 140cm 이상, 깊이 약 95cm, 높이는 위 선반·창틀까지(통돌이 뚜껑 열면 약 135cm).', where: true, f: [['w', '벽 폭'], ['d', '깊이'], ['h', '선반·창틀까지 높이'], ['door', '들어가는 문 폭']], c: [['water', '수전'], ['drain', '배수구'], ['outlet', '콘센트']] },
     { id: 'induction', mk: [[458, 195, '인덕션']], name: '인덕션 자리', hint: '가스레인지는 안 써요. 지금 가스레인지 자리(조리대 위쪽 끝)의 폭·깊이, 220V 콘센트가 가까이 있는지.', f: [['w', '폭'], ['d', '깊이'], ['hood', '후드까지 높이']], c: [['outlet', '220V 콘센트'], ['breaker', '분전반에 인덕션 차단기']] },
     { id: 'path', mk: [[680, 560, '현관']], name: '들어오는 길 (냉장고·매트리스·캐비닛장)', hint: '가장 좁은 곳 기준. 냉장고는 폭 약 93cm가 지나가야 해요(옆으로 돌리면 약 80cm).', f: [['door', '현관문 폭'], ['doorH', '현관문 높이'], ['ev', '엘리베이터 문 폭'], ['evD', '엘리베이터 안 깊이'], ['evH', '엘리베이터 안 높이'], ['hall', '주방 들어가는 좁은 곳'], ['bath', '욕실 문 폭']] },
-    { id: 'ac', mk: [[530, 1035, '에어컨·실외기']], name: '에어컨 자리', hint: '거실 스탠드·안방 벽걸이 배관 구멍이 어느 벽 어디쯤인지, 실외기 놓을 곳 크기(실외기 88 × 31 × 63.8cm).', f: [['ow', '실외기 자리 폭'], ['od', '실외기 자리 깊이'], ['oh', '실외기 자리 높이']], memo: '배관 구멍 위치 (예: 거실 왼쪽 벽 위쪽, 바닥에서 2m)' },
+    { id: 'ac', mk: [[570, 1078, '에어컨·실외기']], name: '에어컨 자리', hint: '거실 스탠드·안방 벽걸이 배관 구멍이 어느 벽 어디쯤인지, 실외기 놓을 곳 크기(실외기 88 × 31 × 63.8cm).', f: [['ow', '실외기 자리 폭'], ['od', '실외기 자리 깊이'], ['oh', '실외기 자리 높이']], memo: '배관 구멍 위치 (예: 거실 왼쪽 벽 위쪽, 바닥에서 2m)' },
     { id: 'shoe', mk: [[625, 480, '신발장']], name: '신발장', hint: '칸 수와 한 칸 높이를 보면 신발 정리 기준을 정할 수 있어요.', f: [['w', '폭'], ['d', '깊이'], ['h', '높이'], ['n', '칸 수']] },
     { id: 'spare', name: '작은 칸들 (왼쪽 발코니 끝·주방 옆)', hint: '무엇에 쓰는 칸인지(세탁·보일러·실외기·창고) 보고 크기를 적어요.', f: [['w', '폭'], ['d', '깊이'], ['h', '높이']], memo: '어디·무슨 칸인지' },
   ];
@@ -707,11 +722,11 @@ textarea { min-height: 70px; font-size: .95rem; }
     o.push('<rect x="735" y="0" width="45" height="1110" fill="var(--bg-3)"/><text x="757" y="555" font-size="20" fill="var(--ink-3)" text-anchor="middle" transform="rotate(90 757 555)">복도·계단·엘리베이터</text>');
     o.push('<g fill="var(--bg-3)" stroke="var(--line-2)" stroke-width="3"><rect x="480" y="0" width="240" height="150"/><rect x="410" y="0" width="70" height="150"/><rect x="0" y="0" width="410" height="150"/><rect x="0" y="960" width="720" height="150"/></g>');
     o.push('<rect x="0" y="970" width="110" height="140" fill="var(--line)" stroke="var(--line-2)" stroke-width="3"/>');
-    o.push('<g font-size="18" fill="var(--ink-3)" text-anchor="middle"><text x="600" y="80">발코니</text><text x="205" y="80">발코니</text><text x="420" y="1040">큰 발코니</text><text x="445" y="80" font-size="14">작은 칸</text><text x="55" y="1030" font-size="14">작은 칸</text></g>');
+    // 발코니 이름은 아래 방 이름 칸으로
     // 방 바닥
     o.push('<g fill="var(--bg-2)" stroke="var(--line-2)" stroke-width="3">');
     o.push('<rect x="240" y="150" width="195" height="480"/><rect x="360" y="450" width="360" height="510"/>');
-    ROOMS.forEach(function (r) { if (r.id !== 'living' && r.id !== 'dining') o.push('<rect x="' + r.x + '" y="' + r.y + '" width="' + r.w + '" height="' + r.d + '"/>'); });
+    ROOMS.forEach(function (r) { if (r.id !== 'living' && r.id !== 'dining' && r.kind !== 'balcony') o.push('<rect x="' + r.x + '" y="' + r.y + '" width="' + r.w + '" height="' + r.d + '"/>'); });
     o.push('</g>');
     // 현관·욕실·조리대
     o.push('<rect x="590" y="450" width="130" height="160" fill="var(--bg-3)" stroke="var(--line-2)" stroke-width="2"/><text x="655" y="500" font-size="16" fill="var(--ink-3)" text-anchor="middle">현관</text>');
@@ -738,18 +753,23 @@ textarea { min-height: 70px; font-size: .95rem; }
     ROOMS.forEach(function (r) {
       var st = roomState(r.id);
       ['top', 'right', 'bottom', 'left'].forEach(function (side) {
-        var x1, y1, x2, y2, tx, ty, anchor = 'middle';
-        if (side === 'top') { x1 = r.x + GAPE; x2 = r.x + r.w - GAPE; y1 = y2 = r.y + IN; tx = r.x + r.w / 2; ty = y1 + 26; }
-        else if (side === 'bottom') { x1 = r.x + GAPE; x2 = r.x + r.w - GAPE; y1 = y2 = r.y + r.d - IN; tx = r.x + r.w / 2; ty = y1 - 14; }
-        else if (side === 'left') { y1 = r.y + GAPE; y2 = r.y + r.d - GAPE; x1 = x2 = r.x + IN; tx = x1 + 12; ty = r.y + r.d * 0.3; anchor = 'start'; }
-        else { y1 = r.y + GAPE; y2 = r.y + r.d - GAPE; x1 = x2 = r.x + r.w - IN; tx = x1 - 12; ty = r.y + r.d * 0.3; anchor = 'end'; }
+        var x1, y1, x2, y2, tx, ty, anchor = 'middle', small = r.w < 160 || r.d < 160, tiny = r.w < 120;
+        var hx = r.kind === 'balcony' && !tiny ? r.x + r.w * (side === 'bottom' && r.y === 0 ? 0.76 : 0.24) : r.x + r.w / 2; // 발코니는 창 글자와 겹치지 않게 옆으로
+        if (side === 'top') { x1 = r.x + GAPE; x2 = r.x + r.w - GAPE; y1 = y2 = r.y + IN; tx = hx; ty = y1 + (small ? 22 : 26); }
+        else if (side === 'bottom') { x1 = r.x + GAPE; x2 = r.x + r.w - GAPE; y1 = y2 = r.y + r.d - IN; tx = hx; ty = y1 - 12; }
+        else if (side === 'left') { y1 = r.y + GAPE; y2 = r.y + r.d - GAPE; x1 = x2 = r.x + IN; tx = x1 + 12; ty = r.y + r.d * (small ? 0.42 : 0.3); anchor = 'start'; }
+        else { y1 = r.y + GAPE; y2 = r.y + r.d - GAPE; x1 = x2 = r.x + r.w - IN; tx = x1 - 12; ty = r.y + r.d * (small ? 0.72 : 0.3); anchor = 'end'; }
         var dimKey = side === 'top' || side === 'bottom' ? 'w' : 'd', v = st[dimKey], u = st['wall_' + side];
         var label = SCREEN[side] + ' ' + (has(v) ? v : '?') + (has(u) ? ' · 놓을 ' + u : '');
         var done = has(v) || has(u);
         o.push('<g class="hit" data-k="wall|' + r.id + '|' + side + '" tabindex="0" role="button" aria-label="' + esc(r.name + ' ' + SCREEN[side] + ' 벽') + '">');
         o.push('<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="transparent" stroke-width="28"/>');
         o.push('<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="' + COL[side] + '" stroke-width="' + (done ? 9 : 7) + '" stroke-linecap="round"' + (done ? '' : ' stroke-opacity=".75"') + '/>');
-        o.push('<text x="' + tx + '" y="' + ty + '" font-size="15" font-weight="800" fill="' + COL[side] + '" text-anchor="' + anchor + '">' + esc(label) + '</text>');
+        if (tiny) label = SCREEN[side].slice(0, 1) + ' ' + (has(v) ? v : '?');
+        if (tiny && (side === 'left' || side === 'right')) { anchor = 'middle'; tx = x1; ty = r.y + r.d * 0.3; }
+        if (tiny && side === 'top') ty = r.y + 12; // 작은 칸은 위·아래 글자를 선 바깥에 두어 안쪽을 비워요
+        if (tiny && side === 'bottom') ty = r.y + r.d - 2;
+        o.push('<text x="' + tx + '" y="' + ty + '" font-size="' + (small ? 12 : 15) + '" font-weight="800" fill="' + COL[side] + '" text-anchor="' + anchor + '">' + esc(label) + '</text>');
         o.push('</g>');
       });
     });
@@ -782,18 +802,24 @@ textarea { min-height: 70px; font-size: .95rem; }
         var wx = (W[0] + W[2]) / 2, wy = (W[1] + W[3]) / 2;
         o.push('<text x="' + wx + '" y="' + (wy + (horiz ? sgn * 26 + (sgn > 0 ? 6 : 0) : 5)) + '" font-size="15" font-weight="800" fill="var(--c-win)" text-anchor="middle">창 ' + (has(st.winW) ? esc(st.winW) : '?') + (has(st.winSill) ? ' · 창틀 ' + esc(st.winSill) : '') + '</text></g>');
       }
-      var cx = r.x + r.w / 2, cy = r.y + r.d / 2 + (r.id === 'living' ? 60 : r.id === 'dining' ? -40 : 0);
-      o.push('<g class="hit" data-k="room|' + r.id + '" tabindex="0" role="button" aria-label="' + esc(r.name + ' 천장 높이·메모') + '"><rect x="' + (cx - 72) + '" y="' + (cy - 30) + '" width="144" height="54" rx="10" fill="var(--bg)" fill-opacity=".95" stroke="var(--ink-3)" stroke-width="1.5"/>');
-      o.push('<text x="' + cx + '" y="' + (cy - 6) + '" font-size="17" font-weight="800" fill="var(--ink)" text-anchor="middle">' + esc(r.name.replace(/\(.*\)/, '')) + '</text>');
-      o.push('<text x="' + cx + '" y="' + (cy + 15) + '" font-size="13" fill="var(--ink-2)" text-anchor="middle">천장 ' + (has(st.ch) ? esc(st.ch) : '?') + (/\(/.test(r.name) ? ' · ' + esc(r.name.replace(/^.*\((.*)\).*$/, '$1')) : '') + '</text></g>');
+      if (r.w < 100) return;
+      if (r.w < 120) { // 작은 칸: 상자 없이 이름만
+        o.push('<g class="hit" data-k="room|' + r.id + '" tabindex="0" role="button" aria-label="' + esc(r.name + ' 메모·높이') + '"><rect x="' + (r.x + 28) + '" y="' + (r.y + r.d * 0.5 - 24) + '" width="' + (r.w - 56) + '" height="32" fill="transparent"/><text x="' + (r.x + r.w / 2) + '" y="' + (r.y + r.d * 0.5) + '" font-size="12" font-weight="800" fill="var(--ink-2)" text-anchor="middle">' + esc(r.name.replace(/\(.*\)/, '')) + '</text></g>');
+        return;
+      }
+      var cx = r.x + r.w / 2, cy = r.y + r.d / 2 + (r.id === 'living' ? 60 : r.id === 'dining' ? -40 : r.kind === 'balcony' ? -4 : 0);
+      var bw = Math.min(144, r.w - 10), sm = r.kind === 'balcony';
+      o.push('<g class="hit" data-k="room|' + r.id + '" tabindex="0" role="button" aria-label="' + esc(r.name + ' 천장 높이·메모') + '"><rect x="' + (cx - bw / 2) + '" y="' + (cy - (sm ? 24 : 30)) + '" width="' + bw + '" height="' + (sm ? 44 : 54) + '" rx="10" fill="var(--bg)" fill-opacity=".95" stroke="var(--ink-3)" stroke-width="1.5"/>');
+      o.push('<text x="' + cx + '" y="' + (cy - (sm ? 5 : 6)) + '" font-size="' + (sm ? 14 : 17) + '" font-weight="800" fill="var(--ink)" text-anchor="middle">' + esc(r.name.replace(/\(.*\)/, '')) + '</text>');
+      o.push('<text x="' + cx + '" y="' + (cy + (sm ? 12 : 15)) + '" font-size="' + (sm ? 11 : 13) + '" fill="var(--ink-2)" text-anchor="middle">' + (sm ? '' : '천장 ' + (has(st.ch) ? esc(st.ch) : '?')) + (/\(/.test(r.name) ? (sm ? '' : ' · ') + esc(r.name.replace(/^.*\((.*)\).*$/, '$1')) : (sm ? '메모·높이' : '')) + '</text></g>');
     });
     SPOTS.forEach(function (sp) {
       var st = roomState(sp.id);
       var done = sp.f.some(function (f) { return has(st[f[0]]); });
       (sp.mk || []).forEach(function (m, n) {
-        var t = m[2], wdt = t.length * 15 + 20;
-        o.push('<g class="hit" data-k="spot|' + sp.id + '|' + n + '" tabindex="0" role="button" aria-label="' + esc(sp.name) + '"><rect x="' + (m[0] - wdt / 2) + '" y="' + (m[1] - 17) + '" width="' + wdt + '" height="34" rx="7" fill="' + (done ? 'var(--good-bg)' : 'var(--bg-2)') + '" stroke="' + (done ? 'var(--good)' : 'var(--ink-2)') + '" stroke-width="2.5"' + (done ? '' : ' stroke-dasharray="5 3"') + '/>');
-        o.push('<text x="' + m[0] + '" y="' + (m[1] + 5) + '" font-size="14" font-weight="800" fill="' + (done ? 'var(--good)' : 'var(--ink)') + '" text-anchor="middle">' + esc(t) + (done ? ' ✓' : '') + '</text></g>');
+        var t = m[2], sm = m[3], wdt = t.length * (sm ? 12 : 15) + (sm ? 12 : 20), hh = sm ? 28 : 34;
+        o.push('<g class="hit" data-k="spot|' + sp.id + '|' + n + '" tabindex="0" role="button" aria-label="' + esc(sp.name) + '"><rect x="' + (m[0] - wdt / 2) + '" y="' + (m[1] - hh / 2) + '" width="' + wdt + '" height="' + hh + '" rx="7" fill="' + (done ? 'var(--good-bg)' : 'var(--bg-2)') + '" stroke="' + (done ? 'var(--good)' : 'var(--ink-2)') + '" stroke-width="2.5"' + (done ? '' : ' stroke-dasharray="5 3"') + '/>');
+        o.push('<text x="' + m[0] + '" y="' + (m[1] + (sm ? 4 : 5)) + '" font-size="' + (sm ? 12 : 14) + '" font-weight="800" fill="' + (done ? 'var(--good)' : 'var(--ink)') + '" text-anchor="middle">' + esc(t) + (done ? ' ✓' : '') + '</text></g>');
       });
     });
     o.push('</svg>');
