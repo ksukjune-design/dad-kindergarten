@@ -25,7 +25,8 @@
                                cmPerPx, x, y (cm, 회전 반영 외곽의 좌상단), opacity 0.15–1, rot 0|90|180|270,
                                show, fade (도면 칸 흐리게), calibrated, aligned (축척 뒤 위치까지 맞췄는지 — false 면 '위치 맞추기' 안내) }
             ui.plan   = { grid, snap, zoom:{new,old}, filter, infoOpen, laundryRoom, bgPanel,
-                          margin (오차 여유 0|5|10|15cm, 기본 10 — 가구 둘레 점선 상자 · '여유 부족' 점검),
+                          margin (오차 여유 0|5|10|15cm, 기본 0 — 10/24 실측 도면부터 · 가구 둘레 점선 상자 · '여유 부족' 점검),
+                          marginV (2 = 기본값 0 으로 한 번 맞춤: 예전 기본 10 이던 기기는 0 으로)
                           useView (쓰임 공간 빗금 보기, 기본 켬), useListOpen (가구별 쓰임 공간 목록 펼침) }
    쓰임 공간 짐의 use = { kind, front, left, right, back, top, note } (없으면 이 파일의 USE_DEFAULTS — 태그·이름으로 고름)
             점검: 쓰임 공간이 벽·다른 가구 몸체·고정물·방문 열림 범위와 겹치면 주의 (쓰임 공간끼리는 괜찮음, 의자↔식탁 예외,
@@ -57,7 +58,7 @@
   const PASS_MIN = 60;  // 배치 점검: 트인 곳에 남아야 할 최소 통로 폭 (cm)
   const PASS_KEEP = 80; // 자동 배치·놓기: 트인 곳에 남겨 둘 통로 폭 (cm)
   const DOOR_FRONT = 45; // 문이 열리지 않는 쪽 문 앞 (드나드는 자리) 깊이 (cm)
-  const MARGINS = [0, 5, 10, 15];   // 오차 여유 고르기 (cm) — 기본 10
+  const MARGINS = [0, 5, 10, 15];   // 오차 여유 고르기 (cm) — 기본 0 (10/24 실측 도면이라 가족이 '10cm씩 띄울 필요 없어')
   const marginNow = () => prefs().margin;
   const FATES_FOR = { new: ['move', 'buy', 'undecided'], old: ['move', 'discard', 'sell', 'undecided'] };
   const CAT_COLOR = {
@@ -548,7 +549,9 @@
     if (typeof p.laundryRoom !== 'string') p.laundryRoom = '';
     if (typeof p.bgPanel !== 'boolean') p.bgPanel = true;
     // 오차 여유 (cm): 가구마다 바깥으로 이만큼 점선 상자 — 벽·다른 가구·고정물·문 열림 범위와 이만큼 떨어졌는지 점검 (0 = 끔)
-    if (!MARGINS.includes(p.margin)) p.margin = 10;
+    if (!MARGINS.includes(p.margin)) p.margin = 0;
+    // 예전 기본값 10 은 추정 도면용 — 실측 도면이 들어온 뒤 한 번만 0 으로 (직접 고른 5·15 는 그대로)
+    if (p.marginV !== 2) { if (p.margin === 10) p.margin = 0; p.marginV = 2; }
     // 쓰임 공간(서랍·문·앉는 자리 …) 빗금 보기 · 가구별 쓰임 공간 목록 펼침
     if (typeof p.useView !== 'boolean') p.useView = true;
     if (typeof p.useListOpen !== 'boolean') p.useListOpen = false;
@@ -1773,7 +1776,11 @@
       sugg.push(type === 'top' ? '세탁기 위 건조기 거치대(선반형) — 통돌이는 뚜껑 열림 높이 때문에 거치대가 높아져요' : '세탁기 위 건조기 거치대 또는 직렬 키트');
     }
     if (failObs || frontHit) sugg.push('문이 어느 쪽으로 열리는지, 고정물을 옮길 수 있는지 현장에서 확인하기');
-    sugg.push('사전방문 때 ' + room.name + ' 폭·깊이·출입문 폭을 꼭 실측하고 “✏️ 치수 수정”으로 반영하기');
+    // 앞 공간이 모자라면 한 벽에 나란히 대신 옆으로 돌려 방 양 끝에 나눠 두기 (10/24 새 집 세탁 발코니 초안)
+    if (!failW && !failD && needD > short) sugg.push('한 벽에 나란히 대신 기기를 옆으로 돌려 방 양 끝에 나눠 두기 — 앞 공간이 넉넉해져요(수전·배수구 위치를 먼저 확인)');
+    // 실측한 도면(confidence high)이면 다시 재라는 말 대신 남은 확인만
+    sugg.push(plan.confidence === 'high' ? room.name + '의 수전·배수구·콘센트 위치와 출입문 폭을 확인해 자리를 정하기'
+      : '사전방문 때 ' + room.name + ' 폭·깊이·출입문 폭을 꼭 실측하고 “✏️ 치수 수정”으로 반영하기');
     const worst = failW || failD || failObs ? 'bad' : (slackW < 5 || needD > short || frontHit) ? 'warn' : 'ok';
     return { checks, sugg, worst, needW, needD, long, short, spot };
   }

@@ -175,7 +175,7 @@ textarea { min-height: 70px; font-size: .95rem; }
 
   <!-- 3차 -->
   <section id="tab3" role="tabpanel" hidden>
-    <div class="note">가구마다 <b>어느 방, 어느 벽</b>에 둘지 고르면 그림이 그려지고 <span class="pill ok">들어가요</span> <span class="pill tight">빠듯해요</span> <span class="pill no">안 들어가요</span>가 나와요. 벽 길이는 1차에 적은 '가구 놓을 수 있는 길이'(없으면 방 크기)로 셈하고, 가구 사이·벽에서 <b>10cm씩</b> 띄워요. 식탁처럼 벽에 붙이지 않는 가구는 <b>가운데</b>를 고르세요. 점선 = 문·서랍을 열거나 앉는(의자 빼는) 자리.</div>
+    <div class="note">가구마다 <b>어느 방, 어느 벽</b>에 둘지 고르면 그림이 그려지고 <span class="pill ok">들어가요</span> <span class="pill tight">빠듯해요</span> <span class="pill no">안 들어가요</span>가 나와요. 벽 길이는 1차에 적은 '가구 놓을 수 있는 길이'(없으면 방 크기)로 셈하고, 10/24 실측값이라 가구 사이·벽에서 따로 띄우지 않아요(1차 칸에 실측 도면 값을 미리 넣어 두었어요). 식탁처럼 벽에 붙이지 않는 가구는 <b>가운데</b>를 고르세요. 점선 = 문·서랍을 열거나 앉는(의자 빼는) 자리.</div>
     <div id="place"></div>
   </section>
 
@@ -230,6 +230,30 @@ textarea { min-height: 70px; font-size: .95rem; }
     Object.keys(S.p).forEach(function (id) { if (S.p[id] && S.p[id].room === 'balTopBox') S.p[id].room = 'balTop1'; });
     if (S.r.living && S.r.living.d != null && String(S.r.living.d).trim() !== '') S.r.living.dLegacy = true;
     S.sv = 1;
+    save();
+  }
+  /* 10/24 밤 가족 실측 도면(방마다 안쪽 치수)을 1차 칸에 한 번만 미리 넣어요 — 이미 적은 칸은 그대로 */
+  if (S.mv !== 1) {
+    var MEAS = {
+      anbang: { w: 340, d: 300, wall_top: 240, wall_right: 210, wall_bottom: 340, wall_left: 300 },
+      smallTop: { w: 213, d: 273, wall_top: 213, wall_right: 273, wall_bottom: 123, wall_left: 180 },
+      smallBot: { w: 218, d: 270, wall_top: 218, wall_right: 180, wall_bottom: 132, wall_left: 270 },
+      living: { w: 330, d: 330, wall_right: 330, wall_bottom: 330, wall_left: 320 },
+      dining: { w: 150, wall_top: 150 },
+      balTop1: { w: 395, d: 125, wall_top: 395, wall_left: 125, wall_right: 125 },
+      balTop2: { w: 217, d: 125, wall_top: 217, wall_right: 125 },
+      balBig: { w: 600, d: 125 },
+      balBox: { w: 70, d: 120, wall_top: 70, wall_right: 120 },
+      fridge: { w: 180, pass: 150 },
+      induction: { w: 58, d: 58 },
+      shoe: { w: 100 },
+    };
+    Object.keys(MEAS).forEach(function (id) {
+      var st = S.r[id] = S.r[id] || {};
+      Object.keys(MEAS[id]).forEach(function (k) { if (st[k] == null || String(st[k]).trim() === '') st[k] = String(MEAS[id][k]); });
+      if (id === 'living') delete st.dLegacy;
+    });
+    S.mv = 1;
     save();
   }
   /* v3(뒤집기 전 세로 도면) 기록 → v4(좌우를 뒤집은 우리 집 방향) */
@@ -570,7 +594,7 @@ textarea { min-height: 70px; font-size: .95rem; }
   });
 
   /* ---------- 3차: 배치 ---------- */
-  var GAP = 10;
+  var GAP = 0;   // 10/24 실측값이라 가구 사이·벽에서 띄우지 않아요 (가족 말 — 제조사 틈은 가구 크기에 넣어 재요)
   function placeOf(it) {
     var p = S.p[it.id];
     if (p && typeof p === 'object' && (!p.room || ROOMS.some(function (r) { return r.id === p.room && r.kind !== 'fixed'; }))) return p;
@@ -603,7 +627,7 @@ textarea { min-height: 70px; font-size: .95rem; }
       var need = Math.max(pos, sum + GAP * (list.length + 1));
       var L = wallLen(r, s);
       var v = L.len >= need ? 'ok' : L.len >= sum ? 'tight' : 'no';
-      res.push({ v: v, text: SIDES[s] + ' 벽 ' + list.length + '개: 가구 ' + round(sum) + 'cm + 띄우기 → 필요 ' + round(need) + 'cm / 벽 ' + round(L.len) + 'cm (' + L.from + ')' + (v === 'ok' ? '' : v === 'tight' ? ' — 10cm씩 못 띄워요' : ' — ' + round(sum - L.len) + 'cm 모자라요') });
+      res.push({ v: v, text: SIDES[s] + ' 벽 ' + list.length + '개: 가구 ' + round(sum) + 'cm + 띄우기 → 필요 ' + round(need) + 'cm / 벽 ' + round(L.len) + 'cm (' + L.from + ')' + (v === 'ok' ? '' : v === 'tight' ? ' — 정해 둔 자리부터 놓으면 모자라요' : ' — ' + round(sum - L.len) + 'cm 모자라요') });
     });
     // 마주 보는 벽: 깊이 + 쓰는 자리
     [['top', 'bottom', rd.D, '위·아래'], ['left', 'right', rd.W, '왼쪽·오른쪽']].forEach(function (pr) {
@@ -669,7 +693,7 @@ textarea { min-height: 70px; font-size: .95rem; }
     });
     return svg + '</svg>';
   }
-  /* 벽마다 가구를 벽 시작(위·왼쪽 끝)부터 10cm씩 띄워 늘어놓기 — at 이 있으면 그 거리부터. 방 안 좌표(cm) */
+  /* 벽마다 가구를 벽 시작(위·왼쪽 끝)부터 GAP 만큼 띄워(지금 0) 늘어놓기 — at 이 있으면 그 거리부터. 방 안 좌표(cm) */
   function layoutRoom(r, walls, W, D) {
     var rects = [];
     ['top', 'right', 'bottom', 'left'].forEach(function (s) {
