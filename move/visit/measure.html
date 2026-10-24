@@ -216,6 +216,22 @@ textarea { min-height: 70px; font-size: .95rem; }
   }
   if (S.pv !== 3) { ['table', 'book5', 'bookk1', 'bookk2', 'bookk3', 'toy', 'fridge', 'sofa', 'hanger'].forEach(function (id) { delete S.p[id]; }); S.pv = 3; try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { /* 무시 */ } }
   function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { /* 저장이 막힌 브라우저 — 이번 화면에서만 */ } }
+  /* 10/24 스케치 화면으로 바뀌며 없어진 칸의 값 옮기기 (한 번만): 욕실 문 폭 → 화장실 문, 세탁 들어가는 문 폭 → 위 발코니(왼쪽) 문,
+     없어진 '작은 칸(위)'에 둔 가구 → 위 발코니(왼쪽). 그 전에 적은 거실 세로는 예전 도면(복도 포함) 기준이라 표시해 둬요 */
+  if (S.sv !== 1) {
+    var mv = function (fromId, fromKey, toId, toKey) {
+      var a = S.r[fromId];
+      if (!a || a[fromKey] == null || String(a[fromKey]).trim() === '') return;
+      S.r[toId] = S.r[toId] || {};
+      if (S.r[toId][toKey] == null || String(S.r[toId][toKey]).trim() === '') { S.r[toId][toKey] = a[fromKey]; delete a[fromKey]; }
+    };
+    mv('path', 'bath', 'bath', 'doorW');
+    mv('laundry', 'door', 'balTop1', 'doorW');
+    Object.keys(S.p).forEach(function (id) { if (S.p[id] && S.p[id].room === 'balTopBox') S.p[id].room = 'balTop1'; });
+    if (S.r.living && S.r.living.d != null && String(S.r.living.d).trim() !== '') S.r.living.dLegacy = true;
+    S.sv = 1;
+    save();
+  }
   /* v3(뒤집기 전 세로 도면) 기록 → v4(좌우를 뒤집은 우리 집 방향) */
   function fromV3() {
     var o = null;
@@ -291,40 +307,40 @@ textarea { min-height: 70px; font-size: .95rem; }
   // 세로 도면(cm) — 방 자리(x·y)와 대략 크기, 문·창이 있는 벽(at = 그 벽의 위/왼쪽 끝에서, len = 길이)
   // measure = 10/24 가족 스케치에서 □ 로 표시한 '잴 벽'(굵은 색 선). 없으면 네 벽 모두. open = 트인 쪽(선 없음). 나머지 벽은 '안 재도 되는 벽'(회색 점선)
   var ROOMS = [
-    { id: 'anbang', name: '안방', x: 0, y: 630, w: 360, d: 330, door: 'right', doorAt0: 5, doorLen0: 85, win: 'bottom', winAt0: 60, winLen0: 240, needCh: true,
+    { id: 'anbang', name: '안방', x: 0, y: 630, w: 360, d: 330, door: 'right', doorAt0: 5, doorLen0: 85, doorAtBy: { top: 270 }, doorQ: '위 벽일 수도', win: 'bottom', winAt0: 60, winLen0: 240, wl: '안방 창', needCh: true, lx: 280, ly: 850,
       sk: { top: '왼쪽 모서리 → 문짝 열리는 자리', right: '문짝 열리는 자리 → 아래 모서리', bottom: '끝에서 끝', left: '끝에서 끝' },
       walls: { top: '화장실·주방 쪽', right: '거실 쪽 (문)', bottom: '창·발코니 쪽', left: '바깥벽' },
       hint: '문은 오른쪽 위 모서리예요(스케치 빗금은 위 벽 쪽 문으로도 읽혀요 — 다르면 문을 눌러 벽을 바꿔요). 라지킹 매트리스(200 × 200)가 지나가려면 문 높이도 재요. 큰 창은 아래 벽(발코니) — 왼쪽 모서리에서 창까지 거리도. 벽걸이 에어컨 배관 구멍 위치도 메모해요.' },
-    { id: 'smallTop', name: '작은방(현관 쪽)', x: 480, y: 150, w: 240, d: 300, door: 'bottom', doorAt0: 25, doorLen0: 80, win: 'top', winAt0: 30, winLen0: 180, needCh: true,
+    { id: 'smallTop', name: '작은방(현관 쪽)', x: 480, y: 150, w: 240, d: 300, door: 'bottom', doorAt0: 25, doorLen0: 80, win: 'top', winAt0: 30, winLen0: 180, wl: '작은방 창', needCh: true,
       sk: { top: '끝에서 끝', right: '끝에서 끝', bottom: '문 → 오른쪽 모서리', left: '위 모서리 → 문짝 열리는 자리' },
       walls: { top: '창·발코니 쪽', right: '복도 쪽 바깥벽', bottom: '현관 쪽 (문)', left: '주방 조리대 쪽' },
       hint: '문은 아래 벽 왼쪽(현관 쪽), 창은 위 벽(발코니). 네 벽을 모두 재요 — 아래 벽은 문 끝에서 오른쪽 모서리까지가 가구 놓을 길이예요.' },
-    { id: 'smallBot', name: '작은방(욕실 쪽)', x: 0, y: 150, w: 240, d: 300, door: 'right', doorAt0: 210, doorLen0: 85, win: 'top', winAt0: 40, winLen0: 160, needCh: true, winNote: '스케치에는 이 자리에 \'문\'처럼 적혀 있어요 — 바닥까지 내려오는 문이면 아래 칸을 체크해요(그 앞에는 책상을 못 둬요).',
+    { id: 'smallBot', name: '작은방(욕실 쪽)', x: 0, y: 150, w: 240, d: 300, door: 'right', doorAt0: 210, doorLen0: 85, hingeEnd: true, win: 'top', winAt0: 40, winLen0: 160, winQ: true, wl: '작은방', needCh: true, winNote: '스케치에는 이 자리에 \'문\'처럼 적혀 있어요 — 바닥까지 내려오는 문이면 아래 칸을 체크해요(그 앞에는 책상을 못 둬요).',
       sk: { top: '끝에서 끝', right: '위 모서리 → 문', bottom: '왼쪽 모서리 → 문짝 열리는 자리', left: '끝에서 끝' },
       walls: { top: '창·발코니 쪽', right: '주방 쪽 (문)', bottom: '화장실 쪽', left: '바깥벽' },
       hint: '문은 오른쪽 벽 아래쪽(주방 쪽), 창은 위 벽(발코니). 네 벽을 모두 재요 — 오른쪽 벽은 위 모서리에서 문까지, 아래 벽은 왼쪽 모서리에서 문짝 열리는 자리까지가 가구 놓을 길이예요.' },
-    { id: 'living', name: '거실', x: 360, y: 610, w: 360, d: 350, door: '', win: 'bottom', winAt0: 40, winLen0: 280, open: ['top'], measure: ['right', 'bottom', 'left'], ly: 815,
+    { id: 'living', name: '거실', x: 360, y: 610, w: 360, d: 350, door: '', win: 'bottom', winAt0: 40, winLen0: 280, wl: '거실 창', open: ['top'], measure: ['right', 'bottom', 'left'], lx: 560, ly: 892,
       sk: { right: '입구 아래 모서리 → 아래 모서리', bottom: '끝에서 끝', left: '안방 문 끝(또는 위 모서리) → 아래 모서리' },
       walls: { top: '복도·입구 쪽 (트임)', right: '오른쪽 벽 (입구 모서리 → 아래)', bottom: '창·발코니 쪽', left: '안방 벽 (안방 문 → 아래)' },
       hint: '위는 복도와 트여 있어요 — 가로 폭은 위쪽 화살표(안방 모서리 → 입구 벽)로 재요. 왼쪽 벽 위쪽에 안방 문, 아래는 큰 창(발코니 문). 스탠드 에어컨 배관 구멍 위치를 메모해요.' },
-    { id: 'dining', name: '주방', x: 240, y: 150, w: 195, d: 480, door: '', win: '', open: ['bottom'], measure: ['top'], ly: 430,
-      sk: { top: '왼쪽 벽 → 조리대 앞 (통로 폭)' },
+    { id: 'dining', name: '주방', x: 240, y: 150, w: 163, d: 480, door: '', win: '', open: ['bottom'], measure: ['top'], ly: 430, lineLen: { right: 300 },
+      sk: { top: '끝에서 끝 = 통로 폭 (왼쪽 벽 → 조리대 앞)' },
       walls: { top: '발코니 쪽 — 통로 폭 (왼쪽 벽 → 조리대 앞)', right: '조리대 앞', bottom: '안방·거실 쪽 (트임)', left: '작은방·화장실 벽 (냉장고 자리)' },
       hint: '스케치대로 위 벽(통로 폭: 왼쪽 벽 → 조리대 앞)을 재요. 냉장고는 싱크대 맞은편 왼쪽 벽 위쪽이에요 — 냉장고 네모를 눌러 놓을 벽 길이도 재요. 오른쪽은 조리대(위쪽 끝 인덕션 · 가운데 싱크 · 아래 식기 건조대).' },
-    { id: 'balTop1', name: '위 발코니(왼쪽)', kind: 'balcony', x: 0, y: 0, w: 480, d: 150, door: 'bottom', doorAt0: 272, doorLen0: 85, win: '', measure: ['top', 'left', 'right'], lx: 380, ly: 52, doorNote: '스케치에 \'문\'으로 적힌 주방 → 세탁 발코니 문이에요. 열리는 방향(주방 쪽이면 냉장고 자리와 부딪혀요), 문턱 높이도 확인해요. 건조기(폭 68.6cm, 눕히면 안 돼요)가 지나가려면 약 71cm 넘게 트여야 해요.',
+    { id: 'balTop1', name: '위 발코니(왼쪽)', kind: 'balcony', x: 0, y: 0, w: 480, d: 150, door: 'bottom', doorAt0: 277, doorLen0: 88, noSwing0: true, win: '', measure: ['top', 'left', 'right'], lx: 380, ly: 52, doorNote: '스케치에 \'문\'으로 적힌 주방 → 세탁 발코니 문이에요. 열리는 방향(주방 쪽이면 냉장고 자리와 부딪혀요), 문턱 높이도 확인해요. 건조기(폭 68.6cm, 눕히면 안 돼요)가 지나가려면 약 71cm 넘게 트여야 해요.',
       sk: { top: '끝에서 끝', left: '끝에서 끝', right: '끝에서 끝' },
       walls: { top: '바깥 창 쪽', right: '오른쪽 발코니 쪽', bottom: '작은방 창·주방 문 쪽', left: '바깥벽' },
       hint: '세탁기·건조기를 둘 발코니예요(스케치대로). 위·왼쪽·오른쪽 벽을 재고, 주방에서 들어오는 문 폭(건조기 68.6cm가 지나가야 해요), 수전·배수구·콘센트가 어느 벽 어디쯤인지 메모해요.' },
     { id: 'balTop2', name: '위 발코니(오른쪽)', kind: 'balcony', x: 480, y: 0, w: 240, d: 150, door: '', win: '', measure: ['top', 'right'], sk: { top: '끝에서 끝', right: '끝에서 끝' },
       walls: { top: '바깥 창 쪽', right: '복도 쪽', bottom: '작은방(현관 쪽) 창 쪽', left: '왼쪽 발코니 쪽' },
       hint: '작은방(현관 쪽) 앞 발코니예요. 스케치대로 위·오른쪽 벽만 재요.' },
-    { id: 'balBig', name: '큰 발코니', kind: 'balcony', x: 110, y: 960, w: 610, d: 150, door: '', win: '', measure: [],
+    { id: 'balBig', name: '큰 발코니', kind: 'balcony', x: 110, y: 960, w: 610, d: 150, door: '', win: '', measure: [], open: ['left'],
       walls: { top: '안방·거실 쪽', right: '복도 쪽', bottom: '바깥 창 쪽', left: '다용도실 쪽' },
       hint: '스케치에는 잴 벽이 없어요. 실외기 놓을 자리만 보면 돼요(에어컨·실외기 네모). 수전·배수구가 있으면 위치를 메모해요.' },
-    { id: 'balBox', name: '다용도실', kind: 'balcony', x: 0, y: 970, w: 110, d: 140, door: '', win: '', measure: ['top', 'right'], sk: { top: '끝에서 끝', right: '끝에서 끝 (큰 발코니 쪽에서)' },
+    { id: 'balBox', name: '다용도실', kind: 'balcony', x: 0, y: 970, w: 110, d: 140, door: '', win: '', measure: ['top', 'right'], lineOut: { right: true }, sk: { top: '끝에서 끝', right: '끝에서 끝 (큰 발코니 쪽에서)' },
       walls: { top: '안방 쪽', right: '큰 발코니 쪽 칸막이', bottom: '바깥 쪽', left: '바깥벽' },
       hint: '큰 발코니 끝의 다용도실이에요. 위 벽, 오른쪽 칸막이(큰 발코니 쪽에서)를 재요. 문은 스케치에 없어요 — 어디로 들어가는지, 문 폭, 안에 있는 것(보일러·수전·선반)을 메모해요. 실외기 자리 후보이기도 해요.' },
-    { id: 'bath', name: '화장실', kind: 'fixed', x: 0, y: 450, w: 240, d: 180, door: 'right', doorAt0: 95, doorLen0: 75, win: '', measure: [],
+    { id: 'bath', name: '화장실', kind: 'fixed', x: 0, y: 450, w: 240, d: 180, door: 'right', doorAt0: 95, doorLen0: 75, hingeEnd: true, win: '', measure: [],
       walls: { top: '작은방 쪽', right: '주방 쪽 (문)', bottom: '안방 쪽', left: '바깥벽' },
       hint: '스케치에는 잴 벽이 없어요. 문 폭과 수건장(동그라미)만 보면 돼요.' },
   ];
@@ -334,9 +350,9 @@ textarea { min-height: 70px; font-size: .95rem; }
     { id: 'hallW', key: 'w', name: '거실 위쪽 폭 (안방 모서리 → 입구 벽)', label: '폭', line: [366, 620, 586, 620], hint: '안방 문 쪽 모서리에서 입구(현관) 벽까지 가로 폭이에요. 거실 위쪽 트인 곳이라 벽 대신 이 폭을 재요.' },
   ];
   var SPOTS = [
-    { id: 'fridge', mk: [[352, 268, '냉장고']], name: '냉장고 자리 (주방 왼쪽 벽)', hint: '스케치대로 싱크대 맞은편, 주방 왼쪽 벽 위쪽이에요. 우리 냉장고 91.3 × 73.5 × 179cm → 놓을 벽 길이(위 모서리 → 작은방 문)는 93cm 이상(권장 101cm). 통로 폭은 바로 이 자리에서 재요(냉장고 73.5 + 뒤 5 + 문 열고 설 자리 약 90 = 약 170cm). 이사 날에는 세탁기·건조기를 위 발코니에 먼저 들이고 냉장고는 나중에 놓아요.', f: [['w', '놓을 벽 길이 (위 모서리 → 작은방 문틀)'], ['pass', '통로 폭 (이 자리에서 벽 → 조리대 앞, 1m 높이)'], ['h', '높이 (위에 걸리는 것까지)']], c: [['outlet', '콘센트 있음']], memo: '콘센트 위치 (위 모서리에서 · 바닥에서 cm), 발코니 문이 주방 쪽으로 열리는지' },
-    { id: 'laundry', mk: [[208, 110, '세탁기·건조기']], name: '세탁기·건조기 자리 (위 발코니 왼쪽)', hint: '스케치대로 위 발코니(왼쪽)에 둬요. 통돌이 63.2 + 건조기 68.6 = 나란히 약 140cm 이상, 깊이: 건조기 87.6 + 뒤 10cm(문 열려면 앞에 약 90cm 더), 높이: 통돌이 뚜껑 열면 약 135cm. 수전·배수구·콘센트가 어느 벽 어디쯤인지, 분배기·배관이 튀어나왔는지 봐요. 들어오는 문 폭은 주황 선(문)에 적어요. 겨울에 수전이 얼 수 있으니 보온재가 있는지도요.', where: true, where0: '위 발코니(왼쪽)', f: [['w', '막힘 없는 벽 길이 (수전 가까이)'], ['d', '깊이 (놓을 자리 앞)'], ['h', '바닥 → 창턱·선반 (뚜껑 열면 135)']], c: [['water', '수전'], ['drain', '배수구'], ['outlet', '콘센트 (건조기용 따로면 좋아요)']], memo: '수전·배수구·콘센트 위치 (예: 왼쪽 벽, 모서리에서 30cm, 바닥에서 90cm)' },
-    { id: 'induction', mk: [[458, 195, '인덕션']], name: '인덕션 자리', hint: '가스레인지는 안 써요. 조리대 위쪽 끝(동그라미) 자리의 폭·깊이, 220V 콘센트가 가까이 있는지.', f: [['w', '폭'], ['d', '깊이'], ['hood', '후드까지 높이']], c: [['outlet', '220V 콘센트'], ['breaker', '분전반에 인덕션 차단기']] },
+    { id: 'fridge', mk: [[277, 280, '냉장고']], name: '냉장고 자리 (주방 왼쪽 벽)', hint: '스케치대로 싱크대 맞은편, 주방 왼쪽 벽 위쪽이에요. 우리 냉장고 91.3 × 73.5 × 179cm → 놓을 벽 길이(위 모서리 → 작은방 문)는 93cm 이상(권장 101cm). 통로 폭은 바로 이 자리에서 재요(냉장고 73.5 + 뒤 5 + 문 열고 설 자리 약 90 = 약 170cm). 이사 날에는 세탁기·건조기를 위 발코니에 먼저 들이고 냉장고는 나중에 놓아요.', f: [['w', '놓을 벽 길이 (위 모서리 → 작은방 문틀)'], ['pass', '통로 폭 (이 자리에서 벽 → 조리대 앞, 1m 높이)'], ['h', '높이 (위에 걸리는 것까지)']], c: [['outlet', '콘센트 있음']], memo: '콘센트 위치 (위 모서리에서 · 바닥에서 cm), 발코니 문이 주방 쪽으로 열리는지' },
+    { id: 'laundry', mk: [[171, 62, '세탁기·건조기']], name: '세탁기·건조기 자리 (위 발코니 왼쪽)', hint: '스케치대로 위 발코니(왼쪽)에 둬요. 통돌이 63.2 + 건조기 68.6 = 나란히 약 140cm 이상, 깊이: 건조기 87.6 + 뒤 10cm(문 열려면 앞에 약 90cm 더), 높이: 통돌이 뚜껑 열면 약 135cm. 수전·배수구·콘센트가 어느 벽 어디쯤인지, 분배기·배관이 튀어나왔는지 봐요. 들어오는 문 폭은 주황 선(문)에 적어요. 겨울에 수전이 얼 수 있으니 보온재가 있는지도요.', where: true, where0: '위 발코니(왼쪽)', f: [['w', '막힘 없는 벽 길이 (수전 가까이)'], ['d', '깊이 (놓을 자리 앞)'], ['h', '바닥 → 창턱·선반 (뚜껑 열면 135)']], c: [['water', '수전'], ['drain', '배수구'], ['outlet', '콘센트 (건조기용 따로면 좋아요)']], memo: '수전·배수구·콘센트 위치 (예: 왼쪽 벽, 모서리에서 30cm, 바닥에서 90cm)' },
+    { id: 'induction', mk: [[441, 195, '인덕션']], name: '인덕션 자리', hint: '가스레인지는 안 써요. 조리대 위쪽 끝(동그라미) 자리의 폭·깊이, 220V 콘센트가 가까이 있는지.', f: [['w', '폭'], ['d', '깊이'], ['hood', '후드까지 높이']], c: [['outlet', '220V 콘센트'], ['breaker', '분전반에 인덕션 차단기']] },
     { id: 'path', mk: [[680, 560, '현관']], name: '들어오는 길 (냉장고·매트리스·캐비닛장)', hint: '가장 좁은 곳 기준. 냉장고는 세운 채 폭 약 93cm(옆으로 돌리면 약 80cm)·높이 약 181cm, 매트리스(200 × 200)는 한쪽이 200cm 넘게 트여야 해요. 사다리차는 큰 발코니 바깥 창으로 들어와요 — 창짝을 뗀 폭과 창턱 위 높이를 재요. 스케치에 현관문이 없어서 어느 벽인지도 적어요.', f: [['door', '현관문 폭 (열었을 때)'], ['doorH', '현관문 높이'], ['ev', '엘리베이터 문 폭'], ['evW', '엘리베이터 안 가로'], ['evD', '엘리베이터 안 깊이'], ['evH', '엘리베이터 안 높이'], ['hall', '주방 들어가는 가장 좁은 곳 (화장실 문틀 ↔ 조리대 끝)'], ['lw', '사다리차 창 트인 폭 (큰 발코니)'], ['lh', '사다리차 창 트인 높이 (창턱 위)']], memo: '현관문이 어느 벽에 있는지, 현관 턱 높이, 방범창·방충망' },
     { id: 'ac', mk: [[570, 1078, '에어컨·실외기']], name: '에어컨 자리', hint: '거실 스탠드·안방 벽걸이 배관 구멍이 어느 벽 어디쯤인지, 실외기 놓을 곳 크기(실외기 88 × 31 × 63.8cm).', f: [['ow', '실외기 자리 폭'], ['od', '실외기 자리 깊이'], ['oh', '실외기 자리 높이']], memo: '배관 구멍 위치 (예: 거실 왼쪽 벽 위쪽, 바닥에서 2m)' },
     { id: 'shoe', mk: [[625, 480, '신발장']], name: '신발장 (입구)', hint: '스케치의 "신발장 폭"이에요. 폭을 먼저 재고, 칸 수와 한 칸 높이를 보면 신발 정리 기준을 정할 수 있어요.', f: [['w', '폭'], ['d', '깊이'], ['h', '높이'], ['n', '칸 수']] },
@@ -350,6 +366,28 @@ textarea { min-height: 70px; font-size: .95rem; }
   }
   function sidesOf(r, kind) { return ['top', 'right', 'bottom', 'left'].filter(function (s) { return kind ? wallKind(r, s) === kind : wallKind(r, s); }); }
   function doorOut(r, st) { return st.doorOut != null ? !!st.doorOut : !!r.doorOut0; }
+  /* 문 시작 자리(벽 위/왼쪽 끝에서) — 문 벽을 바꾸고 아직 안 쟀으면 그 벽의 기본 자리 */
+  function doorAt(r, st, side) {
+    var at = st.doorAt !== undefined ? num(st.doorAt) : null;
+    if (at == null) at = side === r.door ? r.doorAt0 : (r.doorAtBy && r.doorAtBy[side] != null ? r.doorAtBy[side] : 5);
+    return at;
+  }
+  function swingShown(r, st) { return !(r.noSwing0 && st.doorOut == null); } // 스케치에 열리는 방향이 없는 문은 체크하기 전엔 1/4 원 없이
+  /* 문짝 1/4 원: D = 문 선 [x1,y1,x2,y2], 경첩 = 문 위/왼쪽 끝(hingeEnd 면 아래/오른쪽 끝) */
+  function sweepPath(D, side, dw, out, hingeEnd) {
+    var nx = side === 'left' ? 1 : side === 'right' ? -1 : 0, ny = side === 'top' ? 1 : side === 'bottom' ? -1 : 0;
+    if (out) { nx = -nx; ny = -ny; }
+    var hx = hingeEnd ? D[2] : D[0], hy = hingeEnd ? D[3] : D[1], ox = hingeEnd ? D[0] : D[2], oy = hingeEnd ? D[1] : D[3];
+    var px = hx + nx * dw, py = hy + ny * dw;
+    var cr = (ox - hx) * (py - hy) - (oy - hy) * (px - hx);
+    return { d: 'M' + hx + ' ' + hy + ' L' + ox + ' ' + oy + ' A' + dw + ' ' + dw + ' 0 0 ' + (cr > 0 ? 1 : 0) + ' ' + px + ' ' + py + ' Z', h: [hx, hy], p: [px, py] };
+  }
+  /* 예전 화면에서 적었는데 지금 칸이 없는 값 (보여 주기·복사용) */
+  var OLDKEY = { d: '깊이', door: '들어가는 문 폭', bath: '욕실 문 폭' };
+  function leftovers(sp, st) {
+    var known = ['where', 'memo'].concat(sp.f.map(function (f) { return f[0]; }), (sp.c || []).map(function (c) { return c[0]; }));
+    return Object.keys(st).filter(function (k) { return known.indexOf(k) < 0 && has(st[k]) && st[k] !== false; }).map(function (k) { return (OLDKEY[k] || k) + ' ' + st[k]; });
+  }
 
   function roomState(id) { S.r[id] = S.r[id] || {}; return S.r[id]; }
   function input(st, key, label, ph, onch) {
@@ -387,7 +425,7 @@ textarea { min-height: 70px; font-size: .95rem; }
     svg += '<text x="4" y="' + (oy + d / 2 + 4) + '">왼</text><text x="' + (ox + w + 6) + '" y="' + (oy + d / 2 + 4) + '">오</text>';
     var side = st.doorSide || r.door;
     if (side) {
-      var dw = (num(st.doorW) || r.doorLen0 || 80) * s, da = (st.doorAt !== undefined && num(st.doorAt) != null ? num(st.doorAt) : (side === r.door ? r.doorAt0 : 5)) * s;
+      var dw = (num(st.doorW) || r.doorLen0 || 80) * s, da = doorAt(r, st, side) * s;
       var p = side === 'top' ? [ox + da, oy, ox + da + dw, oy] : side === 'left' ? [ox, oy + da, ox, oy + da + dw] : side === 'bottom' ? [ox + da, oy + d, ox + da + dw, oy + d] : [ox + w, oy + da, ox + w, oy + da + dw];
       svg += '<line x1="' + p[0] + '" y1="' + p[1] + '" x2="' + p[2] + '" y2="' + p[3] + '" stroke="var(--brand)" stroke-width="5"/>';
       svg += '<text x="' + ((p[0] + p[2]) / 2) + '" y="' + ((p[1] + p[3]) / 2 + (side === 'top' ? 14 : side === 'bottom' ? -6 : 4)) + '" text-anchor="middle" fill="var(--brand)">문</text>';
@@ -426,10 +464,10 @@ textarea { min-height: 70px; font-size: .95rem; }
         body.appendChild(h('div', { class: 'grid' }, input(st, 'winW', '창 폭', 'cm', upd), input(st, 'winSill', '바닥에서 창틀까지', 'cm', upd), input(st, 'winAt', (r.win === 'left' || r.win === 'right' ? '위' : '왼쪽') + ' 모서리 → 창', 'cm', upd)));
         body.appendChild(h('div', { class: 'checks' }, checkbox(st, 'winDoor', '바닥까지 내려오는 문(창)이에요', upd)));
       }
-      var ws = sidesOf(r);
+      var ws = sidesOf(r).concat((r.open || []).filter(function (sd) { return has(st['wall_' + sd]); }));
       if (ws.length) {
         body.appendChild(h('div', { class: 'sec', text: '벽마다 가구 놓을 수 있는 길이 (문·창·문 열리는 자리 빼고 막힘 없이)' }));
-        body.appendChild(h('div', { class: 'grid two' }, ws.map(function (sd) { return input(st, 'wall_' + sd, SCREEN[sd] + ' 벽' + (wallKind(r, sd) === 'o' ? ' (안 재도 돼요)' : ''), 'cm', upd); })));
+        body.appendChild(h('div', { class: 'grid two' }, ws.map(function (sd) { return input(st, 'wall_' + sd, SCREEN[sd] + ' 벽' + (wallKind(r, sd) === 'o' ? ' (안 재도 돼요)' : !wallKind(r, sd) ? ' (예전 값 — 지금은 트인 쪽)' : ''), 'cm', upd); })));
       }
       body.appendChild(h('div', { class: 'sec', text: '메모 (콘센트·배관 구멍·튀어나온 기둥 등)' }));
       body.appendChild(memo(st, 'memo', '예) 위 벽 가운데 콘센트 2구, 왼쪽 벽 위 배관 구멍', upd));
@@ -454,7 +492,9 @@ textarea { min-height: 70px; font-size: .95rem; }
       var det = h('details', { class: 'room' }, h('summary', null, h('span', { class: 'nm', text: sp.name }), cnt));
       var body = h('div', { class: 'body' });
       body.appendChild(h('p', { class: 'small muted', text: sp.hint }));
-      if (sp.where) body.appendChild(h('div', { class: 'f' }, h('label', { text: '어디예요?' }), (function () { var i = h('input', { placeholder: '예) 위 발코니 왼쪽 끝', value: st.where || sp.where0 || '' }); i.addEventListener('input', function () { st.where = i.value; save(); }); return i; })()));
+      var lo = leftovers(sp, st);
+      if (lo.length) body.appendChild(h('p', { class: 'small muted', text: '예전에 적은 값: ' + lo.join(' · ') }));
+      if (sp.where) body.appendChild(h('div', { class: 'f' }, h('label', { text: '어디예요?' }), (function () { var i = h('input', { placeholder: sp.where0 || '예) 위 발코니 왼쪽 끝', value: st.where || '' }); i.addEventListener('input', function () { st.where = i.value; save(); }); return i; })()));
       body.appendChild(h('div', { class: 'grid' }, sp.f.map(function (f) { return input(st, f[0], f[1], 'cm', upd); })));
       if (sp.c) body.appendChild(h('div', { class: 'checks' }, sp.c.map(function (c) { return checkbox(st, c[0], c[1], upd); })));
       body.appendChild(h('div', { class: 'sec', text: '메모' }));
@@ -533,7 +573,7 @@ textarea { min-height: 70px; font-size: .95rem; }
   var GAP = 10;
   function placeOf(it) {
     var p = S.p[it.id];
-    if (p && typeof p === 'object') return p;
+    if (p && typeof p === 'object' && (!p.room || ROOMS.some(function (r) { return r.id === p.room && r.kind !== 'fixed'; }))) return p;
     return { room: it.room || '', wall: it.wall || '' };
   }
   function roomDims(r) { var st = roomState(r.id); return { W: num(st.w) || r.w, D: num(st.d) || r.d, measured: !!(num(st.w) && num(st.d)), st: st }; }
@@ -610,13 +650,10 @@ textarea { min-height: 70px; font-size: .95rem; }
     svg += '<text x="-10" y="' + (D * k / 2) + '" text-anchor="middle" font-size="12" fill="var(--ink-3)" transform="rotate(-90 -10 ' + (D * k / 2) + ')">왼쪽 ' + round(D) + 'cm</text>';
     // 문
     var st = an.rd.st, side = st.doorSide || r.door;
-    if (side && !doorOut(r, st)) {
-      var dw = num(st.doorW) || r.doorLen0 || 80, at = num(st.doorAt);
-      if (at == null) at = side === r.door ? r.doorAt0 : 5;
-      if (side === 'top') svg += arc(at * k, 0, dw * k, 0, 1);
-      else if (side === 'bottom') svg += arc(at * k, D * k, dw * k, 0, -1);
-      else if (side === 'left') svg += arcV(0, at * k, dw * k, 1);
-      else svg += arcV(W * k, at * k, dw * k, -1);
+    if (side && !doorOut(r, st) && swingShown(r, st)) {
+      var dw = num(st.doorW) || r.doorLen0 || 80, at = doorAt(r, st, side);
+      var L = side === 'top' ? [at, 0, at + dw, 0] : side === 'bottom' ? [at, D, at + dw, D] : side === 'left' ? [0, at, 0, at + dw] : [W, at, W, at + dw];
+      svg += '<path d="' + sweepPath(L.map(function (v) { return v * k; }), side, dw * k, false, !!r.hingeEnd).d + '" fill="var(--brand-bg)" stroke="var(--brand)" stroke-width="2"/>';
     }
     // 가구
     var rects = layoutRoom(r, an.walls, W, D);
@@ -631,12 +668,6 @@ textarea { min-height: 70px; font-size: .95rem; }
       svg += '<text x="' + (q.x + q.w / 2) * k + '" y="' + ((q.y + q.h / 2) * k + 4) + '" text-anchor="middle" font-size="' + fs + '" fill="var(--ink)">' + esc(label.slice(0, Math.max(3, Math.floor(q.w * k / fs) + 1))) + '</text>';
     });
     return svg + '</svg>';
-    function arc(x, y, r0, _u, dir) { // 위·아래 벽의 문: 문짝이 방 안쪽으로 도는 1/4 원
-      return '<path d="M' + x + ' ' + y + ' L' + (x + r0) + ' ' + y + ' A' + r0 + ' ' + r0 + ' 0 0 ' + (dir > 0 ? 1 : 0) + ' ' + x + ' ' + (y + dir * r0) + ' Z" fill="var(--brand-bg)" stroke="var(--brand)" stroke-width="2"/>';
-    }
-    function arcV(x, y, r0, dir) { // 왼쪽·오른쪽 벽의 문
-      return '<path d="M' + x + ' ' + y + ' L' + x + ' ' + (y + r0) + ' A' + r0 + ' ' + r0 + ' 0 0 ' + (dir > 0 ? 0 : 1) + ' ' + (x + dir * r0) + ' ' + y + ' Z" fill="var(--brand-bg)" stroke="var(--brand)" stroke-width="2"/>';
-    }
   }
   /* 벽마다 가구를 벽 시작(위·왼쪽 끝)부터 10cm씩 띄워 늘어놓기 — at 이 있으면 그 거리부터. 방 안 좌표(cm) */
   function layoutRoom(r, walls, W, D) {
@@ -652,7 +683,7 @@ textarea { min-height: 70px; font-size: .95rem; }
         else if (s === 'left') { x = 0; y = pos; w = d.d; hh = d.w; ux = w; uy = y; uw = u; uh = hh; }
         else { x = W - d.d; y = pos; w = d.d; hh = d.w; ux = x - u; uy = y; uw = u; uh = hh; }
         pos += d.w + GAP;
-        rects.push({ it: it, x: x, y: y, w: w, h: hh, ux: ux, uy: uy, uw: uw, uh: uh });
+        rects.push({ it: it, side: s, x: x, y: y, w: w, h: hh, ux: ux, uy: uy, uw: uw, uh: uh });
       });
     });
     walls.center.forEach(function (it) {
@@ -660,7 +691,7 @@ textarea { min-height: 70px; font-size: .95rem; }
       var vert = c.h >= c.w; // 긴 쪽을 빈 곳의 긴 쪽에 맞춤
       var w = vert ? Math.min(d.w, d.d) : Math.max(d.w, d.d), hh = vert ? Math.max(d.w, d.d) : Math.min(d.w, d.d);
       var x = c.x + (c.w - w) / 2, y = c.y + (c.h - hh) / 2;
-      rects.push({ it: it, x: x, y: y, w: w, h: hh, ux: vert ? x - u : x, uy: vert ? y : y - u, uw: vert ? w + 2 * u : w, uh: vert ? hh : hh + 2 * u });
+      rects.push({ it: it, side: 'center', x: x, y: y, w: w, h: hh, ux: vert ? x - u : x, uy: vert ? y : y - u, uw: vert ? w + 2 * u : w, uh: vert ? hh : hh + 2 * u });
     });
     return rects;
   }
@@ -716,16 +747,16 @@ textarea { min-height: 70px; font-size: .95rem; }
       var fr = roomState('fridge'), la = roomState('laundry');
       var fd = dims(ITEMS.filter(function (x) { return x.id === 'fridge'; })[0]);
       var fw = num(fr.w);
-      spots.appendChild(h('p', null, verdictPill(fw ? (fw >= fd.w + 2 * 5 ? (fw >= 101 ? 'ok' : 'tight') : 'no') : 'na'), ' 냉장고 ' + round(fd.w) + 'cm → 주방 왼쪽 벽 놓을 길이 ' + (fw || '?') + 'cm (옆 5cm씩 띄우면 ' + round(fd.w + 10) + 'cm, LG 권장 101cm)'));
-      var kw = num(fr.pass) || num(roomState('dining').w);
+      spots.appendChild(h('p', null, verdictPill(fw ? (fw >= 101 ? 'ok' : fw >= fd.w + 2 ? 'tight' : 'no') : 'na'), ' 냉장고 ' + round(fd.w) + 'cm → 주방 왼쪽 벽 놓을 길이 ' + (fw || '?') + 'cm (최소 약 93cm, LG 권장 101cm)'));
+      var dn = roomState('dining'), kw = num(fr.pass) || num(dn.w) || num(dn.wall_top);
       if (kw) { var pass = kw - fd.d - 5; spots.appendChild(h('p', null, verdictPill(pass >= 90 ? 'ok' : pass >= 70 ? 'tight' : 'no'), ' 냉장고 앞 통로: ' + (num(fr.pass) ? '냉장고 자리 통로 ' : '주방 폭 ') + kw + ' − 냉장고 깊이 ' + round(fd.d) + ' − 뒤 5 = ' + round(pass) + 'cm (문 열고 지나가려면 약 90cm, 건조기 폭 68.6cm도 이리로 지나가요)')); }
       var ab = roomState('anbang'), adh = num(ab.doorH), adw = num(ab.doorW);
       if (adh || adw) spots.appendChild(h('p', null, verdictPill(adh ? (adh >= 202 ? 'ok' : adh >= 195 ? 'tight' : 'no') : 'na'), ' 라지킹 매트리스 200 × 200 → 안방 문 ' + (adw || '?') + ' × ' + (adh || '?') + 'cm (세워도 200cm라 문 높이가 약 202cm 넘어야 편해요 — 낮으면 살짝 휘어서 들여요)'));
       var dr = dims(ITEMS.filter(function (x) { return x.id === 'dryer'; })[0]), wa = dims(ITEMS.filter(function (x) { return x.id === 'washer'; })[0]);
       var lw = num(la.w), need = wa.w + dr.w + 3 * 5;
-      spots.appendChild(h('p', null, verdictPill(lw ? (lw >= need + 10 ? 'ok' : lw >= wa.w + dr.w ? 'tight' : 'no') : 'na'), ' 통돌이 + 건조기 나란히 ' + round(wa.w + dr.w) + 'cm → 벽 ' + (lw || '?') + 'cm (틈 5cm씩이면 ' + round(need) + 'cm)' + (num(la.d) ? ' · 깊이 ' + la.d + 'cm (건조기 ' + dr.d + 'cm + 뒤 10cm)' : '') + (num(la.h) ? ' · 위 높이 ' + la.h + 'cm (통돌이 뚜껑 열면 약 135cm)' : '')));
+      spots.appendChild(h('p', null, verdictPill(lw ? (lw >= need ? 'ok' : lw >= wa.w + dr.w ? 'tight' : 'no') : 'na'), ' 통돌이 + 건조기 나란히 ' + round(wa.w + dr.w) + 'cm → 벽 ' + (lw || '?') + 'cm (틈 5cm씩이면 ' + round(need) + 'cm)' + (num(la.d) ? ' · 깊이 ' + la.d + 'cm (건조기 ' + dr.d + 'cm + 뒤 10cm)' : '') + (num(la.h) ? ' · 위 높이 ' + la.h + 'cm (통돌이 뚜껑 열면 약 135cm)' : '')));
       var bd = num(roomState('balTop1').doorW);
-      if (bd) spots.appendChild(h('p', null, verdictPill(bd >= 75 ? 'ok' : bd >= dr.w + 1 ? 'tight' : 'no'), ' 세탁 발코니 문 폭 ' + bd + 'cm → 건조기 폭 ' + dr.w + 'cm가 지나가요' + (bd >= 75 ? '' : bd >= dr.w + 1 ? ' (빠듯 — 문짝을 떼면 넓어져요)' : ' — 문짝을 떼거나 문틀을 다시 재 봐요')));
+      if (bd) { var bv = bd >= 75 ? 'ok' : bd >= 71 ? 'tight' : 'no'; spots.appendChild(h('p', null, verdictPill(bv), ' 세탁 발코니 문 폭 ' + bd + 'cm → 건조기 폭 ' + dr.w + 'cm가 ' + (bv === 'ok' ? '지나가요' : bv === 'tight' ? '빠듯하게 지나가요 (문짝을 떼면 넓어져요)' : '못 지나가요 — 문짝을 떼거나 문틀을 다시 재 봐요 (약 71cm 넘게 트여야 해요)'))); }
       var ind = roomState('induction');
       if (num(ind.w)) spots.appendChild(h('p', null, verdictPill(num(ind.w) >= 60 ? 'ok' : 'no'), ' 인덕션 자리 폭 ' + ind.w + 'cm (보통 2구 약 30~60cm, 3구 약 60cm — 고를 인덕션 크기와 비교)'));
       var pa = roomState('path'), hl = roomState('hall');
@@ -754,6 +785,20 @@ textarea { min-height: 70px; font-size: .95rem; }
     return side === 'top' || side === 'bottom' ? [L[0] + at, L[1], L[0] + at + len, L[3]] : [L[0], L[1] + at, L[2], L[1] + at + len];
   }
   function has(v) { return v != null && String(v).trim() !== ''; }
+  /* 굵은 벽 선에서 뺄 구간: 이 벽의 문, 이 벽을 따라 열려 눕는 문짝 (벽 방향 좌표) */
+  function wallCuts(r, st, side) {
+    if (!r.door) return [];
+    var ds = st.doorSide || r.door, dw = num(st.doorW) || r.doorLen0 || 80, D = segOn(r, ds, doorAt(r, st, ds), dw), cuts = [];
+    var hz = side === 'top' || side === 'bottom';
+    if (ds === side) cuts.push(hz ? [Math.min(D[0], D[2]) - 6, Math.max(D[0], D[2]) + 6] : [Math.min(D[1], D[3]) - 6, Math.max(D[1], D[3]) + 6]);
+    if (swingShown(r, st) && !doorOut(r, st)) {
+      var sp = sweepPath(D, ds, dw, false, !!r.hingeEnd), H = sp.h, P = sp.p, T = 30;
+      var near = side === 'top' ? Math.abs(H[1] - r.y) <= T && H[1] === P[1] : side === 'bottom' ? Math.abs(H[1] - (r.y + r.d)) <= T && H[1] === P[1]
+        : side === 'left' ? Math.abs(H[0] - r.x) <= T && H[0] === P[0] : Math.abs(H[0] - (r.x + r.w)) <= T && H[0] === P[0];
+      if (near) cuts.push(hz ? [Math.min(H[0], P[0]) - 6, Math.max(H[0], P[0]) + 6] : [Math.min(H[1], P[1]) - 6, Math.max(H[1], P[1]) + 6]);
+    }
+    return cuts;
+  }
   /* 잴 칸: 스케치의 □ 벽(끝에서 끝 또는 가구 놓을 길이 중 하나) · 문 폭 · 창틀 높이 */
   function roomKeys(r) {
     return sidesOf(r, 'm').map(function (sd) { return 'side:' + sd; }).concat(r.door ? ['doorW'] : []).concat(r.win ? ['winSill'] : []).concat(r.needCh ? ['ch'] : []);
@@ -779,18 +824,18 @@ textarea { min-height: 70px; font-size: .95rem; }
     var o = [];
     o.push('<svg class="bigplan" viewBox="-20 -20 810 1150" role="img" aria-label="새 집 세로 도면 — 선을 누르면 칸이 떠요">');
     // 복도·바깥 칸
-    o.push('<rect x="735" y="0" width="45" height="1110" fill="var(--bg-3)"/><text x="757" y="555" font-size="20" fill="var(--ink-3)" text-anchor="middle" transform="rotate(90 757 555)">복도·계단·엘리베이터</text>');
+    o.push('<rect x="735" y="0" width="45" height="1110" fill="var(--bg-3)"/><text x="757" y="555" font-size="18" fill="var(--ink-3)" text-anchor="middle" transform="rotate(90 757 555)">바깥 (복도·계단 쪽 — 추정)</text>');
     o.push('<g fill="var(--bg-3)" stroke="var(--line-2)" stroke-width="3"><rect x="480" y="0" width="240" height="150"/><rect x="0" y="0" width="480" height="150"/><rect x="0" y="960" width="720" height="150"/></g>');
     o.push('<rect x="0" y="970" width="110" height="140" fill="var(--line)" stroke="var(--line-2)" stroke-width="3"/>');
     // 발코니 이름은 아래 방 이름 칸으로
     // 방 바닥
     o.push('<g fill="var(--bg-2)" stroke="var(--line-2)" stroke-width="3">');
-    o.push('<rect x="240" y="150" width="195" height="480"/><rect x="360" y="450" width="360" height="510"/>');
+    o.push('<polygon points="240,150 403,150 403,450 590,450 590,610 720,610 720,960 360,960 360,630 240,630"/>'); // 주방 통로·복도·거실은 트여 있어요 (안쪽 선 없이)
     ROOMS.forEach(function (r) { if (r.id !== 'living' && r.id !== 'dining' && r.kind !== 'balcony') o.push('<rect x="' + r.x + '" y="' + r.y + '" width="' + r.w + '" height="' + r.d + '"' + (r.kind === 'fixed' ? ' fill="var(--kid-bg)"' : '') + '/>'); });
     o.push('</g>');
     // 입구(현관)·조리대
     o.push('<rect x="590" y="450" width="130" height="160" fill="var(--bg-3)" stroke="var(--line-2)" stroke-width="2"/><text x="655" y="525" font-size="16" fill="var(--ink-3)" text-anchor="middle">입구</text>');
-    o.push('<rect x="435" y="150" width="45" height="300" fill="var(--bg-3)" stroke="var(--line-2)" stroke-width="2"/><text x="457" y="330" font-size="13" fill="var(--ink-3)" text-anchor="middle" transform="rotate(90 457 330)">싱크 · 식기 건조대</text>');
+    o.push('<rect x="403" y="150" width="77" height="300" fill="var(--bg-3)" stroke="var(--line-2)" stroke-width="2"/><text x="441" y="330" font-size="13" fill="var(--ink-3)" text-anchor="middle" transform="rotate(90 441 330)">싱크 · 식기 건조대</text>');
     // 가구 음영 (1차 제안 자리 — 평면도 크기 기준)
     if (showF) {
       ROOMS.forEach(function (r) {
@@ -798,10 +843,14 @@ textarea { min-height: 70px; font-size: .95rem; }
         layoutRoom(r, an.walls, r.w, r.d).forEach(function (q) {
           var x = r.x + q.x, y = r.y + q.y;
           o.push('<rect x="' + x + '" y="' + y + '" width="' + q.w + '" height="' + q.h + '" fill="var(--kid-bg)" fill-opacity=".9" stroke="var(--kid)" stroke-width="2" stroke-dasharray="6 4"/>');
+          if (Math.min(q.w, q.h) < 32 || ['fridge', 'washer', 'dryer'].indexOf(q.it.id) >= 0) return; // 얇은 가구·자리 네모가 있는 가전은 글자 없이
           var label = q.it.name.replace(/\s*\(.*?\)\s*/g, ' ').replace(/^(캐비닛장|어린이 책장).*/, '$1').trim();
           var vert = q.h > q.w * 1.4;
           var fs = Math.max(11, Math.min(16, (vert ? q.w : q.h) / 2.2));
           var cx = x + q.w / 2, cy = y + q.h / 2;
+          // 벽 이름 글자와 겹치지 않게 벽 반대쪽 끝에
+          if (q.side === 'top' && !vert) cy = y + q.h - fs * 0.75; else if (q.side === 'bottom' && !vert) cy = y + fs * 0.75;
+          else if (q.side === 'left' && vert) cx = x + q.w - fs * 0.75; else if (q.side === 'right' && vert) cx = x + fs * 0.75;
           o.push('<text x="' + cx + '" y="' + (cy + fs / 3) + '" font-size="' + fs + '" fill="var(--kid)" text-anchor="middle"' + (vert ? ' transform="rotate(-90 ' + cx + ' ' + cy + ')"' : '') + '>' + esc(label.slice(0, 8)) + '</text>');
         });
       });
@@ -811,6 +860,7 @@ textarea { min-height: 70px; font-size: .95rem; }
     var IN = 15, GAPE = 20; // 벽 선을 방 안쪽으로 15, 모서리에서 20씩 띄워 선끼리 닿지 않게
     ROOMS.forEach(function (r) {
       var st = roomState(r.id);
+      var furn = showF ? layoutRoom(r, analyse(r).walls, r.w, r.d) : [];
       sidesOf(r).forEach(function (side) {
         var kind = wallKind(r, side);
         var x1, y1, x2, y2, tx, ty, anchor = 'middle', small = r.w < 160 || r.d < 160, tiny = r.w < 120;
@@ -819,6 +869,8 @@ textarea { min-height: 70px; font-size: .95rem; }
         else if (side === 'bottom') { x1 = r.x + GAPE; x2 = r.x + r.w - GAPE; y1 = y2 = r.y + r.d - IN; tx = hx; ty = y1 - 12; }
         else if (side === 'left') { y1 = r.y + GAPE; y2 = r.y + r.d - GAPE; x1 = x2 = r.x + IN; tx = x1 + 12; ty = r.y + r.d * (small ? 0.42 : 0.3); anchor = 'start'; }
         else { y1 = r.y + GAPE; y2 = r.y + r.d - GAPE; x1 = x2 = r.x + r.w - IN; tx = x1 - 12; ty = r.y + r.d * (small ? 0.72 : 0.3); anchor = 'end'; }
+        if (r.lineLen && r.lineLen[side]) { if (side === 'left' || side === 'right') y2 = r.y + r.lineLen[side] - GAPE; else x2 = r.x + r.lineLen[side] - GAPE; } // 조리대 앞처럼 벽 일부만
+        if (r.lineOut && r.lineOut[side]) { if (side === 'right') { x1 = x2 = r.x + r.w + IN; tx = x1 + 10; anchor = 'start'; } } // 옆 칸 쪽에서 재는 벽
         var dimKey = side === 'top' || side === 'bottom' ? 'w' : 'd', v = st[dimKey], u = st['wall_' + side];
         var label = SCREEN[side] + ' ' + (has(v) ? v : '?') + (has(u) ? ' · 놓을 ' + u : '');
         var done = has(v) || has(u);
@@ -830,9 +882,33 @@ textarea { min-height: 70px; font-size: .95rem; }
           o.push('</g>');
           return;
         }
-        o.push('<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="' + COL[side] + '" stroke-width="' + (done ? 9 : 7) + '" stroke-linecap="round"' + (done ? '' : ' stroke-opacity=".75"') + '/>');
+        // 스케치 □는 문·문짝이 열리는 자리에서 멈춰요 → 그 부분은 굵은 선을 끊어요
+        var hz = side === 'top' || side === 'bottom', segs = [[hz ? x1 : y1, hz ? x2 : y2]];
+        wallCuts(r, st, side).forEach(function (c) {
+          var nx2 = [];
+          segs.forEach(function (g) { if (c[1] <= g[0] || c[0] >= g[1]) nx2.push(g); else { if (c[0] > g[0]) nx2.push([g[0], c[0]]); if (c[1] < g[1]) nx2.push([c[1], g[1]]); } });
+          segs = nx2;
+        });
+        segs = segs.filter(function (g) { return g[1] - g[0] > 14; });
+        segs.forEach(function (g) {
+          o.push('<line x1="' + (hz ? g[0] : x1) + '" y1="' + (hz ? y1 : g[0]) + '" x2="' + (hz ? g[1] : x2) + '" y2="' + (hz ? y2 : g[1]) + '" stroke="' + COL[side] + '" stroke-width="' + (done ? 9 : 7) + '" stroke-linecap="round"' + (done ? '' : ' stroke-opacity=".75"') + '/>');
+        });
+        if (segs.length) {
+          // 글자 자리: 가장 긴 구간 안에서 그 벽에 붙은 가구가 없는 가장 긴 틈 (없으면 구간 가운데) — 가구 이름과 겹치지 않게
+          var lg = segs.reduce(function (m, g) { return g[1] - g[0] > m[1] - m[0] ? g : m; });
+          var free = [lg.slice()];
+          furn.filter(function (q) { return q.side === side; }).forEach(function (q) {
+            var a = hz ? r.x + q.x : r.y + q.y, bb = a + (hz ? q.w : q.h), nf = [];
+            free.forEach(function (g) { if (bb <= g[0] || a >= g[1]) nf.push(g); else { if (a > g[0]) nf.push([g[0], a]); if (bb < g[1]) nf.push([bb, g[1]]); } });
+            free = nf;
+          });
+          var fg = free.reduce(function (m, g) { return !m || g[1] - g[0] > m[1] - m[0] ? g : m; }, null);
+          var hasF = furn.some(function (q) { return q.side === side; }), cut = segs.length > 1 || lg[0] !== (hz ? x1 : y1) || lg[1] !== (hz ? x2 : y2);
+          var pick = hasF ? (fg && fg[1] - fg[0] >= (hz ? 56 : 40) ? fg : lg) : cut ? lg : null; // 가구도 문도 없는 벽은 원래 자리
+          if (pick) { if (hz) tx = (pick[0] + pick[1]) / 2; else ty = Math.min(pick[1] - 8, Math.max(pick[0] + 18, (pick[0] + pick[1]) / 2)); }
+        }
         if (tiny) label = SCREEN[side].slice(0, 1) + ' ' + (has(v) ? v : '?');
-        if (tiny && (side === 'left' || side === 'right')) { anchor = 'middle'; tx = x1; ty = r.y + r.d * 0.3; }
+        if (tiny && (side === 'left' || side === 'right') && !(r.lineOut && r.lineOut[side])) { anchor = 'middle'; tx = x1; ty = r.y + r.d * 0.3; }
         if (tiny && side === 'top') ty = r.y + 12; // 작은 칸은 위·아래 글자를 선 바깥에 두어 안쪽을 비워요
         if (tiny && side === 'bottom') ty = r.y + r.d - 2;
         o.push('<text x="' + tx + '" y="' + ty + '" font-size="' + (small ? 12 : 15) + '" font-weight="800" fill="' + COL[side] + '" text-anchor="' + anchor + '">' + esc(label) + '</text>');
@@ -842,21 +918,18 @@ textarea { min-height: 70px; font-size: .95rem; }
     ROOMS.forEach(function (r) {
       var st = roomState(r.id);
       if (r.door) {
-        var side = st.doorSide || r.door, dw = num(st.doorW) || r.doorLen0, at = num(st.doorAt);
-        if (at == null) at = side === r.door ? r.doorAt0 : 5;
+        var side = st.doorSide || r.door, dw = num(st.doorW) || r.doorLen0, at = doorAt(r, st, side);
         var D = segOn(r, side, at, dw), out = doorOut(r, st);
-        // 문짝이 도는 1/4 원 (자리 표시) — 방 안쪽, '밖으로 열려요'면 바깥쪽. 경첩 = 문 위/왼쪽 끝
-        var nx = side === 'left' ? 1 : side === 'right' ? -1 : 0, ny = side === 'top' ? 1 : side === 'bottom' ? -1 : 0;
-        if (out) { nx = -nx; ny = -ny; }
-        var px = D[0] + nx * dw, py = D[1] + ny * dw;
-        var cr = (D[2] - D[0]) * (py - D[1]) - (D[3] - D[1]) * (px - D[0]);
-        var sweep = 'M' + D[0] + ' ' + D[1] + ' L' + D[2] + ' ' + D[3] + ' A' + dw + ' ' + dw + ' 0 0 ' + (cr > 0 ? 1 : 0) + ' ' + px + ' ' + py + ' Z';
+        // 문짝이 도는 1/4 원 (자리 표시) — 방 안쪽, '밖으로 열려요'면 바깥쪽. 경첩은 스케치 빗금의 중심 모서리
         o.push('<g class="hit" data-k="door|' + r.id + '" tabindex="0" role="button" aria-label="' + esc(r.name + ' 문') + '">');
-        o.push('<path d="' + sweep + '" fill="var(--c-door)" fill-opacity=".12" stroke="var(--c-door)" stroke-width="2" stroke-dasharray="5 4"/>');
+        if (swingShown(r, st)) o.push('<path d="' + sweepPath(D, side, dw, out, !!r.hingeEnd).d + '" fill="var(--c-door)" fill-opacity=".12" stroke="var(--c-door)" stroke-width="2" stroke-dasharray="5 4"/>');
         o.push('<line x1="' + D[0] + '" y1="' + D[1] + '" x2="' + D[2] + '" y2="' + D[3] + '" stroke="transparent" stroke-width="22"/><line x1="' + D[0] + '" y1="' + D[1] + '" x2="' + D[2] + '" y2="' + D[3] + '" stroke="var(--c-door)" stroke-width="13"/>');
         var mx = (D[0] + D[2]) / 2, my = (D[1] + D[3]) / 2;
         var sg = out ? -1 : 1;
-        o.push('<text x="' + (mx + sg * (side === 'left' ? 34 : side === 'right' ? -34 : 0)) + '" y="' + (my + (side === 'top' ? sg * 34 : side === 'bottom' ? (out ? 34 : -26) : 5)) + '" font-size="15" font-weight="800" fill="var(--c-door)" text-anchor="middle">문 ' + (has(st.doorW) ? esc(st.doorW) : '?') + '</text></g>');
+        o.push('<text x="' + (mx + sg * (side === 'left' ? 34 : side === 'right' ? -34 : 0)) + '" y="' + (my + (side === 'top' ? sg * 34 : side === 'bottom' ? (out ? 34 : -26) : 5)) + '" font-size="15" font-weight="800" fill="var(--c-door)" text-anchor="middle">문 ' + (has(st.doorW) ? esc(st.doorW) : '?') + '</text>');
+        if (r.doorQ && !st.doorSide) o.push('<text x="' + (mx + sg * (side === 'left' ? 34 : side === 'right' ? -34 : 0)) + '" y="' + (my + (side === 'top' ? sg * 34 : side === 'bottom' ? (out ? 34 : -26) : 5) + 16) + '" font-size="11" font-weight="700" fill="var(--c-door)" text-anchor="middle">(' + esc(r.doorQ) + ')</text>');
+        if (!swingShown(r, st)) o.push('<text x="' + (mx + sg * (side === 'left' ? 34 : side === 'right' ? -34 : 0)) + '" y="' + (my + (side === 'top' ? 34 : side === 'bottom' ? -26 : 5) + 16) + '" font-size="11" font-weight="700" fill="var(--c-door)" text-anchor="middle">(열리는 쪽?)</text>');
+        o.push('</g>');
       }
       if (r.win) {
         var W = segOn(r, r.win, st.winAt !== undefined && num(st.winAt) != null ? num(st.winAt) : r.winAt0, num(st.winW) || r.winLen0);
@@ -864,10 +937,13 @@ textarea { min-height: 70px; font-size: .95rem; }
         var dx = horiz ? 0 : 7, dy = horiz ? 7 : 0;
         o.push('<g class="hit" data-k="win|' + r.id + '" tabindex="0" role="button" aria-label="' + esc(r.name + ' 창') + '">');
         o.push('<line x1="' + W[0] + '" y1="' + W[1] + '" x2="' + W[2] + '" y2="' + W[3] + '" stroke="transparent" stroke-width="22"/>');
-        o.push('<line x1="' + (W[0] - dx) + '" y1="' + (W[1] - dy) + '" x2="' + (W[2] - dx) + '" y2="' + (W[3] - dy) + '" stroke="var(--c-win)" stroke-width="4"/><line x1="' + (W[0] + dx) + '" y1="' + (W[1] + dy) + '" x2="' + (W[2] + dx) + '" y2="' + (W[3] + dy) + '" stroke="var(--c-win)" stroke-width="4"/>');
-        // 창 글자는 방 바깥(발코니 쪽)에
+        var asDoor = !!st.winDoor, unsure = r.winQ && !asDoor, wc = asDoor ? 'var(--c-door)' : 'var(--c-win)';
+        if (asDoor) o.push('<line x1="' + W[0] + '" y1="' + W[1] + '" x2="' + W[2] + '" y2="' + W[3] + '" stroke="var(--c-door)" stroke-width="11"/>');
+        else o.push('<line x1="' + (W[0] - dx) + '" y1="' + (W[1] - dy) + '" x2="' + (W[2] - dx) + '" y2="' + (W[3] - dy) + '" stroke="var(--c-win)" stroke-width="4"' + (unsure ? ' stroke-dasharray="8 5"' : '') + '/><line x1="' + (W[0] + dx) + '" y1="' + (W[1] + dy) + '" x2="' + (W[2] + dx) + '" y2="' + (W[3] + dy) + '" stroke="var(--c-win)" stroke-width="4"' + (unsure ? ' stroke-dasharray="8 5"' : '') + '/>');
+        // 창 글자는 방 바깥(발코니 쪽)에 — 어느 방 창인지 같이
         var wx = (W[0] + W[2]) / 2, wy = (W[1] + W[3]) / 2;
-        o.push('<text x="' + wx + '" y="' + (wy + (horiz ? sgn * 26 + (sgn > 0 ? 6 : 0) : 5)) + '" font-size="15" font-weight="800" fill="var(--c-win)" text-anchor="middle">창 ' + (has(st.winW) ? esc(st.winW) : '?') + (has(st.winSill) ? ' · 창틀 ' + esc(st.winSill) : '') + '</text></g>');
+        var wname = asDoor ? (r.wl || '').replace(/ ?창.*$/, '') + ' 문' : unsure ? (r.wl || '') + ' 창? 문?' : (r.wl || '창');
+        o.push('<text x="' + wx + '" y="' + (wy + (horiz ? sgn * 26 + (sgn > 0 ? 6 : 0) : 5)) + '" font-size="14" font-weight="800" fill="' + wc + '" text-anchor="middle">' + esc(wname.trim()) + ' ' + (has(st.winW) ? esc(st.winW) : '?') + (has(st.winSill) ? ' · 창틀 ' + esc(st.winSill) : '') + '</text></g>');
       }
       if (r.w < 100) return;
       if (r.w < 120) { // 작은 칸: 상자 없이 이름만
@@ -938,9 +1014,11 @@ textarea { min-height: 70px; font-size: .95rem; }
       var st = roomState(sp.id);
       openSheet(sp.name, function (b) {
         b.appendChild(h('p', { class: 'small muted', text: sp.hint }));
+        var lo2 = leftovers(sp, st);
+        if (lo2.length) b.appendChild(h('div', { class: 'note', text: '예전에 적은 값: ' + lo2.join(' · ') }));
         if (sp.where) {
           var cand = sp.mk && sp.mk[+a[2]] ? sp.mk[+a[2]][2] : '';
-          var wi = h('input', { placeholder: '예) 위 발코니 왼쪽 끝', value: st.where || sp.where0 || (cand ? cand + ' 자리' : '') });
+          var wi = h('input', { placeholder: sp.where0 || (cand ? cand + ' 자리' : '예) 위 발코니 왼쪽 끝'), value: st.where || '' });
           wi.addEventListener('input', function () { st.where = wi.value; save(); planSoon(); });
           b.appendChild(h('div', { class: 'f' }, h('label', { text: '어디예요?' }), wi));
         }
@@ -957,10 +1035,11 @@ textarea { min-height: 70px; font-size: .95rem; }
       var side = a[2], dimKey = side === 'top' || side === 'bottom' ? 'w' : 'd';
       openSheet(r.name + ' · ' + SCREEN[side] + ' 벽 (' + r.walls[side] + ')', function (b) {
         b.appendChild(h('div', { class: 'grid two' },
-          input(st2, dimKey, '이 벽 끝에서 끝까지 (방 ' + (dimKey === 'w' ? '가로' : '세로') + ')', '평면도 ' + (dimKey === 'w' ? r.w : r.d), planSoon),
+          input(st2, dimKey, '이 벽 끝에서 끝까지 (방 ' + (dimKey === 'w' ? '가로' : '세로') + ')', '평면도 ' + (dimKey === 'w' ? r.w : r.d), function () { if (dimKey === 'd') delete st2.dLegacy; planSoon(); }),
           input(st2, 'wall_' + side, '가구 놓을 수 있는 길이', 'cm', planSoon)));
         if (wallKind(r, side) === 'o') b.appendChild(h('div', { class: 'note', text: '스케치에서 □ 표시를 안 한 벽이에요 — 안 재도 돼요. 필요하면 적어 두세요.' }));
         else if (r.sk && r.sk[side]) b.appendChild(h('div', { class: 'note', text: '스케치 □: ' + r.sk[side] + (r.sk[side].indexOf('끝에서 끝') === 0 ? ' → 첫 칸에 적어요.' : ' → \'가구 놓을 수 있는 길이\' 칸에 적어요.') }));
+        if (st2.dLegacy && dimKey === 'd') b.appendChild(h('div', { class: 'warnbox', text: '이 세로 값(' + st2.d + ')은 예전 도면(복도까지 포함)에서 적은 값이에요. 스케치대로 입구 아래 모서리부터 다시 재면 고쳐 주세요.' }));
         b.appendChild(h('p', { class: 'small muted', text: '둘 중 하나만 적어도 돼요. 가구 놓을 수 있는 길이 = 문·창(낮은 창틀)·문짝이 열리는 자리·튀어나온 기둥을 빼고 막힘 없이 이어진 가장 긴 구간이에요.' }));
         if ((st2.doorSide || r.door) === side) b.appendChild(h('div', { class: 'note', text: '이 벽에 문이 있어요 — 주황 선(문)을 눌러 문 폭도 적어 주세요.' }));
       });
@@ -1024,13 +1103,14 @@ textarea { min-height: 70px; font-size: .95rem; }
     var out = ['[새 집 실측 결과 — ' + new Date().toLocaleDateString('ko-KR') + ']', '', '■ 1차 새 집 (빈 공간, cm)'];
     ROOMS.forEach(function (r) {
       var st = roomState(r.id), p = [];
-      if (st.w || st.d) p.push('가로 ' + (st.w || '?') + ' × 세로 ' + (st.d || '?'));
+      if (st.w || st.d) p.push('가로 ' + (st.w || '?') + ' × 세로 ' + (st.d || '?') + (st.dLegacy ? ' (세로는 예전 도면 기준)' : ''));
       if (st.ch) p.push('천장 ' + st.ch);
-      if (st.doorW) p.push('문 ' + st.doorW + ' (' + SIDES[st.doorSide || r.door] + ' 벽' + (st.doorAt ? ', 모서리에서 ' + st.doorAt : '') + (doorOut(r, st) ? ', 밖으로 열림' : '') + ')');
+      if (st.doorW) p.push('문 ' + st.doorW + ' (' + (SIDES[st.doorSide || r.door] || '?') + ' 벽' + (st.doorAt ? ', 모서리에서 ' + st.doorAt : '') + (doorOut(r, st) ? ', 밖으로 열림' : '') + ')');
       if (st.doorH) p.push('문 높이 ' + st.doorH);
       if (st.winW || st.winSill || st.winAt || st.winDoor) p.push('창 폭 ' + (st.winW || '?') + ' · 창틀 높이 ' + (st.winSill || '?') + (st.winAt ? ' · 모서리→창 ' + st.winAt : '') + (st.winDoor ? ' · 바닥까지 문' : ''));
-      var walls = ['top', 'right', 'bottom', 'left'].filter(function (s) { return st['wall_' + s]; }).map(function (s) { return SIDES[s] + ' ' + st['wall_' + s]; });
+      var walls = ['top', 'right', 'bottom', 'left'].filter(function (s) { return st['wall_' + s]; }).map(function (s) { return SIDES[s] + ' ' + st['wall_' + s] + (wallKind(r, s) ? '' : '(트인 쪽 — 예전 값)'); });
       if (walls.length) p.push('가구 놓을 벽: ' + walls.join(', '));
+      if (st.winMemo) p.push('창 메모: ' + st.winMemo.replace(/\n/g, ' / '));
       if (st.memo) p.push('메모: ' + st.memo.replace(/\n/g, ' / '));
       out.push('- ' + r.name + ': ' + (p.length ? p.join(' · ') : '안 잼'));
     });
@@ -1039,12 +1119,11 @@ textarea { min-height: 70px; font-size: .95rem; }
     if (hs.memo) out.push('- 복도 메모: ' + hs.memo.replace(/\n/g, ' / '));
     SPOTS.forEach(function (sp) {
       var st = roomState(sp.id), p = [];
-      if (st.where) p.push('위치 ' + st.where);
+      if (st.where || sp.where0) p.push('위치 ' + (st.where || sp.where0));
       sp.f.forEach(function (f) { if (st[f[0]]) p.push(f[1] + ' ' + st[f[0]]); });
       (sp.c || []).forEach(function (c) { if (st[c[0]]) p.push(c[1] + ' 있음'); });
       if (st.memo) p.push('메모: ' + st.memo.replace(/\n/g, ' / '));
-      var known = ['where', 'memo'].concat(sp.f.map(function (f) { return f[0]; }), (sp.c || []).map(function (c) { return c[0]; }));
-      Object.keys(st).forEach(function (k) { if (known.indexOf(k) < 0 && has(st[k]) && st[k] !== false) p.push(k + ' ' + st[k]); }); // 예전 칸에 적은 값도 빠뜨리지 않게
+      leftovers(sp, st).forEach(function (x) { p.push(x + ' (예전 칸)'); }); // 예전 칸에 적은 값도 빠뜨리지 않게
       out.push('- ' + sp.name + ': ' + (p.length ? p.join(' · ') : '안 잼'));
     });
     // 예전 도면에만 있던 칸(위 작은 칸·작은 칸들 등)에 적은 값
