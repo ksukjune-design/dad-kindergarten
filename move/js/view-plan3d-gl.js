@@ -904,8 +904,11 @@
       if (id === 'top') return viewTo(T3(cx, span * 1.55, cz + 0.02), T3(cx, 0, cz), ms);
       const r = P.rooms.find((x) => x.id === id);
       if (!r) return;
-      const rx = (r.x + r.w / 2) / 100, rz = (r.y + r.h / 2) / 100, sz = Math.max(r.w, r.h) / 100;
-      viewTo(T3(rx + sz * 0.12, 2.3 + sz * 0.95, rz + 1.1 + sz * 0.85), T3(rx, 0.45, rz), ms);
+      // 방이 화면에 꽉 차게: 남쪽 위(약 55°)에서 내려다보는 거리 = 방 가로·세로가 시야에 들어오는 거리 중 큰 쪽
+      const rx = (r.x + r.w / 2) / 100, rz = (r.y + r.h / 2) / 100, rw = r.w / 100 + 0.5, rd = r.h / 100 + 0.5;
+      const tv = Math.tan(deg(camera.fov / 2)), th = tv * camera.aspect, pitch = deg(55);
+      const dist = Math.max(rw / 2 / th, (rd * Math.sin(pitch) + 1.0 * Math.cos(pitch)) / 2 / tv) * 1.12 + 0.6;
+      viewTo(T3(rx, 0.5 + dist * Math.sin(pitch), rz + dist * Math.cos(pitch)), T3(rx, 0.5, rz), ms);
     }
     view(opt.view || 'all', 0);
 
