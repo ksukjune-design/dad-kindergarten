@@ -710,13 +710,12 @@ button.db-wk-head:hover { background:var(--bg-3); }
      가족 결정 반영: 이사업체 아정당 계약(10/8, 190만원·부가세 없음 — 계약금 10만원 냄, 잔금 180만원 11/3) ·
      에어컨 설치는 따로 부른 기사(약 40만원 추정) · 옷장은 이사 뒤 간이 옷장(약 20만원, 선택·나중에) · 통돌이 약 50만원(이사 후 배송)
      · 커튼·소품은 지금 것을 가져감(0원) · 입주청소는 직접(0원) · 예비비 없음.
-     11월 월세 70만원은 계약서상 후불이라 11/3에 낼 때만 — 낸다면 잔금(1억 + 1억 + 9,500만)과 따로 이체. */
+     10/24 확정: 중개보수 부가세 포함 1,216,000원, 월세는 후불(첫 월세 12/3 — 11/3엔 안 냄). */
   const PLAN_FLOW = [
     { label: '집주인 A에게 받을 돈', sub: '보증금 4.2억 − 먼저 받은 0.42억', amt: 378000000, sign: 1 },
     { label: '우리은행 전세대출 상환', sub: '남은 대출 0.78억 (일할이자가 조금 붙을 수 있어요)', amt: 78000000, sign: -1 },
     { label: '집주인 C 잔금', sub: '1억 + 1억 + 9,500만으로 나눠 이체', amt: 295000000, sign: -1 },
-    { label: '11월 월세 (11/3에 낸다면)', sub: '계약서상 후불 — 낸다면 잔금과 따로 이체하고 영수증도 따로 받기', amt: 700000, sign: -1, rent: true },
-    { label: '중개보수 (상한)', sub: '법정 상한 117만원 · 부가세 별도', amt: 1170000, sign: -1 },
+    { label: '중개보수 (10/24 확정)', sub: '부가세 포함 · 중개사무소 계좌로, 현금영수증 받기', amt: 1216000, sign: -1 },
   ];
   const MOVER_PLAN = { total: 1900000, paid: 100000, unpaid: 1800000, company: '아정당' }; // 견적 화면 계약 정보가 없을 때만
   const AC_INSTALL = 400000;                   // 에어컨 설치 (따로 부른 기사, 추정)
@@ -872,7 +871,7 @@ button.db-wk-head:hover { background:var(--bg-3); }
       const nE = bal - pc.essential;
       const planRent = PLAN_FLOW.filter((s) => s.rent).reduce((a, s) => a + s.amt, 0);
       body.appendChild(cashResult({ netEssential: nE, netWithPurchases: nE - pc.purchase, net: nE - pc.purchase - pc.optional, purchase: pc.purchase, optional: pc.optional, rentPart: planRent }));
-      body.appendChild(el('div', { class: 'db-basis' }, '계획값 기준 (약) · 이사업체는 계약 금액, 에어컨 설치는 따로 부른 기사(약 40만원 추정) · 옷장은 이사 뒤 간이 옷장(선택·나중에), 커튼·소품은 지금 것, 입주청소는 직접, 예비비는 없어요. 11월 월세 70만원은 11/3에 낸다고 넣었어요 (계약서대로 후불이면 그만큼 여유). 자금흐름 화면에서 실제 금액을 넣으면 자동으로 바뀝니다.'));
+      body.appendChild(el('div', { class: 'db-basis' }, '계획값 기준 (약) · 이사업체는 계약 금액, 에어컨 설치는 따로 부른 기사(약 40만원 추정) · 옷장은 이사 뒤 간이 옷장(선택·나중에), 커튼·소품은 지금 것, 입주청소는 직접, 예비비는 없어요. 월세는 후불이라 12/3부터예요(11/3엔 안 내요). 자금흐름 화면에서 실제 금액을 넣으면 자동으로 바뀝니다.'));
     }
     return el('section', { class: 'card db-money', 'aria-label': '11월 3일 돈 흐름' },
       head('💸', (moveDay() ? md(moveDay()) : '이사일') + ' 돈 흐름', null, moreLink('자금흐름 자세히 →', '#/money')),

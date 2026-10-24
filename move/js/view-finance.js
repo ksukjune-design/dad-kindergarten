@@ -526,8 +526,10 @@
      9: 장기수선충당금 줄 이름을 '11/3 보증금과 함께 받기'로 (10/7) — 옛 기본 이름·금액 그대로이고 받음·메모가 없는 줄만.
         받음(got)으로 표시한 들어올 돈은 남는 돈 계산(net·netEssential·netWithPurchases)에 더해요 — 받기 전에는 넣지 않음,
      10: 이사업체 계약 확정(아정당 잔금 180만원 + 계약금 10만원 냄)·에어컨 설치(별도 기사 40만원, 이사 뒤) — 확정값 덮어쓰기(migrateV10),
-     11: 통돌이 모델 정함(10/24 LG T17MX3, 521,000원) — 안 고친 통돌이 줄만 (migrateV11) */
-  const FIN_V = 11;
+     11: 통돌이 모델 정함(10/24 LG T17MX3, 521,000원) — 안 고친 통돌이 줄만 (migrateV11),
+     12: 중개보수 확정(10/24, 부가세 포함 1,216,000원)·월세 후불 확정(첫 월세 12/3) — 가족이 정한 값이라 덮어쓰기 (withDefaults) */
+  const FIN_V = 12;
+  const BROKER_FEE = 1216000; /* 10/24 확정 — 부가세 포함 */
   /* v11: 기본값 그대로(50만원)인 통돌이 줄만 새 모델 값으로 — 이름·메모도 옛 기본 그대로일 때만 바꿈 */
   function migrateV11(lines) {
     return lines.map((l) => {
@@ -570,10 +572,10 @@
       loan: { original: 100000000, prepaid: 22000000, payoff: 78130000, lien: 'unknown' },
       newHome: {
         deposit: 320000000, contract: 25000000, contractFromEarly: 20000000, contractFromWife: 5000000,
-        balance: 295000000, rent: 700000, rentOnMoveDay: true, rentConfirmed: false, extraToC: 0,
-        memoTotal: 295770000, memoAck: false, memoAckDiff: null, contractDate: '2026-07-13',
+        balance: 295000000, rent: 700000, rentOnMoveDay: false, rentConfirmed: true, extraToC: 0,
+        memoTotal: 0, memoAck: false, memoAckDiff: null, contractDate: '2026-07-13', /* 예전 메모 295,770,000원(잔금 + 11월 월세)은 월세 후불 확정으로 안 써요 */
       },
-      broker: { planned: 1200000, vat: 'general', agreed: false },
+      broker: { planned: BROKER_FEE, vat: 'simple', agreed: true }, /* 117만원 × 약 1.04(간이과세자) = 1,216,800원과 같은 금액 */
       flow: { times: Object.assign({}, DEFAULT_TIMES), done: {}, memo: {}, limits: { perTx: null, daily: null }, prep: {} },
       contacts: { A: '', C: '', broker: '', oldBroker: '', bank: '', mover: '' },
       budget: { lines: defaultLines(), refunds: defaultRefunds() },
@@ -627,6 +629,12 @@
     /* v11: 통돌이 LG T17MX3 (521,000원) — 50만원 기본값 그대로인 줄만 */
     if (rawV < 11) raw = migrateV11(raw);
     f.budget.lines = raw.map(normLine);
+    /* v12: 중개보수 1,216,000원(부가세 포함) 확정, 월세는 계약서대로 후불(11/3엔 안 내고 12/3부터) — 확정값으로 덮어써요 */
+    if (rawV < 12) {
+      f.broker = Object.assign({}, f.broker, { planned: BROKER_FEE, vat: 'simple', agreed: true });
+      f.newHome = Object.assign({}, f.newHome, { rentOnMoveDay: false, rentConfirmed: true });
+      if (num(f.newHome.memoTotal) === 295770000) f.newHome.memoTotal = 0; /* 월세를 11/3에 같이 줄 때의 옛 메모 — 이제 비교하지 않아요 */
+    }
     f.v = Math.max(rawV, FIN_V);
     f.budget.refunds = (Array.isArray(f.budget.refunds) ? f.budget.refunds : []).filter((x) => x && typeof x === 'object').map(normRefund);
     /* v9: 손대지 않은 장기수선충당금 기본 줄만 새 이름으로 (금액·받음·메모를 고친 줄은 그대로) */
@@ -2515,7 +2523,9 @@ div.fn-alert { cursor: default; }
         moneyField('보증금 잔금', f.newHome.balance, (v) => upd((fin) => { fin.newHome.balance = v; }), { fk: 'amt-balance' }),
         moneyField('기타 (있으면)', f.newHome.extraToC, (v) => upd((fin) => { fin.newHome.extraToC = v; }), { fk: 'amt-extra', placeholder: '예: 관리비 정산', hint: '관리비 정산 등 C에게 함께 보낼 돈' })));
       const rentBox = el('div', { class: 'callout fn-rentbox fn-anchor', id: 'fn-rent' },
-        P.live('p', null, () => [el('b', '📌 월세 지급일 확인 — '), '계약서상 후불이면 첫 월세는 ' + D.fmt(addMonths(P.c.move, 1)) + '. ' + D.fmt(P.c.move) + '에 ' + krw(nn(P.c.f.newHome.rent)) + '을 함께 줄지 중개사·임대인과 확인하고, 주면 영수증/문자로 남기기']),
+        P.live('p', null, () => (P.c.f.newHome.rentConfirmed && !P.c.f.newHome.rentOnMoveDay
+          ? [el('b', '📌 월세 후불 확정 — '), '첫 월세 ' + krw(nn(P.c.f.newHome.rent)) + '는 ' + D.fmt(addMonths(P.c.move, 1)) + '에 내요. ' + D.fmt(P.c.move) + '에는 C에게 잔금만 보내요.']
+          : [el('b', '📌 월세 지급일 확인 — '), '계약서상 후불이면 첫 월세는 ' + D.fmt(addMonths(P.c.move, 1)) + '. ' + D.fmt(P.c.move) + '에 ' + krw(nn(P.c.f.newHome.rent)) + '을 함께 줄지 중개사·임대인과 확인하고, 주면 영수증/문자로 남기기'])),
         el('div', { class: 'row' },
           checkbox(D.fmt(P.c.move) + '에 첫 월세도 보내기 (잔금과 따로 이체)', f.newHome.rentOnMoveDay, (v) => upd((fin) => { fin.newHome.rentOnMoveDay = v; }, { log: '자금흐름: 11/3 첫 월세 ' + (v ? '함께 지급' : '지급 안 함 (12/3부터)') }), { fk: 'rent-on' }),
           el('label', { class: 'fn-inline-money' }, el('span', { class: 'small strong' }, '월세'),
@@ -2955,7 +2965,7 @@ div.fn-alert { cursor: default; }
     };
     const linesCard = el('section', { class: 'card' },
       el('div', { class: 'fn-card-h' }, el('h3', '지출 항목'), el('span', { class: 'spacer' }),
-        el('span', { class: 'small muted' }, '중개보수·첫 월세는 11/3 돈 흐름에 이미 들어 있어요')),
+        el('span', { class: 'small muted' }, '중개보수(와 11/3에 내기로 한 월세)는 11/3 돈 흐름에 이미 들어 있어요')),
       GROUPS.map(groupBlock),
       el('div', { class: 'row mt-12' },
         el('button', { class: 'btn', type: 'button', onclick: () => {
@@ -3478,7 +3488,7 @@ div.fn-alert { cursor: default; }
       r.band.rate === 0 ? el('div', { class: 'fn-warn is-bad' }, '총급여 8,000만원 초과면 월세 세액공제를 받을 수 없어요.') : null,
       el('p', { class: 'small muted mb-0' }, P.c.f.newHome.rentOnMoveDay
         ? D.fmt(P.c.move) + '에 첫 월세를 함께 내면 ' + r.year + '년분이 ' + r.dates.length + '번이에요. 계약서대로 후불(' + D.fmt(addMonths(P.c.move, 1)) + ' 첫 지급)이면 ' + Math.max(0, r.dates.length - 1) + '번(' + won(Math.round(Math.min(r.rent * Math.max(0, r.dates.length - 1), 10000000) * r.band.rate)) + ')으로 줄어요.'
-        : '계약서대로 후불이면 ' + r.year + '년에는 ' + D.fmt(addMonths(P.c.move, 1)) + ' 한 번만 내요. ' + D.fmt(P.c.move) + '에 함께 내면 2번으로 늘어요.'),
+        : '후불이라 ' + r.year + '년에는 ' + D.fmt(addMonths(P.c.move, 1)) + ' 한 번만 내요.'),
     ];
   }
 
