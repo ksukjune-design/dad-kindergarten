@@ -3599,7 +3599,7 @@
       const pick = (it) => (it ? [it.id, it.name, it.note, it.w, it.d, it.h, it.fate] : null);
       const sg = [validRooms(plan).map((r) => [r.id, r.name, r.kind, r.x, r.y, r.w, r.h]), room && room.id, !!chosen, pick(washer), pick(dryer), cands.map((r) => r.id),
         plan.fixtures.map((f) => [f.x, f.y, f.w, f.h]), plan.doors.map((d) => d._key + d.width + d.swing), plan.openings.length, marginNow(),
-        [washer, dryer].map((it) => (it ? JSON.stringify(useOf(it)) : ''))];
+        [washer, dryer].map((it) => (it ? JSON.stringify(useOf(it)) : '')), laundryHome(washer, dryer).map((s) => s.off)];
       if (!changed('laundry', sg) && !force) return;
       laundry.textContent = '';
       const res = room && washer && dryer ? laundryCheck(plan, room, washer, dryer, marginNow()) : null;
@@ -3633,9 +3633,45 @@
       laundry.appendChild(el('div', { class: 'small strong mt-8' }, '💡 이렇게 해 보세요'));
       laundry.appendChild(el('ul', { class: 'fp-sugg' }, res.sugg.map((s) => el('li', s))));
       const noSpot = !res.spot;
+      // 기본 배치(가족 배치 그림) 자리에서 옮겨졌으면 한 번에 되돌리기 — 이때는 이 버튼을 앞세움
+      const home = laundryHome(washer, dryer);
+      const offHome = home.some((h) => h.off);
       laundry.appendChild(el('div', { class: 'row mt-12' },
-        el('button', { type: 'button', class: 'btn fp-b ' + (noSpot ? '' : 'btn-primary'), onclick: () => placeLaundry(room, washer, dryer) }, '📐 ' + room.name + '에 ' + (noSpot ? '그래도 ' : '') + '놓아보기'),
+        el('button', { type: 'button', class: 'btn fp-b ' + (noSpot || offHome ? '' : 'btn-primary'), onclick: () => placeLaundry(room, washer, dryer) }, '📐 ' + room.name + '에 ' + (noSpot ? '그래도 ' : '') + '놓아보기'),
         noSpot ? el('span', { class: 'tiny muted' }, '자리가 없어 겹쳐 놓일 수 있어요') : null));
+      if (offHome) {
+        laundry.appendChild(el('div', { class: 'row mt-8' },
+          el('button', { type: 'button', class: 'btn fp-b btn-primary', onclick: () => backHome(home) }, '↩ 기본 배치 자리로'),
+          el('span', { class: 'tiny muted' }, '지금 자리가 기본 배치(10/24 저녁 가족 배치 그림)와 달라요')));
+      }
+    }
+    /** 세탁기·건조기의 기본 배치 자리(data-layouts.js 새 집 기본 배치)와 지금 자리가 다른지 */
+    function laundryHome(washer, dryer) {
+      const S = (MV.seedLayouts && MV.seedLayouts.new && MV.seedLayouts.new.placements) || [];
+      return [washer, dryer].map((it) => {
+        const s = it && S.find((z) => z.invId === it.id);
+        if (!s) return null;
+        const o = cur.items.find((x) => x.it.id === it.id);
+        return { it, s, off: !o || o.p.x !== s.x || o.p.y !== s.y || o.p.rot !== s.rot };
+      }).filter(Boolean);
+    }
+    function backHome(home) {
+      let firstId = null;
+      MV.store.update((st) => {
+        const P = layoutsOf(st).new.placements;
+        home.forEach(({ it, s }) => {
+          let p = P.find((z) => z.invId === it.id);
+          if (p) Object.assign(p, { x: s.x, y: s.y, rot: s.rot });
+          else { p = { id: MV.uid('pl'), invId: it.id, x: s.x, y: s.y, rot: s.rot }; P.push(p); }
+          if (!firstId) firstId = p.id;
+          const iv = (st.inventory || []).find((z) => z.id === it.id);
+          const sv = ((MV.seed && MV.seed.inventory) || []).find((z) => z.id === it.id);
+          if (iv && sv && sv.roomNew) iv.roomNew = sv.roomNew;
+        });
+        sel = firstId;
+      }, { log: '📐 세탁기·건조기를 기본 배치 자리로' });
+      toast('세탁기·건조기를 기본 배치 자리로 옮겼어요', { action: window.innerWidth < 1100 ? { label: '보기', onClick: revealSel } : null });
+      if (window.innerWidth >= 1100) revealSel();
     }
     /** 예전 방식(벽 쪽 한 줄로 단순 배치) — 문·고정물 때문에 laundrySpot 이 자리를 못 찾을 때만 */
     function simplePair(plan, room, washer, dryer) {
@@ -5206,8 +5242,38 @@
   /**
    * 3D 보기용 도면 자료 (view-plan3d.js) — 2D 도면과 같은 값(실측 수정·배치 그대로)을 넘겨요.
    * MV.calc.plan3d('new') → { key, name, width, depth, bounds, rooms, doors:[{x,y,w,v,gap}], openings, windows, fixtures,
-   *                          items:[{ pid, invId, name, cat, tag, fate, rot, x, y, w, h, hgt, dw, dd, wall, room, url, front }] } | null
+   *                          items:[{ pid, invId, name, cat, tag, fate, rot, x, y, w, h, hgt, dw, dd, wall, room, url, front,
+   *                                   open:{ kind, need, free, top } | null }], extras:[floor: false 짐] } | null
    */
+  /**
+   * 3D '열림' 보기용: 정면(문·서랍·앉는 자리)을 실제로 몇 cm 열 수 있는지 — 벽·다른 가구 몸체·고정물(설비)에 처음 닿는 곳까지.
+   * 방문 열림 범위·문 앞은 막는 것으로 보지 않아요(방문을 닫으면 열 수 있어서). 의자 ↔ 식탁은 서로 예외.
+   * → { kind, need, free, by(처음 닿는 것), top } | null
+   */
+  function frontFree(plan, list, o) {
+    const u = useOf(o.it);
+    if (!u || !(u.front > 0.5)) return null;
+    const rot = rotOf(o.p);
+    const z = useZones(o.r, rot, u).find((x) => x.side === 'front');
+    if (!z) return null;
+    let free = z.depth, by = '';
+    const hitAt = (cm, name) => { if (cm < free - 0.05) { free = cm; by = name; } };
+    const rm = homeRoom(validRooms(plan), o.r);
+    if (rm) { const ex = wallExcess(edgeGaps(plan, rm), rm, z.rect, z.dir); if (ex) hitAt(z.depth - ex, '벽'); }
+    const fr = o.r;
+    // 정면에서 장애물 가까운 쪽 가장자리까지 (inter 는 겹친 크기만 줘서 장애물 사각형으로 재요)
+    const gap = (b) => Math.max(0, z.dir === 0 ? b.y - (fr.y + fr.h) : z.dir === 180 ? fr.y - (b.y + b.h) : z.dir === 90 ? fr.x - (b.x + b.w) : b.x - (fr.x + fr.w));
+    list.forEach((b) => {
+      if (b === o || wallMounted(b.it) || pairExempt(o.it, b.it)) return;
+      const i = inter(z.rect, b.r);
+      if (i && i.w > 1 && i.h > 1) hitAt(gap(b.r), shortName(b.it.name, 14));
+    });
+    statics(plan).filter((st) => st.type === 'fixture' || st.type === 'builtin').forEach((st) => {
+      const i = inter(z.rect, st.r);
+      if (i && i.w > 1 && i.h > 1) hitAt(gap(st.r), st.name);
+    });
+    return { kind: u.kind, need: r1(z.depth), free: r1(Math.max(0, free)), by, top: u.top > 0.5 ? r1(u.top) : 0 };
+  }
   MV.calc.plan3d = function plan3d(key) {
     key = key === 'old' ? 'old' : 'new';
     try {
@@ -5216,23 +5282,29 @@
       if (!plan) return null;
       const inv = invMap();
       const items = [];
-      pls(key).forEach((p) => {
-        const it = inv.get(p.invId);
-        if (!it || !eligible(key, it)) return;
-        const rot = rotOf(p), r = rectOf(p, it);
+      const list = pls(key).map((p) => ({ p, it: inv.get(p.invId) })).filter((o) => o.it && eligible(key, o.it));
+      list.forEach((o) => { o.r = rectOf(o.p, o.it); });
+      list.forEach((o) => {
+        const p = o.p, it = o.it;
+        const rot = rotOf(p), r = o.r;
         items.push({ pid: p.id, invId: it.id, name: String(it.name || ''), cat: String(it.cat || 'misc'), tag: String(it.tag || ''), fate: fateOf(it),
           rot, x: r.x, y: r.y, w: r.w, h: r.h, dw: Math.max(5, num(it.w, 60)), dd: Math.max(5, num(it.d, 60)),
           hgt: Math.max(3, num(it.h, 0) || 60), wall: wallMounted(it), img: typeof it.img === 'string' ? it.img : '',
-          room: String(it[roomField(key)] || ''), url: typeof it.url === 'string' ? it.url : '', front: FRONT_WORD[rot] });
+          room: String(it[roomField(key)] || ''), url: typeof it.url === 'string' ? it.url : '', front: FRONT_WORD[rot],
+          open: frontFree(plan, list, o) });
       });
+      // 바닥에 안 놓고 다른 짐 위에 올리는 짐(전자레인지 등 floor: false) — 3D 에서 받침 짐 위에 그려요
+      const extras = Array.from(inv.values()).filter((it) => it && it.floor === false && FATES_FOR[key].includes(fateOf(it)))
+        .map((it) => ({ invId: it.id, name: String(it.name || ''), cat: String(it.cat || 'misc'), tag: String(it.tag || ''), fate: fateOf(it),
+          dw: Math.max(5, num(it.w, 40)), dd: Math.max(5, num(it.d, 30)), hgt: Math.max(3, num(it.h, 20)), use: useOf(it), url: typeof it.url === 'string' ? it.url : '' }));
       return {
         key, name: plan.name, width: plan.width, depth: plan.depth, bounds: plan.bounds,
         rooms: plan.rooms.filter((r) => r.w > 0 && r.h > 0).map((r) => ({ id: r.id, name: r.name, kind: r.kind, x: r.x, y: r.y, w: r.w, h: r.h })),
-        doors: plan.doors.map((d) => { const g = doorGeom(d); return { x: num(d.x, 0), y: num(d.y, 0), w: g.w, v: d.orientation === 'v', swing: d.swing, hinge: d.hinge, open: g.open, hingeAt: g.hinge }; }),
+        doors: plan.doors.map((d) => { const g = doorGeom(d); return { x: num(d.x, 0), y: num(d.y, 0), w: g.w, v: d.orientation === 'v', swing: d.swing, hinge: d.hinge, open: g.open, hingeAt: g.hinge, shut: g.free }; }),
         openings: plan.openings.map((o) => ({ x: num(o.x, 0), y: num(o.y, 0), w: Math.max(0, num(o.width, 0)), v: o.orientation === 'v' })),
         windows: plan.windows.map((w) => ({ x: num(w.x, 0), y: num(w.y, 0), w: Math.max(0, num(w.length, 0)), v: w.orientation === 'v', note: String(w.note || '') })),
         fixtures: plan.fixtures.map((f) => Object.assign({ kind: String(f.kind || ''), name: String(f.name || '') }, fxRect(f))).filter((f) => f.w > 0 && f.h > 0),
-        items,
+        items, extras,
       };
     } catch (e) { console.error('[plan] 3d', e); return null; }
   };
