@@ -127,7 +127,8 @@
     [P('pl-new-box-10', 'inv-living-box', 508, 80, 0), { w: 53, d: 40 }],
   ];
   // 새 집 배치 v16 — 가족이 공유 버전에서 직접 옮긴 배치(10/24 저녁 그림·공유 기록)를 그대로 쓰고 쓰임 공간만 미세 조정
-  const NEW = [
+  // (v16 이전 규칙이 쓰는 목록이라 얼려 둬요 — 지금 기본 배치는 아래 NEW = v17)
+  const NEW16 = [
     // 세탁 발코니: 건조기 왼쪽(정면 오른쪽) — 뒤 배기·호스 10cm 띄움(가족 배치 x 0 → 10) · 전자레인지 수납장 가운데 창 쪽 벽(정면 아래) ·
     // 통돌이 70x73 칸(정면 왼쪽, 뒤 호스 10cm)
     [P('pl-new-dryer', 'inv-dryer', 10, 20, 270), { w: 70, d: 90 }],
@@ -181,6 +182,16 @@
     [P('pl-new-box-9', 'inv-living-box', 455, 80, 0), { w: 53, d: 40 }],
     [P('pl-new-box-10', 'inv-living-box', 508, 80, 0), { w: 53, d: 40 }],
   ];
+  /* 새 집 배치 v17 — 10/24 밤 가족이 공유 버전에서 다시 옮긴 배치(그림·공유 기록 그대로, 미세 조정 없음). v16 에서 바뀐 자리만 적어요:
+     세탁 발코니 — 건조기 뒤(왼쪽 벽) 20cm · 전자레인지 수납장 x 185 · 통돌이는 70x73 칸 오른쪽 벽에 붙여(뒤 호스 자리 없음 — 설치 때 확인)
+     주방 — 냉장고 x 343, y 345(뒤 벽에 붙임, 조리대와 10cm, 복도 쪽으로 38cm, 식탁 모서리와 통로 약 57cm)
+     거실 — 에어컨 스탠드 아래 벽에 붙임(y 853, 소파와 20cm)
+     안방 왼쪽 벽 위에서부터 — 체스트랙 · 캐비닛장 ① · 캐비닛장 ① · 캐비닛장 ②(아래 벽에 붙임) */
+  const V17 = {
+    'pl-new-dryer': [20, 20, 270], 'pl-new-mwcab': [185, 0, 0], 'pl-new-washer': [325, 0, 90], 'pl-new-fridge': [343, 345, 90], 'pl-new-ac': [640, 853, 90],
+    'pl-new-chest': [0, 593, 270], 'pl-new-cabinet-1': [0, 660, 270], 'pl-new-cabinet-2': [0, 740, 270], 'pl-new-cabinet2': [0, 817, 270],
+  };
+  const NEW = NEW16.map(([p, size]) => { const v = V17[p.id]; return [v ? P(p.id, p.invId, v[0], v[1], v[2]) : p, size]; });
   /* 10/24 저녁 가족이 공유 버전에서 직접 옮긴 자리(공유 기록 그대로) — v16 에서 이 자리에 그대로 있는 배치만 미세 조정한 자리로 옮겨요 */
   const FAMILY_AT = {
     'pl-new-dryer': [0, 20, 270], 'pl-new-fridge': [343, 345, 90], 'pl-new-ac': [640, 853, 90], 'pl-new-sofa': [587, 675, 90],
@@ -298,7 +309,7 @@
     NEW15.forEach(([p]) => { at15[p.id] = [p.x, p.y, p.rot]; });
     const moveFrom = (AT) => {
       const move = {};
-      NEW.forEach(([p, size]) => {
+      NEW16.forEach(([p, size]) => {
         const was = AT[p.id];
         if (!was || (was[0] === p.x && was[1] === p.y && was[2] === p.rot)) return;
         move[p.id] = { from: { x: was[0], y: was[1], rot: was[2] }, set: { x: p.x, y: p.y, rot: p.rot }, ifInv: size || undefined };
@@ -307,5 +318,19 @@
     };
     MV.seed.migrations.push({ to: 16, layouts: { new: { add: [], move: moveFrom(at15) } } });
     MV.seed.migrations.push({ to: 16, layouts: { new: { add: [], move: moveFrom(FAMILY_AT) } } });
+  }
+  /* v17: 10/24 밤 가족이 다시 옮긴 배치를 그대로 기본으로 — v16 기본 자리(NEW16)에 그대로 있는 배치만 v17 자리로 옮겨요
+     (안방 왼쪽 벽은 체스트랙과 캐비닛장 ②가 자리를 맞바꿔요 — core 가 후보끼리는 옮긴 뒤 자리로 비교해서 함께 옮겨져요).
+     사용자가 다르게 옮긴 배치는 그대로 둬요 */
+  if (MV.seed && Array.isArray(MV.seed.migrations)) {
+    const at16 = {};
+    NEW16.forEach(([p]) => { at16[p.id] = [p.x, p.y, p.rot]; });
+    const move = {};
+    NEW.forEach(([p, size]) => {
+      const was = at16[p.id];
+      if (!was || (was[0] === p.x && was[1] === p.y && was[2] === p.rot)) return;
+      move[p.id] = { from: { x: was[0], y: was[1], rot: was[2] }, set: { x: p.x, y: p.y, rot: p.rot }, ifInv: size || undefined };
+    });
+    MV.seed.migrations.push({ to: 17, layouts: { new: { add: [], move } } });
   }
 })();
