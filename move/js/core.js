@@ -800,6 +800,8 @@
   S.normItem = (it) => normItem(it, !!(it && it.seed));
   S.normInv = (it) => normInv(it, !!(it && it.seed));
   const persistSoon = MV.debounce(() => S.persist(), 250);
+  /** 기다리던 저장을 지금 바로 (체크처럼 누르자마자 창을 닫을 수 있는 것) */
+  S.persistNow = () => persistSoon.flush();
   // 시작할 때 저장소 문제를 한 번 알림 (화면이 그려진 뒤)
   global.addEventListener('load', () => setTimeout(() => {
     if (!MV.ui || !MV.ui.toast) return;
@@ -964,6 +966,7 @@
     if (!it) return;
     const done = !it.done;
     I.update(id, { done, doneAt: done ? MV.nowISO() : null }, (done ? '✅ 완료: ' : '↩︎ 다시 열기: ') + it.title);
+    S.persistNow();   // 체크는 바로 저장 → 공유 기록에도 바로 올림 (누르고 곧장 앱을 닫아도 올라가게)
   };
   I.addNote = (id, text) => {
     const it = I.get(id);

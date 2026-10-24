@@ -484,6 +484,7 @@
         stuck.delete(path);
         // 보내는 사이에 새 스냅샷이 오지 않았으면 서버 내용 = 보낸 내용
         if ((seen.get(path) || 0) === seq0) { if (job.body === null) srv.delete(path); else srv.set(path, canon(job.body)); }
+        if (global.document && global.document.visibilityState === 'hidden') saveBase(); // 숨은 창은 타이머가 늦거나 곧 정리됨 → 기준을 바로 남김
       }).catch((e) => { if (conn === db) onWriteError(path, job, e); }).finally(() => {
         if (conn !== db) return;      // 끊긴(또는 바뀐) 연결의 약속: 지금 연결의 셈에 손대지 않음
         inflight.delete(path);
@@ -577,6 +578,16 @@
       pushHist(path, j, hj);
       stuck.delete(path);
       return 0;
+    }
+    // 받은 문서가 지금 이 기기 내용을 이미 품고 그 위에 고친 것 → 그대로 받음
+    // (남겨 둔 기준이 늦었어도 — 예: 체크하고 바로 창이 정리됨 — 내 예전 바꿈을 다시 올려 상대의 새 체크를 되돌리지 않게)
+    if (sa && lj !== null && sa.indexOf(hash(lj)) >= 0) {
+      pushHist(path, j, hj);
+      last.set(path, j);
+      pending.delete(path);
+      stuck.delete(path);
+      applyUnit(st, path, data);
+      return 1;
     }
     // 기준 찾기: 받은 문서가 '이미 들어 있다'고 적은 내용 중 이 기기도 가진 가장 최근 것
     const H = hist.get(path) || [];
@@ -852,7 +863,16 @@
       const u = units.get(path);
       if ((u === undefined ? null : canon(u)) !== j && !path.startsWith('planbg/')) d[path] = j; // 이 기기와 다른 문서만 내용째
     });
-    try { global.localStorage.setItem(BASE_KEY, JSON.stringify({ id: baseId, h, d })); } catch (e) { /* 가득 참 등 — 다음 저장 때 다시 */ }
+    // 문서마다 이 기기 내용에 이미 들어 있는 예전 내용(최대 2개)도 남김 → 다시 열었을 때도 '상대가 내 것을 못 보고 덮어쓴' 쓰기를
+    // 공통 조상 기준으로 합쳐요 (없으면 늦게 도착한 다른 기기의 쓰기가 이 기기에서 올린 체크를 지움)
+    const a = {};
+    hist.forEach((H, path) => {
+      if (path.startsWith('planbg/') || !srv.has(path)) return;
+      const sj = srv.get(path), u = units.get(path), lj = u === undefined ? null : canon(u);
+      const anc = H.filter((e) => e.j !== sj && e.j !== lj).slice(-2).map((e) => e.j);
+      if (anc.length) a[path] = anc;
+    });
+    try { global.localStorage.setItem(BASE_KEY, JSON.stringify({ id: baseId, h, d, a })); } catch (e) { /* 가득 참 등 — 다음 저장 때 다시 */ }
   }
   function saveBaseSoon() { if (baseId && !baseT) baseT = setTimeout(saveBase, 400); }
   function clearBase() {
@@ -886,6 +906,13 @@
       if (pu === undefined) return;
       const pj = canon(pu);
       if (hash(pj) === rec.h[path]) srv.set(path, pj);
+    });
+    // 남겨 둔 예전 내용 → 기억(hist)에 되살림 (오래된 것 → 마지막으로 안 서버 내용 순)
+    if (isObj(rec.a)) Object.keys(rec.a).forEach((path) => {
+      const list = rec.a[path];
+      if (!Array.isArray(list) || !srv.has(path)) return;
+      list.forEach((j) => { if (typeof j === 'string') pushHist(path, j); });
+      pushHist(path, srv.get(path));
     });
     baseId = rec.id;
     // 이 기기가 지금 새 기본값 버전으로 맞췄으면: 바뀐 문서의 맞추기 전·뒤 내용을 남겨 둬요 (다시 붙을 때 서버가 이미 새 버전이면
@@ -1003,14 +1030,20 @@
     synced: ['🔗', '공유 중 — 부부가 같은 기록을 봐요'],
     saving: ['⏳', '공유 저장소에 저장하는 중'],
     empty: ['✨', '공유 기록이 아직 없어요 — ⋯ 메뉴에서 시작하세요'],
-    readonly: ['👁', '보기 전용 — 바꾼 내용은 이 기기에만 남아요'],
+    readonly: ['👁', '보기 전용 — 바꾼 내용은 이 기기에만 남아요', '보기만'],
     offline: ['⚠', '공유 저장소와 잠시 연결이 끊겼어요 — 다시 시도하는 중'],
     partial: ['⚠', '일부 기록을 공유하지 못했어요 — 이 기기에만 남아요'],
-    revoked: ['🔒', '공유 권한이 없어요 — 이 기기에만 저장돼요'],
-    unreachable: ['⚠', '공유 저장소에 연결하지 못했어요 — 지금은 이 기기에만 저장돼요'],
+    revoked: ['🔒', '공유 권한이 없어요 — 이 기기에만 저장돼요', '이 기기만'],
+    unreachable: ['⚠', '공유 저장소에 연결하지 못했어요 — 지금은 이 기기에만 저장돼요', '이 기기만'],
     error: ['⚠', '공유 저장소 오류'],
-    login: ['🔑', '로그인하면 부부가 같은 기록을 봐요'],
-    local: ['💾', '이 브라우저에만 저장 중 — 함께 쓰기에 연결되지 않았어요. 눌러서 확인하세요'],
+    login: ['🔑', '로그인하면 부부가 같은 기록을 봐요 — 지금은 이 기기에만 저장돼요', '로그인'],
+    local: ['💾', '이 브라우저에만 저장 중 — 함께 쓰기에 연결되지 않았어요. 눌러서 확인하세요', '이 기기만'],
+  };
+  /** 체크가 공유 기록에 올라가지 않는 상태인지 (칩에 짧은 글·완료 알림에 '이 기기에만' 덧붙임) */
+  Y.deviceOnly = function deviceOnly() {
+    const s = Y.status;
+    if (s === 'local') return localChip();
+    return s === 'login' || s === 'revoked' || s === 'unreachable' || s === 'readonly';
   };
   /* 'local'(연결 안 됨) 칩: 깃허브 페이지 버전에서 이 브라우저에 함께 쓰기 설정이 없을 때(파이어베이스 off)나
      클로드 공유 버전에서 공유 저장소를 못 쓸 때만 — 설정이 있으면 곧 연결 중·로그인 칩으로 바뀌니 깜빡이지 않게 숨김 */
@@ -1061,7 +1094,8 @@
       const dday = document.getElementById('topbar-dday');
       if (dday && dday.parentNode === top) top.insertBefore(chip, dday.nextSibling); else top.appendChild(chip);
     }
-    chip.textContent = info[0];
+    chip.textContent = info[2] ? info[0] + ' ' + info[2] : info[0];   // 이 기기에만 남는 상태는 그림만으로는 안 보여서 짧은 글도
+    chip.classList.toggle('sync-chip-warn', !!info[2]);
     chip.title = info[1];
     chip.setAttribute('aria-label', info[1]);
     chip.dataset.status = Y.status;
@@ -1225,10 +1259,17 @@
   S.on('change', (e) => {
     if (e && e.reset && (e.log === 'reset' || e.log === 'import') && Y.mode !== 'shared' && baseId) { srv.clear(); hist.clear(); clearSeedPre(); saveBaseSoon(); }
   });
-  global.addEventListener('pagehide', () => { if (baseT) saveBase(); });
-  global.document.addEventListener('visibilitychange', () => { if (global.document.visibilityState === 'hidden' && baseT) saveBase(); });
+  // 창을 닫거나 다른 앱으로 갈 때: core 가 방금 저장한(줄 세운) 쓰기를 타이머 없이 바로 보냄 → 그다음 기준 저장
+  const onHide = () => {
+    if (pending.size && Y.mode === 'shared') { clearTimeout(timer); timer = null; pump(); }
+    if (baseT) saveBase();
+  };
+  global.addEventListener('pagehide', onHide);
+  global.document.addEventListener('visibilitychange', () => { if (global.document.visibilityState === 'hidden') onHide(); });
   MV.css('sync', `
-    .sync-chip { flex: 0 0 auto; padding: 0 8px; font-size: 1rem; }
+    .sync-chip { flex: 0 0 auto; padding: 0 8px; font-size: 1rem; white-space: nowrap; }
+    .sync-chip.sync-chip-warn { color: var(--warn); font-size: .8rem; font-weight: 800; border: 1.5px solid var(--warn); border-radius: 999px; min-height: 32px; }
+    @media (max-width: 420px) { .topbar:has(.sync-chip-warn) .brand-text strong { display: none; } }
     .sync-chip[data-status="offline"], .sync-chip[data-status="error"], .sync-chip[data-status="partial"],
     .sync-chip[data-status="revoked"], .sync-chip[data-status="unreachable"], .sync-chip[data-status="local"] { color: var(--warn); }
   `);
