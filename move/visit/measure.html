@@ -532,27 +532,27 @@ textarea { min-height: 70px; font-size: .95rem; }
   /* ---------- 2차: 지금 집 가구 ---------- */
   // 알던 값 = data-seed.js 짐 목록 (use: 앞에 비워 둘 자리 cm)
   var ITEMS = [
-    { id: 'bed', name: '라지킹 매트리스 (프레임 없음)', w: 200, d: 200, h: 36, use: 50, room: 'anbang', wall: 'left', at: 60 },
-    { id: 'vanity', name: '화장대 (낮은 좌식)', w: 100, d: 50, h: 50, use: 60, room: 'anbang', wall: 'top', at: 110 },
-    { id: 'chest', name: '수납장 (니토리 체스트랙)', w: 45, d: 43, h: 175, use: 50, room: 'anbang', wall: 'top' },
-    { id: 'cab1a', name: '캐비닛장 ① 2단 행어형 (1)', w: 76, d: 50, h: 200, use: 70, room: 'smallBot', wall: 'left' },
-    { id: 'cab1b', name: '캐비닛장 ① 2단 행어형 (2)', w: 76, d: 50, h: 200, use: 70, room: 'smallBot', wall: 'left' },
-    { id: 'cab2', name: '캐비닛장 ② 3단 수납형', w: 76, d: 50, h: 169, use: 70, room: 'smallBot', wall: 'left' },
+    { id: 'bed', name: '라지킹 매트리스 (프레임 없음)', w: 205, d: 205, h: 36, use: 50, room: 'anbang', wall: 'left', at: 60 },
+    { id: 'vanity', name: '화장대 (낮은 좌식)', w: 85, d: 47, h: 75, use: 68, room: 'anbang', wall: 'top', at: 110 },
+    { id: 'chest', name: '수납장 (니토리 체스트랙)', w: 62, d: 40, h: 110, use: 60, room: 'anbang', wall: 'top' },
+    { id: 'cab1a', name: '캐비닛장 ① 2단 행어형 (1)', w: 76, d: 52, h: 200, use: 63, room: 'smallBot', wall: 'left' },
+    { id: 'cab1b', name: '캐비닛장 ① 2단 행어형 (2)', w: 76, d: 52, h: 200, use: 63, room: 'smallBot', wall: 'left' },
+    { id: 'cab2', name: '캐비닛장 ② 3단 수납형', w: 76, d: 52, h: 200, use: 63, room: 'smallBot', wall: 'left' },
     { id: 'desk', name: '책상 (데스커)', w: 120, d: 60, h: 72, use: 75, room: 'smallBot', wall: 'top', at: 60 },
-    { id: 'alex', name: '책상 서랍 (이케아 알렉스)', w: 36, d: 58, h: 70, use: 60, room: 'smallBot', wall: 'top' },
-    { id: 'book5', name: '책장 5단 (폭 80)', w: 80, d: 28.5, h: 195.9, use: 60, room: 'smallTop', wall: 'right' },
-    { id: 'bookk1', name: '어린이 책장 3단 (1)', w: 80, d: 28.5, h: 118.2, use: 60, room: 'living', wall: 'right' },
-    { id: 'bookk2', name: '어린이 책장 3단 (2)', w: 80, d: 28.5, h: 118.2, use: 60, room: 'living', wall: 'right' },
-    { id: 'bookk3', name: '어린이 책장 3단 (3)', w: 80, d: 28.5, h: 118.2, use: 60, room: 'living', wall: 'right' },
-    { id: 'toy', name: '장난감장', w: 66.5, d: 39.5, h: 118.1, use: 50, room: 'living', wall: 'right' },
+    { id: 'alex', name: '책상 서랍 (이케아 알렉스)', w: 37, d: 59, h: 70, use: 56, room: 'smallBot', wall: 'top' },
+    { id: 'book5', name: '책장 5단 (폭 80)', w: 80, d: 29, h: 195, use: 60, room: 'smallTop', wall: 'right' },
+    { id: 'bookk1', name: '어린이 책장 3단 (1)', w: 80, d: 29, h: 120, use: 60, room: 'living', wall: 'right' },
+    { id: 'bookk2', name: '어린이 책장 3단 (2)', w: 80, d: 29, h: 120, use: 60, room: 'living', wall: 'right' },
+    { id: 'bookk3', name: '어린이 책장 3단 (3)', w: 80, d: 29, h: 120, use: 60, room: 'living', wall: 'right' },
+    { id: 'toy', name: '장난감장', w: 67, d: 41, h: 110, use: 69, room: 'living', wall: 'right' },
     { id: 'hanger', name: '간이옷장 (스탠드 행거)', w: 82, d: 40, h: 147.6, use: 60, room: 'smallTop', wall: 'right' },
-    { id: 'sofa', name: '소파 (3인)', w: 173, d: 85, h: 94, use: 60, room: 'living', wall: 'left', at: 115 },
-    { id: 'acStand', name: '에어컨 스탠드 (바람 앞 150cm 비우기)', w: 36, d: 24.6, h: 184.7, use: 150, room: 'living', wall: 'bottom', at: 100 },
+    { id: 'sofa', name: '소파 (3인)', w: 170, d: 83, h: 80, use: 60, room: 'living', wall: 'left', at: 115 },
+    { id: 'acStand', name: '에어컨 스탠드 (바람 앞 150cm 비우기)', w: 40, d: 30, h: 190, use: 150, room: 'living', wall: 'bottom', at: 100 },
     { id: 'table', name: '식탁', w: 135, d: 80, h: 70, use: 75, room: 'living', wall: 'center' },
-    { id: 'chairs', name: '식탁 의자 4개 (1개 크기)', w: 51, d: 50.5, h: 71, use: 0, qty: 4, room: '', wall: '' },
-    { id: 'fridge', name: '냉장고 (손잡이 포함 깊이)', w: 91.3, d: 73.5, h: 179, use: 90, room: 'dining', wall: 'left', at: 85 },
-    { id: 'dryer', name: '건조기 (문 포함 깊이)', w: 68.6, d: 87.6, h: 98.4, use: 90, room: 'balTop1', wall: 'top', at: 100 },
-    { id: 'washer', name: '통돌이 LG T17MX3 (새로 사요 — 안 재도 돼요)', w: 63.2, d: 67, h: 101.8, use: 60, fixed: true, room: 'balTop1', wall: 'top' },
+    { id: 'chairs', name: '식탁 의자 4개 (1개 크기)', w: 45, d: 50, h: 71, use: 0, qty: 4, room: '', wall: '' },
+    { id: 'fridge', name: '냉장고 (손잡이 포함 깊이)', w: 91, d: 95, h: 180, use: 50, room: 'dining', wall: 'left', at: 85 },
+    { id: 'dryer', name: '건조기 (문 포함 깊이)', w: 70, d: 90, h: 100, use: 55, room: 'balTop1', wall: 'top', at: 100 },
+    { id: 'washer', name: '통돌이 LG T17MX3 (새로 사요 — 안 재도 돼요)', w: 64, d: 70, h: 105, use: 60, fixed: true, room: 'balTop1', wall: 'top' },
   ];
   function itemState(id) { S.i[id] = S.i[id] || {}; return S.i[id]; }
   function dims(it) {
@@ -566,7 +566,7 @@ textarea { min-height: 70px; font-size: .95rem; }
     var box = $('#items');
     box.innerHTML = '';
     box.appendChild(h('h2', { text: '우리 가구 다시 재기' }));
-    box.appendChild(h('p', { class: 'small muted', text: '회색 글자는 지금까지 알던 값이에요. 잰 값만 넣으면 돼요.' }));
+    box.appendChild(h('p', { class: 'small muted', text: '회색 글자는 10/24 가족 실측표 값이에요. 다시 잰 값만 넣으면 돼요.' }));
     ITEMS.forEach(function (it) {
       var st = itemState(it.id);
       var row = h('div', { class: 'item' });
