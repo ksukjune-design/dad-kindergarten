@@ -82,6 +82,7 @@
   let db = null;
   const last = new Map();       // 경로 → 이 기기가 보냈거나(보낼 예정) 받아 둔 내용 (정렬된 JSON) — 바뀐 것만 보내는 데 씀
   const srv = new Map();        // 경로 → 이 기기가 마지막으로 안 서버 내용 (합치기의 기준)
+  const recv = new Map();       // 경로 → 받은 그대로 적용한 내용 (이 기기에서 고치지 않은 것 — 받기만 한 옛 내용을 '내 것'으로 다시 올리지 않게)
   const hist = new Map();       // 경로 → [{h, j}] 지금 이 기기 내용에 이미 들어 있는 내용들 (오래된 것 → 최근, 합치기 기준·메아리 거르기)
   const seen = new Map();       // 경로 → 받은 스냅샷 수 (쓰기 확인 사이에 새 내용이 왔는지)
   const pending = new Map();    // 경로 → { body | null(삭제) }
@@ -438,6 +439,7 @@
       }
       if (last.get(path) === j) return;
       last.set(path, j);
+      recv.delete(path);               // 이 기기에서 고친 내용 → 이제 '받기만 한 것'이 아님
       const hj = hash(j);
       const sa = (hist.get(path) || []).map((e) => e.h).filter((h) => h !== hj).slice(-SA_MAX);
       pushHist(path, j, hj);
@@ -587,6 +589,7 @@
       pending.delete(path);
       stuck.delete(path);
       applyUnit(st, path, data);
+      recv.set(path, j);
       return 1;
     }
     // 기준 찾기: 받은 문서가 '이미 들어 있다'고 적은 내용 중 이 기기도 가진 가장 최근 것
@@ -594,7 +597,8 @@
     let baseIdx = -1;
     if (sa) for (let i = H.length - 1; i >= 0; i--) { if (sa.indexOf(H[i].h) >= 0) { baseIdx = i; break; } }
     const selfIdx = H.findIndex((e) => e.h === hj);
-    if (selfIdx >= 0 && baseIdx <= selfIdx) {
+    // (지금 내 내용이 받기만 한 것이면 '내 것'이 아니라서 메아리로 보지 않아요 — 옛 캐시를 받은 뒤 진짜 서버 내용이 오면 그대로 받음)
+    if (selfIdx >= 0 && baseIdx <= selfIdx && recv.get(path) !== lj) {
       // 이미 이 기기 내용에 들어 있는 예전 내용(내가 보낸 것의 메아리 등) → 지금 내 것이 더 새것: 다시 올림
       last.set(path, j);
       return 2;
@@ -608,6 +612,7 @@
       pending.delete(path);
       stuck.delete(path);
       applyUnit(st, path, data);
+      recv.set(path, j);
       return 1;
     }
     if (localDeleted) {
@@ -615,6 +620,7 @@
       pending.delete(path);            // 상대가 고친 것을 내가 지웠음 → 고친 쪽이 이김
       last.set(path, j);
       applyUnit(st, path, data);
+      recv.set(path, j);
       return 1;
     }
     // 둘 다 고침 → 합치기
@@ -731,12 +737,14 @@
     srv.clear();
     hist.clear();
     stuck.clear();
+    recv.clear();
     remote.forEach((raw, path) => {
       const data = strip(raw);
       applyUnit(st, path, data);
       const j = canon(data);
       last.set(path, j);
       srv.set(path, j);
+      recv.set(path, j);
       pushHist(path, j);
     });
     clearSeedPre();           // 공유 기록으로 맞추니 되돌릴 것 없음
