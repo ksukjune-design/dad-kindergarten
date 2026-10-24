@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
+<title>새 집 상태 점검</title>
+<!--
+  새 집 상태 점검 체크리스트 (2026-10-24 사전방문용, 혼자 열리는 페이지)
+  · 색·글꼴 토큰은 move/css/app.css 와 같아요.
+  · 인덕션 항목의 크기는 실측 가이드(measure.html#p6)에서 재요.
+  · 넣은 값은 이 기기의 localStorage('mv-visit-check-v1')에만 저장돼요.
+-->
+<style>
+:root {
+  --bg:#f6f4ef; --bg-2:#ffffff; --bg-3:#eeeae1;
+  --ink:#21201d; --ink-2:#57534e; --ink-3:#78726a;
+  --line:#e2ddd3; --line-2:#cfc8ba;
+  --brand:#c2410c; --brand-2:#ea580c; --brand-bg:#fff2e8;
+  --kid:#0e7490; --kid-bg:#e6f4f7;
+  --good:#15803d; --good-bg:#e7f4ec;
+  --warn:#a16207; --warn-bg:#fdf5e0;
+  --bad:#b91c1c; --bad-bg:#fdeceb;
+  --on-brand:#ffffff;
+  --radius:16px; --radius-sm:10px;
+  --shadow:0 1px 2px rgba(33,32,29,.05), 0 8px 24px -12px rgba(33,32,29,.18);
+  --font:"Pretendard","Pretendard Variable",-apple-system,BlinkMacSystemFont,"Segoe UI","Malgun Gothic","맑은 고딕","Apple SD Gothic Neo",system-ui,sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg:#16151a; --bg-2:#1f1e24; --bg-3:#2a2830;
+    --ink:#f0ede8; --ink-2:#b9b3ab; --ink-3:#9c968e;
+    --line:#33313a; --line-2:#45424d;
+    --brand:#fb923c; --brand-2:#fdba74; --brand-bg:#3a2415;
+    --kid:#67e8f9; --kid-bg:#10333c;
+    --good:#6ee7a8; --good-bg:#123324;
+    --warn:#fcd34d; --warn-bg:#3a2f10;
+    --bad:#fca5a5; --bad-bg:#3a1a1a;
+    --on-brand:#2a1200;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg:#16151a; --bg-2:#1f1e24; --bg-3:#2a2830;
+  --ink:#f0ede8; --ink-2:#b9b3ab; --ink-3:#9c968e;
+  --line:#33313a; --line-2:#45424d;
+  --brand:#fb923c; --brand-2:#fdba74; --brand-bg:#3a2415;
+  --kid:#67e8f9; --kid-bg:#10333c;
+  --good:#6ee7a8; --good-bg:#123324;
+  --warn:#fcd34d; --warn-bg:#3a2f10;
+  --bad:#fca5a5; --bad-bg:#3a1a1a;
+  --on-brand:#2a1200;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); font-family: var(--font);
+  font-size: 16px; line-height: 1.6; -webkit-text-size-adjust: 100%; word-break: keep-all; overflow-wrap: anywhere; }
+body { min-height: 100vh; overflow-x: hidden; }
+h1, h2, h3 { margin: 0 0 .4em; line-height: 1.3; font-weight: 800; letter-spacing: -.02em; }
+h1 { font-size: 1.45rem; }
+h2 { font-size: 1.15rem; }
+h3 { font-size: 1rem; }
+p { margin: 0 0 .6em; }
+a { color: var(--brand); text-underline-offset: 3px; }
+button, input, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 3px solid color-mix(in srgb, var(--brand) 55%, transparent); outline-offset: 2px; border-radius: 6px; }
+[hidden] { display: none !important; }
+.wrap { max-width: 860px; margin: 0 auto; padding: 8px 16px 64px; }
+.top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; margin-bottom: 8px; }
+.back { display: inline-flex; align-items: center; min-height: 44px; padding: 0 2px; font-weight: 700; text-decoration: none; }
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.tab { display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--line);
+  background: var(--bg-2); color: var(--ink); text-decoration: none; font-weight: 700; font-size: .95rem; }
+.tab[aria-current="page"] { background: var(--brand); border-color: var(--brand); color: var(--on-brand); }
+.lead { color: var(--ink-2); }
+.card { background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px; min-width: 0; }
+.card + .card { margin-top: 12px; }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 0 16px;
+  border-radius: 12px; border: 1px solid var(--line-2); background: var(--bg-2); color: var(--ink); font-weight: 700; cursor: pointer; text-decoration: none; }
+.btn:hover { background: var(--bg-3); }
+.btn-primary { background: var(--brand); border-color: var(--brand); color: var(--on-brand); }
+.btn-primary:hover { background: var(--brand-2); border-color: var(--brand-2); }
+.btn-danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, var(--line)); }
+.btn-danger:hover { background: var(--bad-bg); }
+.btn-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.muted { color: var(--ink-3); }
+.small { font-size: .88rem; }
+.sum-big { font-size: 1.25rem; font-weight: 800; margin: 0 0 6px; }
+.sum-big .n { color: var(--bad); }
+.counts { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.chip { display: inline-flex; align-items: center; padding: 2px 10px; border-radius: 99px; font-size: .82rem; font-weight: 800; white-space: nowrap; }
+.c-todo { background: var(--bg-3); color: var(--ink-2); }
+.c-good { background: var(--good-bg); color: var(--good); }
+.c-skip { background: var(--warn-bg); color: var(--warn); }
+.c-bad  { background: var(--bad-bg);  color: var(--bad); }
+.bad-list { margin: 0 0 10px; padding-left: 1.2em; }
+.bad-list a { font-weight: 700; color: var(--bad); }
+.confirm { margin-top: 10px; padding: 12px; border-radius: 12px; background: var(--bad-bg); border: 1px solid color-mix(in srgb, var(--bad) 35%, var(--line)); }
+.copy-msg { margin: 8px 0 0; font-weight: 700; }
+.copy-out { width: 100%; min-height: 160px; margin-top: 8px; padding: 10px; border-radius: 10px; border: 1px solid var(--line-2);
+  background: var(--bg); font-size: .85rem; line-height: 1.5; }
+.sec { scroll-margin-top: 12px; }
+.sec-desc { color: var(--ink-2); font-size: .92rem; }
+.grp { margin: 16px 0 6px; font-size: .9rem; font-weight: 800; color: var(--ink-3); }
+.item { border: 1px solid var(--line); border-radius: 14px; padding: 12px; background: var(--bg); scroll-margin-top: 12px; }
+.item + .item { margin-top: 8px; }
+.item.s-bad { border-color: color-mix(in srgb, var(--bad) 55%, var(--line)); background: var(--bad-bg); }
+.item.s-good { border-color: color-mix(in srgb, var(--good) 45%, var(--line)); }
+.item.s-skip { border-color: color-mix(in srgb, var(--warn) 50%, var(--line)); }
+.it-t { font-weight: 800; margin: 0 0 2px; line-height: 1.4; }
+.it-h { font-size: .9rem; color: var(--ink-2); margin: 0 0 8px; }
+.seg3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.seg3 button { min-height: 44px; padding: 6px 4px; border-radius: 12px; border: 1px solid var(--line-2); background: var(--bg-2); font-weight: 700;
+  cursor: pointer; line-height: 1.25; font-size: .92rem; }
+.seg3 button[data-s="good"][aria-pressed="true"] { background: var(--good); border-color: var(--good); color: var(--bg-2); }
+.seg3 button[data-s="bad"][aria-pressed="true"] { background: var(--bad); border-color: var(--bad); color: var(--bg-2); }
+.seg3 button[data-s="skip"][aria-pressed="true"] { background: var(--warn); border-color: var(--warn); color: var(--bg-2); }
+.memo { margin-top: 8px; }
+.memo label { display: block; font-size: .82rem; font-weight: 700; color: var(--ink-3); margin-bottom: 2px; }
+textarea { width: 100%; min-height: 44px; height: 52px; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--line-2); background: var(--bg-2);
+  font-size: 16px; line-height: 1.45; resize: vertical; }
+.photo { font-size: .82rem; color: var(--ink-3); margin: 6px 0 0; }
+.it-link { display: inline-flex; align-items: center; min-height: 44px; font-weight: 700; font-size: .92rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <a class="back" href="../index.html#/">← 이사 앱으로</a>
+    <nav class="tabs" aria-label="사전방문 페이지">
+      <a class="tab" href="measure.html">실측 가이드</a>
+      <a class="tab" href="check.html" aria-current="page">상태 점검</a>
+    </nav>
+  </header>
+
+  <h1>새 집 상태 점검</h1>
+  <p class="lead">항목마다 <b>괜찮아요 · 문제 있어요 · 못 봤어요</b>를 누르고, 문제가 있으면 메모와 사진을 남기세요. 이사 나갈 때 원래 있던 문제라는 증거가 돼요. 값은 이 휴대폰에 저장돼요.</p>
+
+  <section class="card" aria-labelledby="sum-h">
+    <h2 id="sum-h" class="sum-big" aria-live="polite"><span id="sumText">문제 0개</span></h2>
+    <div class="counts" id="counts"></div>
+    <ul class="bad-list" id="badList" hidden></ul>
+    <div class="btn-row">
+      <button type="button" class="btn btn-primary" id="copyBtn">결과 복사</button>
+      <button type="button" class="btn btn-danger" id="clearBtn">다 지우기</button>
+    </div>
+    <div class="confirm" id="confirmBox" hidden role="alertdialog" aria-labelledby="confirmT">
+      <p id="confirmT" style="font-weight:800">점검 결과와 메모를 모두 지울까요? 되돌릴 수 없어요.</p>
+      <div class="btn-row">
+        <button type="button" class="btn btn-danger" id="confirmYes">네, 다 지울게요</button>
+        <button type="button" class="btn" id="confirmNo">취소</button>
+      </div>
+    </div>
+    <p class="copy-msg" id="copyMsg" hidden aria-live="polite"></p>
+    <textarea class="copy-out" id="copyOut" hidden readonly aria-label="복사할 결과"></textarea>
+  </section>
+
+  <div id="sections"></div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var KEY = 'mv-visit-check-v1';
+  var PHOTO = '📷 사진 찍기: 문제가 보이면 가까이 한 장, 넓게 한 장';
+  var SECTIONS = [
+    { id: 'ask', no: '①', title: '꼭 물어보고 정할 것', desc: '집주인이나 중개사에게 물어보고, 답은 꼭 문자로 남겨 달라고 하세요.',
+      labels: { good: '정했어요', bad: '문제 있어요', skip: '못 물어봤어요' }, photo: '✉️ 답은 문자로 받아 두세요',
+      items: [
+        { id: 'clean-who', t: '입주청소는 누가 하나요?', h: '집주인이나 전 세입자가 해 주는지, 우리가 하는지 물어보세요. 우리가 하면 업체를 부를지도 정해요.', ph: '예: 우리가 해요 / 집주인이 업체를 불러 줘요' },
+        { id: 'clean-when', t: '입주청소는 언제 할 수 있나요?', h: '청소할 날짜·시간에 들어갈 수 있는지, 열쇠·현관 비밀번호는 언제 어떻게 받는지 물어보세요. 비밀번호는 여기 적지 마세요.', ph: '예: 11/1 오전, 열쇠는 중개사무소에서' },
+        { id: 'rent-start', t: '첫 월세는 11/3부터인가요?', h: '월세가 11/3(입주일) 날짜 기준으로 시작되는지, 매달 내는 날이 3일인지 물어보세요. 계약서 특약에 적힌 날짜와 같은지도 보세요.', ph: '예: 11/3부터, 매달 3일' },
+        { id: 'rent-month', t: '11/3에 내는 돈은 몇 월분인가요?', h: '11/3에 내는 월세가 11월분(11/3~12/2, 먼저 내기)인지, 12/3에 11월분을 내는지(나중에 내기) 확인하세요. 계약서 특약과 다르면 지금 말하세요.', ph: '예: 11/3에 11월분 먼저 내기' },
+        { id: 'rent-text', t: '답을 문자로 받았나요?', h: '입주청소·첫 월세일·몇 월분인지를 집주인이나 중개사에게 문자로 확인 받아 두세요. 말로만 듣지 마세요.', ph: '예: 중개사에게 문자 받음' }
+      ] },
+    { id: 'state', no: '②', title: '상태 점검', desc: '불을 켜고, 휴대폰 손전등으로 구석까지 비춰 보세요. 문제가 있으면 사진에 날짜가 남게 찍어 두세요.',
+      items: [
+        { g: '곰팡이', id: 'mold-window', t: '창틀·발코니 벽', h: '창틀 실리콘, 발코니 벽과 천장 모서리에 검은 점·얼룩이 있는지 보세요.' },
+        { id: 'mold-bath', t: '욕실 천장·모서리', h: '욕실 천장, 환풍기 둘레, 타일 줄눈·실리콘이 까맣게 변했는지 보세요.' },
+        { id: 'mold-behind', t: '붙박이 뒤 (신발장·싱크대)', h: '신발장·싱크대 하부장 문을 열고 안쪽 벽·바닥·뒤판에 곰팡이나 냄새가 있는지 보세요.' },
+        { id: 'mold-corner', t: '바깥벽 모서리 (작은방·안방)', h: '바깥벽 쪽 방 모서리와 창 둘레 벽지가 들뜨거나 얼룩졌는지 보세요. 겨울에 결로가 생기는 곳이에요.' },
+        { g: '누수', id: 'leak-ceiling', t: '천장 얼룩', h: '방·거실·욕실 천장에 누런 얼룩, 물 흐른 자국, 들뜬 곳이 있는지 보세요(윗집 누수).' },
+        { id: 'leak-sink', t: '싱크대 아래 배관', h: '하부장 안 배수관·수도관 이음새를 만져 젖었는지, 바닥에 물이 고였는지 보세요.' },
+        { id: 'leak-laundry', t: '세탁 자리 바닥', h: '세탁기 놓을 곳(발코니·작은 칸) 바닥과 배수구 둘레에 물 자국·녹·곰팡이가 있는지 보세요.' },
+        { id: 'leak-bathfloor', t: '욕실 바닥 실리콘', h: '욕조·세면대·변기 둘레 실리콘이 갈라지거나 떨어진 곳이 있는지 보세요.' },
+        { g: '수압·온수', id: 'water-pressure', t: '수압 (한꺼번에 틀기)', h: '주방 수전, 욕실 세면대, 샤워기를 한꺼번에 틀어 물줄기가 약해지는지 보세요.' },
+        { id: 'water-hot', t: '온수 나오는 시간', h: '더운물로 틀고 따뜻해질 때까지 몇 초 걸리는지 재서 메모에 적으세요. 지역난방이라 처음엔 오래 걸릴 수 있어요.', ph: '예: 40초' },
+        { g: '변기', id: 'toilet-flush', t: '물 내림·물 차는 소리', h: '물을 내려 시원하게 내려가는지, 물이 다 찬 뒤에도 쉬익 소리가 계속 나지 않는지 들어 보세요.' },
+        { id: 'toilet-base', t: '밑동 흔들림·물 샘', h: '변기를 양옆으로 살짝 밀어 흔들리는지, 바닥과 닿는 곳이 젖었거나 냄새가 나는지 보세요.' },
+        { g: '싱크대', id: 'sink-drain', t: '배수 속도', h: '개수대에 물을 받았다가 빼서 금방 빠지는지, 꾸르륵 소리나 냄새가 나는지 보세요.' },
+        { id: 'sink-cabinet', t: '하부장 안 물 자국', h: '하부장 바닥 판이 부풀었거나 물 자국·곰팡이가 있는지 보세요.' },
+        { id: 'sink-tap', t: '수전 흔들림·물 샘', h: '수전을 잡고 흔들어 보고, 잠근 뒤에 물이 똑똑 떨어지지 않는지 보세요.' },
+        { id: 'sink-hood', t: '후드 작동', h: '후드를 켜서 빨아들이는지(휴지를 대 보세요), 불이 켜지는지, 소리가 너무 크지 않은지 보세요.' }
+      ] },
+    { id: 'induction', no: '③', title: '인덕션', desc: '가스레인지는 쓰지 않아요. 인덕션을 놓을 자리와 전기를 확인하세요.',
+      items: [
+        { id: 'ind-place', t: '인덕션 놓을 위치', h: '평면도의 가스레인지 자리(조리대 오른쪽 끝)나 다른 조리대에 인덕션을 놓을 수 있는지 보세요.', link: ['measure.html#p6', '실측 가이드 6번에서 조리대 폭·깊이 재기'] },
+        { id: 'ind-size', t: '조리대 폭·깊이', h: '인덕션 들어갈 조리대 폭·깊이(흔한 3구 인덕션 약 60 × 52cm, 추정)와 가스레인지 구멍 크기를 재세요.', link: ['measure.html#p6', '실측 가이드 6번 열기'] },
+        { id: 'ind-outlet', t: '220V 콘센트', h: '인덕션 놓을 자리 가까이(약 1m 안, 추정) 220V 벽 콘센트가 있는지 보세요. 멀티탭·연장선은 쓰면 안 돼요.' },
+        { id: 'ind-circuit', t: '전용 회로 (차단기 함)', h: '인덕션은 보통 전용 회로가 필요해요. 차단기 함(분전반)을 열어 주방·인덕션·전기레인지처럼 따로 적힌 차단기가 있는지, 몇 A인지 사진을 찍으세요. 없으면 전기 공사가 필요할 수 있어요(집주인 동의).', ph: '예: 주방 20A 따로 있음' },
+        { id: 'ind-gas', t: '가스 배관 마감', h: '가스 중간밸브가 잠겨 있고 끝이 막음 캡으로 막혀 있는지 보세요. 가스레인지나 호스가 남아 있으면 누가 떼고 막아 줄지(도시가스 기사) 물어보세요. 가스를 전혀 안 쓰면 도시가스 개통은 하지 않아도 돼요(추정).' }
+      ] },
+    { id: 'more', no: '④', title: '같이 보면 좋은 것', desc: '시간이 남으면 짧게 보세요.',
+      items: [
+        { id: 'win-screen', t: '창·방충망', h: '창이 부드럽게 열리고 잠기는지, 방충망 찢어진 곳이 있는지 보세요.' },
+        { id: 'breaker', t: '전기 차단기 위치', h: '차단기 함(분전반)이 어디 있는지 사진을 찍어 두세요.' },
+        { id: 'doorlock', t: '도어락', h: '잘 열리고 잠기는지, 비밀번호 바꾸는 법을 물어보세요. 입주 날 꼭 바꾸세요.' },
+        { id: 'heating', t: '지역난방 밸브 (분배기)', h: '보일러 대신 지역난방이에요. 난방 분배기·밸브가 어디 있는지(싱크대 아래·작은 칸·신발장 아래) 보세요.' },
+        { id: 'balc-drain', t: '발코니 배수구', h: '발코니 배수구가 막히지 않았는지 물을 조금 부어 보세요.' }
+      ] }
+  ];
+  var DEF_LABELS = { good: '괜찮아요', bad: '문제 있어요', skip: '못 봤어요' };
+  var ALL = []; SECTIONS.forEach(function (s) { var g = ''; s.items.forEach(function (it) { if (it.g) g = it.g; it.gn = g; it.sec = s; ALL.push(it); }); });
+
+  var state = load();
+  function load() { try { var s = JSON.parse(localStorage.getItem(KEY) || 'null'); if (s && typeof s === 'object' && s.i && typeof s.i === 'object') return s; } catch (e) {} return { i: {} }; }
+  function save() { state.t = Date.now(); try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }
+  function rec(id) { return state.i[id] || (state.i[id] = {}); }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function labels(it) { return it.sec.labels || DEF_LABELS; }
+
+  function renderSections() {
+    var h = '';
+    SECTIONS.forEach(function (s) {
+      h += '<section class="card sec" id="' + s.id + '" aria-labelledby="h-' + s.id + '"><h2 id="h-' + s.id + '">' + s.no + ' ' + esc(s.title) + '</h2><p class="sec-desc">' + esc(s.desc) + '</p>';
+      s.items.forEach(function (it) {
+        if (it.g) h += '<h3 class="grp">' + esc(it.g) + '</h3>';
+        var r = state.i[it.id] || {}, lb = labels(it), tid = 't-' + it.id;
+        h += '<div class="item' + (r.s ? ' s-' + r.s : '') + '" id="i-' + it.id + '"><p class="it-t" id="' + tid + '">' + (it.g ? esc(it.g) + ' · ' : '') + esc(it.t) + '</p><p class="it-h">' + esc(it.h) + '</p>';
+        if (it.link) h += '<a class="it-link" href="' + it.link[0] + '">' + esc(it.link[1]) + ' →</a>';
+        h += '<div class="seg3" role="group" aria-labelledby="' + tid + '">';
+        ['good', 'bad', 'skip'].forEach(function (k) { h += '<button type="button" data-id="' + it.id + '" data-s="' + k + '" aria-pressed="' + (r.s === k) + '">' + lb[k] + '</button>'; });
+        h += '</div><div class="memo"><label for="m-' + it.id + '">메모</label><textarea id="m-' + it.id + '" data-id="' + it.id + '" placeholder="' + esc(it.ph || '어디에, 어떤 문제인지') + '">' + esc(r.m || '') + '</textarea></div>';
+        h += '<p class="photo">' + esc(it.sec.photo || PHOTO) + '</p></div>';
+      });
+      h += '</section>';
+    });
+    document.getElementById('sections').innerHTML = h;
+  }
+  function counts() {
+    var c = { good: 0, bad: 0, skip: 0, todo: 0 };
+    ALL.forEach(function (it) { var s = (state.i[it.id] || {}).s; c[s || 'todo']++; });
+    return c;
+  }
+  function renderSummary() {
+    var c = counts();
+    document.getElementById('sumText').innerHTML = '문제 <span class="n">' + c.bad + '</span>개';
+    document.getElementById('counts').innerHTML = '<span class="chip c-good">괜찮아요 ' + c.good + '</span><span class="chip c-bad">문제 있어요 ' + c.bad + '</span>' +
+      '<span class="chip c-skip">못 봤어요 ' + c.skip + '</span><span class="chip c-todo">아직 ' + c.todo + ' / ' + ALL.length + '</span>';
+    var bl = document.getElementById('badList'), bad = ALL.filter(function (it) { return (state.i[it.id] || {}).s === 'bad'; });
+    bl.hidden = !bad.length;
+    bl.innerHTML = bad.map(function (it) { return '<li><a href="#i-' + it.id + '">' + esc((it.gn ? it.gn + ' · ' : '') + it.t) + '</a></li>'; }).join('');
+  }
+  document.getElementById('sections').addEventListener('click', function (e) {
+    var b = e.target.closest ? e.target.closest('button[data-s]') : null; if (!b) return;
+    var id = b.getAttribute('data-id'), s = b.getAttribute('data-s'), r = rec(id);
+    if (r.s === s) delete r.s; else r.s = s;
+    save();
+    var item = document.getElementById('i-' + id);
+    item.classList.remove('s-good', 's-bad', 's-skip'); if (r.s) item.classList.add('s-' + r.s);
+    var bs = item.querySelectorAll('button[data-s]'); for (var i = 0; i < bs.length; i++) bs[i].setAttribute('aria-pressed', String(bs[i].getAttribute('data-s') === r.s));
+    renderSummary();
+  });
+  document.getElementById('sections').addEventListener('input', function (e) {
+    var id = e.target.getAttribute && e.target.getAttribute('data-id'); if (!id || e.target.tagName !== 'TEXTAREA') return;
+    var r = rec(id); r.m = e.target.value; if (!r.m) delete r.m; save();
+  });
+
+  function today() { var d = new Date(); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
+  function line(it) { var r = state.i[it.id] || {}; return '- ' + it.sec.no + ' ' + (it.gn ? it.gn + ' · ' : '') + it.t + (r.m && r.m.trim() ? ': ' + r.m.trim().replace(/\s*\n\s*/g, ' / ') : ''); }
+  function summaryText() {
+    var c = counts(), out = [];
+    out.push('[새 집 상태 점검] ' + today());
+    out.push('문제 ' + c.bad + '개 · 괜찮아요 ' + c.good + '개 · 못 봤어요 ' + c.skip + '개 · 아직 ' + c.todo + '개');
+    var groups = [['bad', '■ 문제 있어요'], ['skip', '■ 못 봤어요 / 못 물어봤어요'], ['good', '■ 괜찮아요 / 정했어요']];
+    groups.forEach(function (g) {
+      var xs = ALL.filter(function (it) { return (state.i[it.id] || {}).s === g[0]; });
+      out.push(''); out.push(g[1] + ' (' + xs.length + ')'); out.push(xs.length ? xs.map(line).join('\n') : '- 없어요');
+    });
+    var todo = ALL.filter(function (it) { return !(state.i[it.id] || {}).s; });
+    out.push(''); out.push('■ 아직 안 본 것 (' + todo.length + ')');
+    out.push(todo.length ? todo.map(line).join('\n') : '- 없어요');
+    return out.join('\n');
+  }
+  var copyMsg = document.getElementById('copyMsg'), copyOut = document.getElementById('copyOut');
+  function showFallback(text) {
+    copyOut.hidden = false; copyOut.value = text; copyOut.focus(); copyOut.select();
+    var ok = false; try { ok = document.execCommand && document.execCommand('copy'); } catch (e) {}
+    copyMsg.hidden = false;
+    copyMsg.textContent = ok ? '복사했어요. 카카오톡에 붙여 넣으세요.' : '자동 복사가 안 돼요. 아래 글을 길게 눌러 전체 선택 → 복사하세요.';
+  }
+  document.getElementById('copyBtn').addEventListener('click', function () {
+    var text = summaryText(); copyOut.value = text;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function () { copyMsg.hidden = false; copyMsg.textContent = '복사했어요. 카카오톡에 붙여 넣으세요.'; copyOut.hidden = true; },
+          function () { showFallback(text); });
+      } else showFallback(text);
+    } catch (e) { showFallback(text); }
+  });
+  var confirmBox = document.getElementById('confirmBox');
+  document.getElementById('clearBtn').addEventListener('click', function () { confirmBox.hidden = false; document.getElementById('confirmNo').focus(); });
+  document.getElementById('confirmNo').addEventListener('click', function () { confirmBox.hidden = true; document.getElementById('clearBtn').focus(); });
+  document.getElementById('confirmYes').addEventListener('click', function () {
+    state = { i: {} }; try { localStorage.removeItem(KEY); } catch (e) {}
+    confirmBox.hidden = true; copyOut.hidden = true; copyMsg.hidden = false; copyMsg.textContent = '다 지웠어요.';
+    renderSections(); renderSummary(); document.getElementById('clearBtn').focus();
+  });
+
+  renderSections();
+  renderSummary();
+  if (location.hash) { var t = document.getElementById(location.hash.slice(1)); if (t) t.scrollIntoView(); }
+})();
+</script>
+</body>
+</html>

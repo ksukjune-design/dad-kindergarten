@@ -1,0 +1,1027 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
+<title>새 집 실측 가이드</title>
+<!--
+  새 집 실측 가이드 — 우리 가구 들어갈까? (2026-10-24 사전방문용, 혼자 열리는 페이지)
+  · 도면: 네이버 부동산 평면도(전용 59.67㎡, 공용 21.65㎡, 서비스 17.19㎡)를 보고 옮긴 근사 치수예요.
+    아래 스크립트의 PLAN 좌표(cm, 원점 = 세대 왼쪽 위 바깥 모서리, x→오른쪽, y→아래, 위쪽은 공용 복도).
+    아래 기준선: 150 | 330 | 180 | 300 | 150, 위 기준선: 150 | 350 | 160 | 300 | 150,
+    왼쪽 세로 360 + 360, 오른쪽 세로 240 + 240 + 240. 방·문·창 위치는 근사값이에요.
+    (move/js/data-plans.js 의 MV.plans.new 는 평면도를 구하기 전 '추정' 도면이라 여기서는 쓰지 않았어요.)
+  · 가구 크기·쓰임 공간: move/js/data-seed.js 의 MV.seed.inventory (inv-fridge, inv-dryer, inv-sofa, inv-dining,
+    inv-dining-chair, inv-bed-master, inv-cabinet, inv-cabinet-2, inv-vanity, inv-chest-rack, inv-hanger,
+    inv-toy-storage, inv-bookshelf-kid, inv-bookshelf, inv-desk-adult, inv-desk-drawer, inv-ac-stand) 의 w·d·h 와 use.
+    세탁기는 구매 예정 LG 통돌이 T17MX3 63.2×67×101.8cm(뚜껑 열면 약 135cm).
+  · 판정 기준: move/js/data-guides-b.js 의 'layout-draft'·'critical'(10cm 여유 규칙, 쓰임 공간),
+    move/js/data-plans.js 의 냉장고 자리·다용도실 기준(냉장고 최소 93·LG 101, 세탁+건조 나란히 140~162, 깊이 155~188).
+  · 인덕션 크기·전기(3구 약 60×52cm, 약 3.4kW)는 앱 데이터에 없어 흔한 제품 기준 '추정'이에요.
+  · 넣은 값은 이 기기의 localStorage('mv-visit-measure-v2')에만 저장돼요.
+-->
+<style>
+:root {
+  --bg:#f6f4ef; --bg-2:#ffffff; --bg-3:#eeeae1;
+  --ink:#21201d; --ink-2:#57534e; --ink-3:#78726a;
+  --line:#e2ddd3; --line-2:#cfc8ba;
+  --brand:#c2410c; --brand-2:#ea580c; --brand-bg:#fff2e8;
+  --kid:#0e7490; --kid-bg:#e6f4f7;
+  --good:#15803d; --good-bg:#e7f4ec;
+  --warn:#a16207; --warn-bg:#fdf5e0;
+  --bad:#b91c1c; --bad-bg:#fdeceb;
+  --on-brand:#ffffff;
+  --plan-wall:#3f3a34; --plan-floor:#fbfaf7; --plan-wet:#e8f1f4; --plan-balc:#f1eee6;
+  --radius:16px; --radius-sm:10px;
+  --shadow:0 1px 2px rgba(33,32,29,.05), 0 8px 24px -12px rgba(33,32,29,.18);
+  --shadow-lg:0 2px 4px rgba(33,32,29,.06), 0 24px 48px -20px rgba(33,32,29,.28);
+  --font:"Pretendard","Pretendard Variable",-apple-system,BlinkMacSystemFont,"Segoe UI","Malgun Gothic","맑은 고딕","Apple SD Gothic Neo",system-ui,sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg:#16151a; --bg-2:#1f1e24; --bg-3:#2a2830;
+    --ink:#f0ede8; --ink-2:#b9b3ab; --ink-3:#9c968e;
+    --line:#33313a; --line-2:#45424d;
+    --brand:#fb923c; --brand-2:#fdba74; --brand-bg:#3a2415;
+    --kid:#67e8f9; --kid-bg:#10333c;
+    --good:#6ee7a8; --good-bg:#123324;
+    --warn:#fcd34d; --warn-bg:#3a2f10;
+    --bad:#fca5a5; --bad-bg:#3a1a1a;
+    --on-brand:#2a1200;
+    --plan-wall:#d9d3ca; --plan-floor:#22212a; --plan-wet:#17303a; --plan-balc:#2a2830;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+    --shadow-lg:0 2px 4px rgba(0,0,0,.5), 0 24px 48px -20px rgba(0,0,0,.8);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg:#16151a; --bg-2:#1f1e24; --bg-3:#2a2830;
+  --ink:#f0ede8; --ink-2:#b9b3ab; --ink-3:#9c968e;
+  --line:#33313a; --line-2:#45424d;
+  --brand:#fb923c; --brand-2:#fdba74; --brand-bg:#3a2415;
+  --kid:#67e8f9; --kid-bg:#10333c;
+  --good:#6ee7a8; --good-bg:#123324;
+  --warn:#fcd34d; --warn-bg:#3a2f10;
+  --bad:#fca5a5; --bad-bg:#3a1a1a;
+  --on-brand:#2a1200;
+  --plan-wall:#d9d3ca; --plan-floor:#22212a; --plan-wet:#17303a; --plan-balc:#2a2830;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+  --shadow-lg:0 2px 4px rgba(0,0,0,.5), 0 24px 48px -20px rgba(0,0,0,.8);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); font-family: var(--font);
+  font-size: 16px; line-height: 1.6; -webkit-text-size-adjust: 100%; word-break: keep-all; overflow-wrap: anywhere; }
+body { min-height: 100vh; overflow-x: hidden; }
+h1, h2, h3 { margin: 0 0 .4em; line-height: 1.3; font-weight: 800; letter-spacing: -.02em; }
+h1 { font-size: 1.45rem; }
+h2 { font-size: 1.15rem; }
+h3 { font-size: 1rem; }
+p { margin: 0 0 .6em; }
+a { color: var(--brand); text-underline-offset: 3px; }
+button, input, textarea, select { font: inherit; color: inherit; }
+:focus-visible { outline: 3px solid color-mix(in srgb, var(--brand) 55%, transparent); outline-offset: 2px; border-radius: 6px; }
+[hidden] { display: none !important; }
+
+.wrap { max-width: 1240px; margin: 0 auto; padding: 8px 16px 64px; }
+.top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; margin-bottom: 8px; }
+.back { display: inline-flex; align-items: center; min-height: 44px; padding: 0 2px; font-weight: 700; text-decoration: none; }
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.tab { display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--line);
+  background: var(--bg-2); color: var(--ink); text-decoration: none; font-weight: 700; font-size: .95rem; }
+.tab[aria-current="page"] { background: var(--brand); border-color: var(--brand); color: var(--on-brand); }
+.sub { display: block; font-size: 1rem; color: var(--ink-2); font-weight: 700; margin-top: 2px; }
+.lead { color: var(--ink-2); }
+.note { font-size: .9rem; color: var(--ink-2); background: var(--warn-bg); border: 1px solid color-mix(in srgb, var(--warn) 30%, var(--line));
+  border-radius: var(--radius-sm); padding: 8px 12px; }
+.card { background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px; min-width: 0; }
+.card + .card, .stack > * + * { margin-top: 12px; }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 0 16px;
+  border-radius: 12px; border: 1px solid var(--line-2); background: var(--bg-2); color: var(--ink); font-weight: 700; cursor: pointer; text-decoration: none; }
+.btn:hover { background: var(--bg-3); }
+.btn-primary { background: var(--brand); border-color: var(--brand); color: var(--on-brand); }
+.btn-primary:hover { background: var(--brand-2); border-color: var(--brand-2); }
+.btn-danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, var(--line)); }
+.btn-danger:hover { background: var(--bad-bg); }
+.btn-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.muted { color: var(--ink-3); }
+.small { font-size: .88rem; }
+
+/* 진행 */
+.prog-line { font-size: 1.1rem; font-weight: 800; margin: 0 0 6px; }
+.bar { height: 10px; border-radius: 99px; background: var(--bg-3); overflow: hidden; margin-bottom: 8px; }
+.bar > i { display: block; height: 100%; width: 0; background: var(--brand); border-radius: 99px; transition: width .25s; }
+.counts { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 10px; border-radius: 99px; font-size: .82rem; font-weight: 800;
+  border: 1px solid transparent; white-space: nowrap; }
+.c-todo { background: var(--brand-bg); color: var(--brand); }
+.c-info { background: var(--kid-bg); color: var(--kid); }
+.c-good { background: var(--good-bg); color: var(--good); }
+.c-warn { background: var(--warn-bg); color: var(--warn); }
+.c-bad  { background: var(--bad-bg);  color: var(--bad); }
+.confirm { margin-top: 10px; padding: 12px; border-radius: 12px; background: var(--bad-bg); border: 1px solid color-mix(in srgb, var(--bad) 35%, var(--line)); }
+.copy-msg { margin: 8px 0 0; font-weight: 700; }
+.copy-out { width: 100%; min-height: 160px; margin-top: 8px; padding: 10px; border-radius: 10px; border: 1px solid var(--line-2);
+  background: var(--bg); font-size: .85rem; line-height: 1.5; }
+
+/* 아이 방 선택 */
+.seg { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.seg button { min-height: 44px; padding: 6px 8px; border-radius: 12px; border: 1px solid var(--line-2); background: var(--bg-2);
+  font-weight: 700; cursor: pointer; line-height: 1.3; }
+.seg button[aria-pressed="true"] { background: var(--kid); border-color: var(--kid); color: var(--bg-2); }
+
+/* 도면 + 목록 */
+.layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; margin-top: 12px; }
+@media (min-width: 1100px) { .layout { grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); align-items: start; }
+  .plan-card { position: sticky; top: 8px; } }
+.plan-card { padding: 10px; }
+.plan-wrap { width: 100%; }
+#plan { display: block; width: 100%; height: auto; max-height: 86vh; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: .8rem; color: var(--ink-2); margin-top: 6px; }
+.legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; margin-right: 4px; }
+.legend .lg-use { border: 2px dashed var(--ink-3); background: transparent; }
+
+#plan .corr { fill: var(--bg-3); }
+#plan .corr-lab { font-size: 20px; font-weight: 700; fill: var(--ink-3); text-anchor: middle; dominant-baseline: central; }
+#plan .rm { stroke: var(--plan-wall); stroke-width: 5; stroke-linejoin: round; }
+#plan .k-floor { fill: var(--plan-floor); }
+#plan .k-balc { fill: var(--plan-balc); }
+#plan .k-wet { fill: var(--plan-wet); }
+#plan .k-grey { fill: var(--bg-3); }
+#plan .k-tile { fill: var(--plan-floor); }
+#plan .tile { fill: var(--line); }
+#plan .outer { fill: none; stroke: var(--plan-wall); stroke-width: 10; stroke-linejoin: round; }
+#plan .gap { stroke: var(--plan-floor); stroke-width: 9; }
+#plan .opn { stroke: var(--line-2); stroke-width: 2; stroke-dasharray: 8 8; }
+#plan .winbg { stroke: var(--plan-floor); stroke-width: 10; }
+#plan .win { stroke: var(--kid); stroke-width: 4; }
+#plan .leaf { stroke: var(--plan-wall); stroke-width: 3; }
+#plan .swing { fill: none; stroke: var(--line-2); stroke-width: 2; stroke-dasharray: 6 6; }
+#plan .fx { fill: var(--bg-3); stroke: var(--line-2); stroke-width: 2; }
+#plan .fx-d { fill: none; stroke: var(--ink-3); stroke-width: 2; stroke-dasharray: 6 5; }
+#plan .lab { font-size: 24px; font-weight: 800; fill: var(--ink-2); text-anchor: middle; dominant-baseline: central;
+  paint-order: stroke; stroke: var(--plan-floor); stroke-width: 6px; stroke-linejoin: round; }
+#plan .lab.s { font-size: 18px; font-weight: 700; fill: var(--ink-3); }
+#plan .lab.role { font-size: 18px; fill: var(--kid); }
+#plan .scale { stroke: var(--ink-2); stroke-width: 4; }
+#plan .scale-lab { font-size: 20px; fill: var(--ink-2); font-weight: 700; }
+#plan .mp { cursor: pointer; }
+#plan .st-todo { color: var(--brand); }
+#plan .st-info { color: var(--kid); }
+#plan .st-good { color: var(--good); }
+#plan .st-warn { color: var(--warn); }
+#plan .st-bad  { color: var(--bad); }
+#plan .body { fill: currentColor; fill-opacity: .22; stroke: currentColor; stroke-width: 3; }
+#plan .use { fill: currentColor; fill-opacity: .07; stroke: currentColor; stroke-width: 2; stroke-dasharray: 7 6; }
+#plan .area { fill: currentColor; fill-opacity: .1; stroke: currentColor; stroke-width: 3; stroke-dasharray: 12 6; }
+#plan .dl { stroke: currentColor; stroke-width: 7; stroke-linecap: round; }
+#plan .dt { stroke: currentColor; stroke-width: 4; }
+#plan .path { fill: none; stroke: currentColor; stroke-width: 6; stroke-dasharray: 16 10; stroke-linecap: round; }
+#plan .ring { fill: none; stroke: currentColor; stroke-width: 4; }
+#plan .dot { fill: currentColor; stroke: var(--bg-2); stroke-width: 4; }
+#plan .num { fill: var(--bg-2); font-size: 27px; font-weight: 800; text-anchor: middle; dominant-baseline: central; pointer-events: none; }
+#plan .val { font-size: 19px; font-weight: 800; fill: currentColor; text-anchor: middle; dominant-baseline: central; pointer-events: none;
+  paint-order: stroke; stroke: var(--bg-2); stroke-width: 6px; stroke-linejoin: round; }
+#plan .hit { fill: transparent; }
+#plan .mp.sel .dl { stroke-width: 10; }
+#plan .mp.sel .body { fill-opacity: .4; stroke-width: 5; }
+#plan .mp.sel .dot { stroke: var(--ink); stroke-width: 5; }
+#plan.has-sel .mp:not(.sel) { opacity: .28; }
+#plan .mp:focus { outline: none; }
+#plan .mp:focus-visible .dot { stroke: var(--ink); stroke-width: 6; }
+
+.list { list-style: none; margin: 0; padding: 0; }
+.list li + li { margin-top: 6px; }
+.row { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; gap: 4px 10px; align-items: center; width: 100%; min-height: 56px;
+  padding: 8px 10px; text-align: left; border-radius: 12px; border: 1px solid var(--line); background: var(--bg-2); cursor: pointer; }
+.row:hover { background: var(--bg-3); }
+.row .no { width: 32px; height: 32px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+  font-weight: 800; font-size: .95rem; background: var(--brand); color: var(--on-brand); }
+.row.st-info .no { background: var(--kid); color: var(--bg-2); }
+.row.st-good .no { background: var(--good); color: var(--bg-2); }
+.row.st-warn .no { background: var(--warn); color: var(--bg-2); }
+.row.st-bad .no { background: var(--bad); color: var(--bg-2); }
+.row .t { font-weight: 800; line-height: 1.35; display: block; }
+.row .s { display: block; font-size: .82rem; color: var(--ink-3); line-height: 1.35; }
+.row .v { display: block; font-size: .82rem; color: var(--ink-2); line-height: 1.35; margin-top: 2px; }
+.row .chip { justify-self: end; }
+.group-h { margin: 14px 0 6px; font-size: .85rem; color: var(--ink-3); font-weight: 800; letter-spacing: .02em; }
+.group-h:first-child { margin-top: 0; }
+
+.tips ul { margin: 0; padding-left: 1.2em; }
+.tips li + li { margin-top: 4px; }
+
+/* 패널 (바텀 시트) */
+.sheet-back { position: fixed; inset: 0; background: rgba(0,0,0,.42); z-index: 50; }
+.sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 51; max-height: 90vh; max-height: 90dvh; overflow-y: auto; overscroll-behavior: contain;
+  background: var(--bg-2); border-radius: 20px 20px 0 0; box-shadow: var(--shadow-lg); padding: 0 16px calc(16px + env(safe-area-inset-bottom, 0px)); }
+@media (min-width: 760px) {
+  .sheet { left: 50%; right: auto; top: 50%; bottom: auto; transform: translate(-50%, -50%); width: min(640px, calc(100vw - 32px)); border-radius: 20px; }
+}
+.sh-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 10px; padding: 12px 0 10px; background: var(--bg-2);
+  border-bottom: 1px solid var(--line); margin-bottom: 10px; }
+.sh-head .no { flex: 0 0 auto; width: 36px; height: 36px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+  font-weight: 800; background: var(--brand); color: var(--on-brand); }
+.sh-head h2 { margin: 0; font-size: 1.08rem; flex: 1 1 auto; min-width: 0; }
+.sh-head .where { display: block; font-size: .82rem; color: var(--ink-3); font-weight: 700; }
+.x { flex: 0 0 auto; width: 44px; height: 44px; border-radius: 12px; border: 1px solid var(--line-2); background: var(--bg-2); font-size: 1.3rem; cursor: pointer; line-height: 1; }
+.sec-t { font-size: .85rem; font-weight: 800; color: var(--ink-3); margin: 12px 0 4px; }
+.sizes { width: 100%; border-collapse: collapse; font-size: .88rem; margin-bottom: 4px; }
+.sizes th, .sizes td { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.sizes th { color: var(--ink-2); font-weight: 700; width: 42%; }
+.fields { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.fld { border: 1px solid var(--line); border-radius: 12px; padding: 10px; background: var(--bg); }
+.fld.lv-good { border-color: color-mix(in srgb, var(--good) 45%, var(--line)); }
+.fld.lv-warn { border-color: color-mix(in srgb, var(--warn) 55%, var(--line)); background: var(--warn-bg); }
+.fld.lv-bad  { border-color: color-mix(in srgb, var(--bad) 55%, var(--line)); background: var(--bad-bg); }
+.fld label, .fld .lb { display: block; font-weight: 800; font-size: .95rem; line-height: 1.35; margin-bottom: 4px; }
+.fld .hint { display: block; font-size: .8rem; color: var(--ink-3); font-weight: 600; margin-top: 2px; }
+.inrow { display: flex; align-items: center; gap: 8px; }
+.inrow input { flex: 1 1 auto; min-width: 0; }
+.inrow .u { flex: 0 0 auto; font-weight: 700; color: var(--ink-2); }
+input[type="text"], textarea { width: 100%; min-height: 44px; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--line-2);
+  background: var(--bg-2); font-size: 16px; }
+textarea { min-height: 76px; resize: vertical; line-height: 1.5; }
+.ch { display: flex; flex-wrap: wrap; gap: 6px; }
+.ch button { min-height: 44px; padding: 6px 12px; border-radius: 10px; border: 1px solid var(--line-2); background: var(--bg-2); font-weight: 700; cursor: pointer; }
+.ch button[aria-pressed="true"] { background: var(--ink); color: var(--bg-2); border-color: var(--ink); }
+.msg { margin: 6px 0 0; font-size: .88rem; font-weight: 800; }
+.msg.lv-good { color: var(--good); } .msg.lv-warn { color: var(--warn); } .msg.lv-bad { color: var(--bad); } .msg.lv-info { color: var(--kid); }
+.derive { margin: 10px 0 0; padding: 0; list-style: none; }
+.derive li { padding: 8px 10px; border-radius: 10px; background: var(--bg-3); font-size: .88rem; font-weight: 700; }
+.derive li + li { margin-top: 6px; }
+.derive li.lv-warn { background: var(--warn-bg); color: var(--warn); }
+.derive li.lv-bad { background: var(--bad-bg); color: var(--bad); }
+.derive li.lv-good { background: var(--good-bg); color: var(--good); }
+.verdict { margin: 12px 0 0; padding: 10px 12px; border-radius: 12px; font-weight: 800; }
+.photo { font-size: .88rem; color: var(--ink-2); margin: 10px 0 0; }
+.sh-nav { display: flex; gap: 8px; margin-top: 14px; }
+.sh-nav .btn { flex: 1 1 0; min-width: 0; }
+.src { font-size: .76rem; color: var(--ink-3); margin-top: 10px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <a class="back" href="../index.html#/">← 이사 앱으로</a>
+    <nav class="tabs" aria-label="사전방문 페이지">
+      <a class="tab" href="measure.html" aria-current="page">실측 가이드</a>
+      <a class="tab" href="check.html">상태 점검</a>
+    </nav>
+  </header>
+
+  <h1>새 집 실측 가이드<span class="sub">우리 가구 들어갈까?</span></h1>
+  <p class="lead">도면의 번호나 아래 목록을 누르고, 줄자로 잰 값을 넣으세요. 바로 <b>들어가요 · 빠듯해요 · 안 들어가요</b>를 알려 드려요. 값은 이 휴대폰에 저장돼요.</p>
+  <p class="note">네이버 부동산 평면도 기준(전용 59.67㎡) — 실제와 다를 수 있어요. 도면 위 가구 자리는 <b>제안</b>이에요. 실제 집을 보고 정하세요.</p>
+
+  <section class="card" aria-labelledby="prog-h">
+    <h2 id="prog-h" class="prog-line" aria-live="polite"><span id="progText">21곳 중 0곳 쟀어요</span></h2>
+    <div class="bar" aria-hidden="true"><i id="progBar"></i></div>
+    <div class="counts" id="counts"></div>
+    <div class="btn-row">
+      <button type="button" class="btn btn-primary" id="copyBtn">결과 복사</button>
+      <button type="button" class="btn btn-danger" id="clearBtn">다 지우기</button>
+    </div>
+    <div class="confirm" id="confirmBox" hidden role="alertdialog" aria-labelledby="confirmT">
+      <p id="confirmT" style="font-weight:800">잰 값과 메모를 모두 지울까요? 되돌릴 수 없어요.</p>
+      <div class="btn-row">
+        <button type="button" class="btn btn-danger" id="confirmYes">네, 다 지울게요</button>
+        <button type="button" class="btn" id="confirmNo">취소</button>
+      </div>
+    </div>
+    <p class="copy-msg" id="copyMsg" hidden aria-live="polite"></p>
+    <textarea class="copy-out" id="copyOut" hidden readonly aria-label="복사할 결과"></textarea>
+  </section>
+
+  <section class="card" aria-labelledby="kid-h">
+    <h2 id="kid-h">아이 방은 어느 방으로 할까요?</h2>
+    <p class="small muted">작은방 두 개(각 약 3.0 × 2.4m) 중 하나는 아이 방(책장 4개 · 간이옷장), 다른 하나는 옷 방(캐비닛장 3개 · 책상 · 알렉스 서랍)이에요. 두 방을 다 보고 정하세요 — 고르면 도면의 가구 자리가 바뀌어요.</p>
+    <div class="seg" role="group" aria-label="아이 방 고르기" id="kidSeg">
+      <button type="button" data-kid="U">작은방(위)</button>
+      <button type="button" data-kid="L">작은방(아래)</button>
+      <button type="button" data-kid="">아직 몰라요</button>
+    </div>
+    <p class="small muted" id="kidNote" style="margin:8px 0 0"></p>
+  </section>
+
+  <div class="layout">
+    <section class="card plan-card" aria-labelledby="plan-h">
+      <h2 id="plan-h" class="small" style="font-size:1rem">도면 — 번호를 누르세요</h2>
+      <p class="small muted" id="planNote" style="margin:0 0 6px"></p>
+      <div class="plan-wrap"><svg id="plan" role="img" aria-label="새 집 평면도와 실측 지점"></svg></div>
+      <div class="legend" aria-hidden="true">
+        <span><i style="background:var(--brand)"></i>안 쟀어요</span>
+        <span><i style="background:var(--good)"></i>들어가요</span>
+        <span><i style="background:var(--warn)"></i>빠듯해요</span>
+        <span><i style="background:var(--bad)"></i>안 들어가요</span>
+        <span><i style="background:var(--kid)"></i>쟀어요(정보)</span>
+        <span><i class="lg-use"></i>점선 = 쓰임 공간(문·서랍·앉는 자리)</span>
+      </div>
+    </section>
+    <section class="card" aria-labelledby="list-h">
+      <h2 id="list-h">잴 곳 목록</h2>
+      <ol class="list" id="list"></ol>
+    </section>
+  </div>
+
+  <section class="card tips" aria-labelledby="tips-h" style="margin-top:12px">
+    <h2 id="tips-h">이렇게 재세요</h2>
+    <ul>
+      <li><b>줄자</b>는 5m 이상이 편해요. 끝 고리를 벽에 대고 팽팽하게 당겨 재세요.</li>
+      <li>벽 길이는 <b>걸레받이 위 약 10cm</b> 높이에서 재세요. 걸레받이·몰딩 두께만큼 바닥 쪽이 짧아요.</li>
+      <li>같은 곳을 두세 번 재서 <b>가장 좁은 값</b>을 넣으세요. 문·창틀·콘센트처럼 튀어나온 곳은 빼고 재요.</li>
+      <li><b>사진은 줄자 눈금이 보이게</b> 찍으세요. 배관 구멍·콘센트·수전처럼 위치가 중요한 곳은 넓게 한 장, 가까이 한 장.</li>
+      <li><b>몸체</b> = 가구 크기 그대로, <b>여유 포함</b> = 벽·다른 가구에서 10cm씩 띄우고 문·서랍·앉는 자리까지 더한 크기예요. 여유 포함보다 크면 '들어가요', 몸체보다만 크면 '빠듯해요'예요.</li>
+      <li>두 사람이면 한 사람은 재고, 한 사람은 이 화면에 적으세요.</li>
+    </ul>
+  </section>
+</div>
+
+<div class="sheet-back" id="sheetBack" hidden></div>
+<div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="shTitle" hidden></div>
+
+<script>
+(function () {
+  'use strict';
+  var KEY = 'mv-visit-measure-v2';
+  var NS = 'http://www.w3.org/2000/svg';
+
+  /* ---------- 도면 (네이버 부동산 평면도에서 옮긴 근사 치수, cm) ---------- */
+  var PLAN = {
+    W: 1110, H: 720,
+    rooms: [
+      { id: 'balL', name: '발코니', kind: 'balc', r: [0, 0, 150, 720], lab: [75, 300] },
+      { id: 'boxA', name: '작은 칸', kind: 'grey', r: [0, 610, 140, 110], lab: [70, 703], small: true },
+      { id: 'living', name: '거실', kind: 'floor', p: [[150, 0], [500, 0], [500, 130], [660, 130], [660, 480], [480, 480], [480, 360], [150, 360]], lab: [400, 185] },
+      { id: 'entry', name: '현관', kind: 'tile', r: [500, 0, 160, 130], lab: [580, 112] },
+      { id: 'roomU', name: '작은방(위)', kind: 'floor', r: [660, 0, 300, 240], lab: [790, 140], role: 'U' },
+      { id: 'balTR', name: '발코니', kind: 'balc', r: [960, 0, 150, 240], lab: [1035, 120] },
+      { id: 'kitchen', name: '주방·식당', kind: 'floor', r: [660, 240, 300, 240], lab: [905, 458] },
+      { id: 'boxC1', name: '', kind: 'grey', r: [960, 240, 150, 35] },
+      { id: 'boxC2', name: '', kind: 'grey', r: [960, 275, 150, 35] },
+      { id: 'balR', name: '발코니', kind: 'balc', r: [960, 310, 150, 410], lab: [1035, 350] },
+      { id: 'master', name: '안방', kind: 'floor', r: [150, 360, 330, 360], lab: [430, 650] },
+      { id: 'bath', name: '욕실', kind: 'wet', r: [480, 480, 180, 190], lab: [590, 585] },
+      { id: 'shaft', name: '설비', kind: 'grey', r: [480, 670, 180, 50], lab: [570, 695], small: true },
+      { id: 'roomL', name: '작은방(아래)', kind: 'floor', r: [660, 480, 300, 240], lab: [810, 575], role: 'L' }
+    ],
+    doors: [ // o: h(가로벽)·v(세로벽), swing: 문짝이 쓸고 가는 쪽, hinge: 개구부 시작/끝
+      { x: 520, y: 0, w: 90, o: 'h', swing: 'down', hinge: 'start' },   // 현관문 (복도 → 현관)
+      { x: 660, y: 160, w: 75, o: 'v', swing: 'right', hinge: 'start' },// 작은방(위)
+      { x: 395, y: 360, w: 80, o: 'h', swing: 'down', hinge: 'end' },   // 안방
+      { x: 490, y: 480, w: 70, o: 'h', swing: 'down', hinge: 'start' }, // 욕실
+      { x: 670, y: 480, w: 75, o: 'h', swing: 'down', hinge: 'start' }, // 작은방(아래)
+      { x: 35, y: 610, w: 70, o: 'h', swing: 'up', hinge: 'start' }     // 작은 칸 (발코니 쪽)
+    ],
+    openings: [ { x: 500, y: 130, w: 160, o: 'h' }, { x: 660, y: 240, w: 240, o: 'v' } ],
+    windows: [
+      { x: 150, y: 20, w: 320, o: 'v' }, { x: 150, y: 395, w: 200, o: 'v' },
+      { x: 960, y: 40, w: 160, o: 'v' }, { x: 960, y: 520, w: 160, o: 'v' },
+      { x: 0, y: 15, w: 580, o: 'v' }, { x: 1110, y: 15, w: 210, o: 'v' }, { x: 1110, y: 325, w: 380, o: 'v' }
+    ],
+    fixtures: [
+      { r: [660, 240, 300, 45], c: 'fx' },          // 일자형 조리대
+      { r: [735, 247, 70, 32], c: 'fx' },           // 싱크볼
+      { r: [485, 600, 170, 65], c: 'fx' },          // 욕조
+      { r: [600, 492, 45, 60], c: 'fx' },           // 변기
+      { r: [490, 556, 50, 38], c: 'fx' },           // 세면대
+      { r: [620, 5, 40, 120], c: 'fx-d' }           // 신발장(위치 확인)
+    ],
+    burners: [[885, 263], [915, 263]]               // 평면도의 2구 가스레인지 표시 → 인덕션 자리
+  };
+
+  /* ---------- 작은방 두 개: 역할(아이 방/옷 방)에 따른 가구 후보 자리 ---------- */
+  // 작은방(위): x 660–960, y 0–240, 문은 왼쪽 벽 y 160–235 / 작은방(아래): x 660–960, y 480–720, 문은 위쪽 벽 x 670–745
+  var ROOMLAYOUT = {
+    kid: {
+      U: { shelves: [[670, 10, 80, 28.5], [760, 10, 80, 28.5], [850, 10, 80, 28.5], [745, 201.5, 80, 28.5]],
+           shelfUse: [[670, 38.5, 260, 60], [745, 141.5, 80, 60]], shelfLines: [[660, 6, 960, 6], [745, 234, 960, 234]], shelfDot: [900, 40],
+           hanger: [835, 190, 82, 40], hangerUse: [835, 130, 82, 60], hangerLine: [835, 234, 917, 234], hangerDot: [876, 170] },
+      L: { shelves: [[670, 681.5, 80, 28.5], [760, 681.5, 80, 28.5], [850, 681.5, 80, 28.5], [755, 490, 80, 28.5]],
+           shelfUse: [[670, 621.5, 260, 60], [755, 518.5, 80, 60]], shelfLines: [[660, 714, 960, 714], [755, 486, 960, 486]], shelfDot: [800, 660],
+           hanger: [845, 490, 82, 40], hangerUse: [845, 530, 82, 60], hangerLine: [845, 486, 927, 486], hangerDot: [886, 552] }
+    },
+    closet: {
+      L: { cabs: [[670, 660, 76, 50], [756, 660, 76, 50], [842, 660, 76, 50]], cabUse: [[670, 590, 248, 70]], cabLine: [660, 714, 960, 714], cabDot: [794, 685],
+           alex: [755, 490, 36, 58], desk: [801, 490, 120, 60], deskUse: [[801, 550, 120, 75]], deskLine: [745, 486, 960, 486], deskDot: [880, 520], gapLine: [940, 480, 940, 720] },
+      U: { cabs: [[670, 10, 76, 50], [756, 10, 76, 50], [842, 10, 76, 50]], cabUse: [[670, 60, 248, 70]], cabLine: [660, 6, 960, 6], cabDot: [794, 35],
+           alex: [755, 172, 36, 58], desk: [801, 170, 120, 60], deskUse: [[801, 95, 120, 75]], deskLine: [745, 234, 960, 234], deskDot: [861, 200], gapLine: [940, 0, 940, 240] }
+    }
+  };
+  function kidRoom() { return state.kid === 'L' ? 'L' : 'U'; }       // 정하지 않았으면 작은방(위)를 아이 방으로 제안
+  function closetRoom() { return kidRoom() === 'U' ? 'L' : 'U'; }
+  function roomName(k) { return k === 'U' ? '작은방(위)' : '작은방(아래)'; }
+
+  /* ---------- 필드 도우미 ---------- */
+  function L(id, label, fit, need, extra) { return Object.assign({ id: id, label: label, type: 'len', fit: fit, need: need }, extra || {}); }
+  function N(id, label, fit, need, extra) { return Object.assign({ id: id, label: label, type: 'num', fit: fit, need: need, unit: '개' }, extra || {}); }
+  function C(id, label, opts, extra) { return Object.assign({ id: id, label: label, type: 'choice', opts: opts }, extra || {}); }
+  function T(id, label, ph) { return { id: id, label: label, type: 'text', ph: ph || '' }; }
+  var YESNO = [['있어요', 'good'], ['없어요', 'bad']];
+  var YESNO_W = [['있어요', 'good'], ['없어요', 'warn']];
+  var WASH_SIZES = [
+    ['세탁기 (LG 통돌이 T17MX3, 살 예정)', '63.2 × 67 × 101.8cm · 위 뚜껑을 열면 바닥에서 약 135cm'],
+    ['건조기 (삼성 그랑데 AI)', '68.6 × 87.6 × 98.4cm (깊이는 추정 84.4~87.6)'],
+    ['나란히 놓을 벽', '몸체 63.2 + 68.6 = 131.8 · 여유 포함 10 × 3 더해 161.8'],
+    ['깊이', '몸체 87.6(건조기) · 여유 포함 뒤 10 + 87.6 + 앞 90(문 열림 약 55 + 바구니 들고 설 자리) = 187.6'],
+    ['쓰임 공간', '세탁기 앞 60·뒤 10·위 뚜껑 · 건조기 앞 90·뒤 10 · 위에 쌓을 수 없어요']
+  ];
+  function washFields(withWhat, withDoor) {
+    var f = [];
+    if (withWhat) f.push(C('what', '이 칸은 무엇인가요?', [['세탁 공간', 'good'], ['보일러·분배기', 'warn'], ['실외기 칸', 'warn'], ['창고', 'info'], ['모르겠어요', 'warn']]));
+    f.push(L('wall', '나란히 놓을 벽 길이', 131.8, 161.8, { hint: '바닥 높이에서, 문이 쓸고 가는 자리는 빼고' }));
+    f.push(L('depth', '그 벽 → 맞은편 (깊이)', 87.6, 187.6));
+    f.push(L('top', '위 선반·창틀 높이 (바닥에서)', 136, 150, { hint: '세탁기 뚜껑이 약 135cm까지 올라가요', badMsg: '세탁기 뚜껑이 끝까지 안 열려요' }));
+    if (withDoor) f.push(L('door', '칸 입구 문 폭', 68.6, 72, { hint: '건조기(폭 68.6)를 세워서 넣어요', badMsg: '건조기가 문을 못 지나가요' }));
+    f.push(C('tap', '수전 (찬물·더운물)', YESNO));
+    f.push(C('drain', '바닥 배수구', YESNO));
+    f.push(N('outlet', '220V 콘센트 개수', 1, 2, { hint: '건조기는 약 2,400W라 따로 1개(멀티탭 금지)' }));
+    f.push(T('pos', '수전·배수구·콘센트 위치', '예: 왼쪽 모서리에서 30cm, 바닥에서 100cm'));
+    return f;
+  }
+  function washDerive(v) {
+    var out = [], w = num(v.wall), d = num(v.depth);
+    if (w != null) out.push({ t: '벽 ' + fmt(w) + ' − 세탁기 63.2 − 건조기 68.6 = 남는 틈 ' + fmt(w - 131.8) + 'cm (10cm씩 띄우려면 30cm)', lv: w - 131.8 >= 30 ? 'good' : (w >= 131.8 ? 'warn' : 'bad') });
+    if (d != null) { var f = d - 97.6; out.push({ t: '건조기 문 앞 빈 곳: 약 ' + fmt(f) + 'cm (문 열림 약 55 · 서서 넣고 빼기 90)', lv: f >= 90 ? 'good' : (f >= 55 ? 'warn' : 'bad') }); }
+    return out;
+  }
+
+  /* ---------- 실측 지점 (가구별) ---------- */
+  var POINTS = [
+    { n: 1, group: '먼저 — 큰 가전과 들어오는 길', kind: 'fit', title: '냉장고 자리', where: '주방·식당 — 후보: 조리대 오른쪽 끝 아래, 주방 오른쪽 벽',
+      measure: '냉장고 놓을 자리의 폭(양옆 벽·가구 사이 가장 좁은 곳), 뒷벽에서 앞으로 비어 있는 길이(식탁이나 맞은편 벽까지), 바닥에서 위 수납장(없으면 천장)까지 높이를 재세요. 냉장고 자리로 비워 둔 칸이 따로 있으면 그곳을 재세요.',
+      sizes: [['냉장고 (LG 양문형 652L)', '91.3 × 73.5 × 179cm · 118kg'], ['쓰임 공간', '앞 90(문 열고 서기) · 옆 5 · 뒤 10(LG 설치 기준) · 위 5'],
+              ['자리 폭', '최소 93(넣고 빼는 틈) · 여유 포함 101(LG 설치 기준 좌우 5)']],
+      fields: [L('w', '자리 폭', 93, 101), L('front', '뒷벽 → 앞쪽 가구·벽 (앞 빈 곳)', 83.5, 173.5, { hint: '뒤 10 + 냉장고 73.5 + 문 앞 90' }),
+               L('h', '높이 (바닥 → 위 수납장·천장)', 179, 184), C('outlet', '가까운 벽 콘센트', YESNO_W)],
+      spots: function () { return { bodies: [[876.5, 295, 73.5, 91.3]], uses: [[786.5, 295, 90, 91.3]], lines: [[954, 285, 954, 480]], dot: [913, 340] }; },
+      src: 'data-seed.js inv-fridge(91.3×73.5×179, 앞 90·옆 5·뒤 5~10·위 5) · data-plans.js 냉장고 자리 기준(최소 93, LG 101)' },
+
+    { n: 2, kind: 'fit', title: '큰 짐 들어올 길', where: '현관문 · 엘리베이터 · 현관→주방 · 방문',
+      measure: '문을 활짝 열고 문틀 안쪽에서 문짝(손잡이)까지 가장 좁은 곳이 유효 폭이에요. 현관문, 엘리베이터 문과 안쪽 높이, 현관에서 주방까지 가는 길의 가장 좁은 곳, 안방 문, 작은방 문을 재세요.',
+      sizes: [['냉장고', '91.3 × 73.5 × 179cm — 세워서 옮겨요. 정면으로는 93cm, 옆으로 돌리면 약 80cm면 될 수도 있어요(추정)'],
+              ['라지킹 매트리스', '200 × 200 × 36cm — 안 접혀요. 세우면 두께 36cm, 높이 200cm'],
+              ['소파 상자', '180 × 86 × 83cm'], ['책상', '120 × 60 × 72cm — 옆으로 세우면 60cm'],
+              ['캐비닛장', '철제 조립식이라 분해해서 옮겨요']],
+      fields: [L('door', '현관문 유효 폭', 80, 93, { warnMsg: '냉장고를 옆으로 돌리거나 문짝을 떼야 할 수 있어요', badMsg: '사다리차나 문짝 분리가 필요해요' }),
+               L('doorH', '현관문 높이', 179, 185, { hint: '냉장고 179cm를 세워서' }),
+               L('elev', '엘리베이터 문 폭', 80, 93, { badMsg: '냉장고는 사다리차로 올려야 해요' }),
+               L('elevH', '엘리베이터 안쪽 높이', 179, 205, { hint: '매트리스 200cm를 세워서 넣으려면 205(추정)', warnMsg: '매트리스는 비스듬히 넣거나 사다리차예요' }),
+               L('hall', '현관 → 주방 가장 좁은 곳', 80, 93),
+               L('mDoor', '안방 문 유효 폭', 36, 46, { hint: '매트리스를 세워 넣는 두께 36' }),
+               L('sDoor', '작은방 문 유효 폭 (좁은 쪽)', 60, 70, { hint: '책상을 옆으로 세워 60(추정)' })],
+      spots: function () { return { lines: [[520, 8, 610, 8], [500, 138, 660, 138], [395, 352, 475, 352], [652, 160, 652, 235], [670, 488, 745, 488]],
+        path: [[565, -45], [565, 320], [870, 320]], dot: [530, 42] }; },
+      src: 'data-seed.js inv-fridge 메모(유효 폭 93, 80 넘으면 옆으로 — 추정)·inv-bed-master·inv-sofa(상자 180×86×83)·inv-desk-adult · 공간 가이드 \'냉장고가 지나갈 길\'' },
+
+    { n: 3, kind: 'fit', title: '세탁기 + 건조기 후보 A', where: '왼쪽 발코니 아래 작은 칸 (용도 확인)',
+      measure: '이 작은 칸이 무엇인지(세탁 공간·보일러·실외기 칸·창고) 먼저 보세요. 세탁기와 건조기를 나란히 둘 벽 길이, 그 벽에서 맞은편까지 깊이, 위 선반·창틀 높이, 입구 문 폭을 재고, 수전·배수구·220V 콘센트가 있는지 보세요.',
+      sizes: WASH_SIZES, fields: washFields(true, true), derive: washDerive,
+      spots: function () { return { area: [[0, 610, 140, 110]], bodies: [[4, 643, 63.2, 67], [69.6, 622.4, 68.6, 87.6]], lines: [[0, 714, 140, 714], [134, 610, 134, 720]], dot: [70, 580] }; },
+      src: 'data-seed.js inv-dryer(68.6×87.6×98.4, 앞 90·뒤 10) · 세탁기 T17MX3 63.2×67×101.8(구매 예정) · data-plans.js 다용도실 기준(벽 140~162, 깊이 155~188)' },
+
+    { n: 4, kind: 'fit', title: '세탁기 + 건조기 후보 B', where: '오른쪽 발코니 (주방·작은방(아래) 옆)',
+      measure: '발코니 안쪽 벽(주방·방 쪽 벽)을 따라 세탁기와 건조기를 나란히 둘 길이, 그 벽에서 바깥 창까지 깊이, 창틀 높이를 재세요. 수전·배수구·콘센트가 있는지, 주방에서 나가는 문이 어디인지 보세요. 바깥 창이 있는 발코니는 겨울에 5℃ 아래로 내려가면 세탁기·건조기가 얼 수 있어요.',
+      sizes: WASH_SIZES, fields: washFields(false, false), derive: washDerive,
+      spots: function () { return { bodies: [[970, 500, 67, 63.2], [970, 573.2, 87.6, 68.6]], uses: [[1057.6, 500, 52.4, 141.8]], lines: [[966, 490, 966, 720], [960, 660, 1110, 660]], dot: [1035, 440] }; },
+      src: '후보 A와 같아요' },
+
+    { n: 5, kind: 'fit', title: '세탁기 + 건조기 후보 C', where: '주방 오른쪽 작은 칸 2개 (용도 확인)',
+      measure: '주방 옆 작은 칸 두 개가 무엇인지(세탁 공간·보일러·실외기 칸·창고) 보고, 두 칸을 합친 크기와 칸 사이 벽을 뺄 수 있는지 보세요. 칸마다 가로·세로, 입구 문 폭, 수전·배수구·콘센트를 확인하세요.',
+      sizes: WASH_SIZES, fields: washFields(true, true), derive: washDerive,
+      spots: function () { return { area: [[960, 240, 150, 70]], lines: [[960, 246, 1110, 246], [1104, 240, 1104, 310]], dot: [995, 275] }; },
+      src: '후보 A와 같아요' },
+
+    { n: 6, kind: 'info', title: '인덕션 자리', where: '주방 조리대 오른쪽 끝 (평면도의 가스레인지 자리)',
+      measure: '가스레인지는 쓰지 않고 인덕션을 써요. 인덕션을 놓을 조리대의 폭(싱크볼·벽까지)과 깊이(벽 → 앞 끝)를 재고, 빌트인으로 바꿀 수 있게 가스레인지 구멍 가로·세로도 재 두세요. 가까운 220V 콘센트, 차단기 함에 주방·인덕션 전용 차단기가 있는지, 가스 중간밸브가 잠기고 막혀 있는지 보세요.',
+      sizes: [['인덕션 (흔한 3구, 추정)', '약 59~60 × 50~52cm — 우리 인덕션 크기로 바꿔 보세요'], ['전기', '약 3.4kW 안팎(추정) → 단독 콘센트, 되도록 전용 회로. 멀티탭·연장선 금지'],
+              ['조리대', '몸체 60 × 52 · 여유 포함 폭 70 · 깊이 60 (추정)']],
+      fields: [C('place', '인덕션 놓을 곳', [['가스레인지 자리', 'good'], ['다른 조리대', 'info'], ['아직 몰라요', 'warn']]),
+               L('cw', '놓을 조리대 폭', 60, 70, { hint: '추정 — 인덕션 폭 약 60' }), L('cd', '조리대 깊이 (벽 → 앞 끝)', 52, 60, { hint: '추정 — 인덕션 깊이 약 52' }),
+               L('hw', '가스레인지 구멍 가로'), L('hd', '가스레인지 구멍 세로'),
+               C('o220', '가까운 220V 콘센트 (약 1m 안)', YESNO), C('circ', '전용 회로 (차단기 함에 주방·인덕션 표시)', [['있어요', 'good'], ['없어요', 'warn'], ['모르겠어요', 'warn']]),
+               C('gas', '가스 배관 막음 (중간밸브 잠김·캡)', [['돼 있어요', 'good'], ['안 돼 있어요', 'warn'], ['모르겠어요', 'warn']])],
+      spots: function () { return { bodies: [[865, 241, 70, 44]], lines: [[810, 292, 960, 292]], dot: [900, 262] }; },
+      link: { href: 'check.html#induction', t: '상태 점검 ③ 인덕션 보기' },
+      src: '앱 데이터에 인덕션 규격 없음 → 흔한 3구 인덕션 기준 추정 · 평면도의 2구 가스레인지 자리' },
+
+    { n: 7, group: '안방', kind: 'fit', title: '침대 — 라지킹 매트리스', where: '안방 (침실 11.87㎡, 약 3.3 × 3.6m)',
+      measure: '안방 가로(창 벽 → 반대쪽 벽)와 세로(거실 쪽 벽 → 아래 바깥벽)를 걸레받이 위에서 재세요.',
+      sizes: [['라지킹 매트리스 (프레임 없음)', '200 × 200 × 36cm'], ['쓰임 공간', '발치 50 · 양옆 중 한쪽 이상 50 · 머리 쪽 벽 10'],
+              ['방 크기', '몸체 200 · 여유 포함 10 + 200 + 50 = 260 (가로·세로 모두)']],
+      fields: [L('W', '안방 가로 (창 벽 → 반대쪽 벽)', 200, 260), L('H', '안방 세로 (거실 쪽 벽 → 바깥벽)', 200, 260)],
+      derive: function (v) { var h = num(v.H); if (h == null) return [];
+        return [{ t: '화장대 줄까지 놓으려면 세로 330cm(벽 10 + 화장대 50 + 앞 60 + 매트리스 200 + 10) — 지금 ' + fmt(h) + 'cm', lv: h >= 330 ? 'good' : 'warn' }]; },
+      spots: function () { return { bodies: [[170, 510, 200, 200]], uses: [[170, 460, 200, 50], [370, 510, 50, 200]], lines: [[150, 714, 480, 714], [474, 360, 474, 720]], dot: [270, 610] }; },
+      src: 'data-seed.js inv-bed-master(200×200×36, 발치 50·옆 50) · 공간 가이드 크리티컬 포인트' },
+
+    { n: 8, kind: 'fit', title: '화장대 · 수납장(체스트랙)', where: '안방 위쪽 벽(거실 쪽) — 수납장은 다른 곳도 괜찮아요',
+      measure: '안방 위쪽 벽(거실 쪽 벽)을 창 쪽 모서리부터 안방 문틀까지 재세요. 콘센트 위치도 적어요. 체스트랙은 키가 커서(175cm) 벽에 고정할 곳을 보세요.',
+      sizes: [['화장대 (낮은 좌식)', '100 × 50 × 50cm · 앞 60(앉기·서랍)'], ['수납장 — 니토리 체스트랙', '45 × 43 × 175cm · 앞 50(서랍)'],
+              ['벽 길이', '몸체 100 + 45 = 145 · 여유 포함 10 × 3 더해 175']],
+      fields: [L('top', '위쪽 벽 길이 (창 쪽 모서리 → 안방 문틀)', 145, 175), T('pos', '콘센트 위치', '예: 창 쪽에서 120cm')],
+      spots: function () { return { bodies: [[160, 370, 100, 50], [270, 370, 45, 43]], uses: [[160, 420, 100, 60], [270, 413, 45, 50]], lines: [[150, 366, 395, 366]], dot: [210, 397] }; },
+      src: 'data-seed.js inv-vanity(100×50×50, 앞 60)·inv-chest-rack(45×43×175, 앞 50) · data-layouts.js 안방 배치(10cm 띄움)' },
+
+    { n: 9, kind: 'info', title: '벽걸이 에어컨', where: '안방 (배관 구멍 위치 확인)',
+      measure: '안방에서 에어컨 배관 구멍(막음 캡)을 찾아 바닥에서 높이, 가까운 모서리에서 거리, 천장까지 여유를 재세요. 실내기를 달 벽의 폭과 근처 콘센트를 보세요. 사진은 설치 기사에게 보내요.',
+      sizes: [['벽걸이 실내기 (2in1)', '68.2 × 21.5 × 29.9cm'], ['달 벽 폭', '몸체 68.2 · 여유 포함 옆 10씩 88.2']],
+      fields: [L('wall', '실내기 달 벽 폭', 68.2, 88.2), L('holeH', '배관 구멍 높이 (바닥에서)'), L('holeX', '배관 구멍 ↔ 가까운 모서리'),
+               L('ceil', '배관 구멍 위 → 천장'), C('outlet', '근처 콘센트', YESNO_W), C('hole', '배관 구멍', [['있어요', 'good'], ['없어요(새로 뚫어야)', 'warn']])],
+      spots: function () { return { bodies: [[160, 698.5, 68.2, 21.5]], dot: [194, 672] }; },
+      src: 'data-seed.js inv-ac-stand 메모(벽걸이 68.2×21.5×29.9) · 구멍 위치는 평면도에 없어요' }
+  ];
+  // 표시 순서는 번호순
+  POINTS.push(
+    { n: 10, group: '작은방 두 개', kind: 'fit', title: '캐비닛장 3개', where: function () { return '옷 방 = ' + roomName(closetRoom()) + (state.kid ? '' : ' (제안)'); },
+      measure: '캐비닛장을 나란히 둘 벽(문·창 없는 긴 벽, 약 3m)을 재고, 그 벽에서 맞은편 벽까지(방 깊이)를 재세요. 위에 창이 있으면 창틀 높이도요.',
+      sizes: [['캐비닛장 ① 2단 행어형 × 2', '76 × 50 × 200cm (철제 조립식)'], ['캐비닛장 ② 3단 수납형 × 1', '76 × 50 × 169cm'],
+              ['쓰임 공간', '앞 70 (여닫이 문 40 + 서서 꺼내기 30)'], ['벽 길이', '몸체 76 × 3 = 228 · 여유 포함 10 × 4 더해 268'],
+              ['방 깊이', '몸체 50 + 문 앞 70 = 120 · 여유 포함 130']],
+      fields: [L('wall', '캐비닛장 놓을 벽 길이', 228, 268, { hint: '문이 쓸고 가는 자리·창 앞은 빼고' }), L('depth', '그 벽 → 맞은편 벽 (방 깊이)', 120, 130)],
+      spots: function () { var c = ROOMLAYOUT.closet[closetRoom()]; return { bodies: c.cabs, uses: c.cabUse, lines: [c.cabLine], dot: c.cabDot }; },
+      src: 'data-seed.js inv-cabinet(76×50×200 ×2)·inv-cabinet-2(76×50×169), 앞 70 · 공간 가이드(268cm)' },
+
+    { n: 11, kind: 'fit', title: '책상 + 알렉스 서랍', where: function () { return '옷 방 = ' + roomName(closetRoom()) + (state.kid ? '' : ' (제안)'); },
+      measure: '책상과 서랍을 나란히 둘 벽(방문이 쓸고 가는 자리는 빼고)을 재세요. 캐비닛장과 같은 방이면 캐비닛장 벽 ↔ 책상 벽 사이(방 깊이)도 재세요. 책상 멀티탭(줄 2m)이 닿을 콘센트를 보세요.',
+      sizes: [['데스커 책상', '120 × 60 × 72cm · 앞 75(의자 빼고 앉기)'], ['알렉스 서랍', '36 × 58 × 70cm · 앞 60'],
+              ['벽 길이', '몸체 120 + 36 = 156 · 여유 포함 10 × 3 더해 186'],
+              ['캐비닛장과 마주 보면', '몸체 50 + 60 = 110 · 여유 포함 10 + 50 + 문 70 + 의자 75 + 60 + 10 = 275']],
+      fields: [L('wall', '책상 놓을 벽 길이', 156, 186), L('gap', '캐비닛장 벽 ↔ 책상 벽 (같은 방이면)', 110, 275,
+               { warnMsg: '캐비닛장 문 앞과 의자 자리가 겹쳐요' }), C('outlet', '책상 옆 콘센트 (멀티탭 2m 닿나요)', [['닿아요', 'good'], ['안 닿아요', 'warn']])],
+      derive: function (v) { var g = num(v.gap); if (g == null || g >= 275) return [];
+        return [{ t: '3.0 × 2.4m 방이면 마주 보는 벽 사이가 240cm라 약 ' + fmt(275 - g) + 'cm 겹쳐요. 의자를 책상 밑에 넣어 두면 캐비닛장 문을 열 수 있어요. 책상을 창 쪽 짧은 벽(약 240cm)에 두는 안도 재 보세요(창 아래 서랍은 아이가 딛고 올라설 수 있어 창 잠금장치).', lv: 'warn' }]; },
+      spots: function () { var c = ROOMLAYOUT.closet[closetRoom()]; return { bodies: [c.alex, c.desk], uses: c.deskUse, lines: [c.deskLine, c.gapLine], dot: c.deskDot }; },
+      src: 'data-seed.js inv-desk-adult(120×60×72, 앞 75)·inv-desk-drawer(36×58×70, 앞 60) · 3.0×2.4m 방 겹침 계산' },
+
+    { n: 12, kind: 'fit', title: '책장 4개', where: function () { return '아이 방 = ' + roomName(kidRoom()) + (state.kid ? '' : ' (제안)'); },
+      measure: '책장을 둘 벽을 두세 군데 재세요(문이 쓸고 가는 자리·창 앞·간이옷장 자리는 빼고). 한 벽(약 3m)에 3개, 다른 벽에 1개가 들어가는지 봐요. 창 앞에 둘 수밖에 없으면 창틀 높이를 재세요.',
+      sizes: [['책장 5단 (한샘 샘) × 1', '80 × 28.5 × 195.9cm'], ['어린이책장 3단 × 3', '80 × 28.5 × 118.2cm'],
+              ['쓰임 공간', '앞 60 · 키 큰 책장은 벽에 고정'], ['벽 길이', '몸체 80 × 4 = 320 (벽 두 개에 나눠서) · 여유 포함 10cm씩 띄워 한 벽 3개 = 280']],
+      fields: [L('w1', '책장 벽 ① 길이'), L('w2', '책장 벽 ② 길이'), L('w3', '책장 벽 ③ 길이 (있으면)'),
+               L('sill', '창틀 높이 (창 앞에 둘 때)', null, 118.2, { warnMsg: '어린이책장(118.2)이 창을 가려요 — 창 앞은 피하세요' })],
+      custom: function (v) {
+        var ws = ['w1', 'w2', 'w3'].map(function (k) { return num(v[k]); }).filter(function (n) { return n != null && n > 0; });
+        if (!ws.length) return null;
+        var need = 0, body = 0;
+        ws.forEach(function (x) { need += Math.max(0, Math.floor((x - 10) / 90)); body += Math.floor(x / 80); });
+        if (need >= 4) return { lv: 'good', t: '들어가요 — 10cm씩 띄워 책장 ' + need + '개까지 놓을 수 있어요 (4개 필요)' };
+        if (body >= 4) return { lv: 'warn', t: '빠듯해요 — 붙여 놓으면 4개가 들어가지만 10cm씩 띄우면 ' + need + '개예요' };
+        return { lv: 'bad', t: '안 들어가요 — 이 벽들엔 ' + body + '개까지만 들어가요 (4개 필요). 다른 벽도 재 보세요' };
+      },
+      spots: function () { var k = ROOMLAYOUT.kid[kidRoom()]; return { bodies: k.shelves, uses: k.shelfUse, lines: k.shelfLines, dot: k.shelfDot }; },
+      src: 'data-seed.js inv-bookshelf(80×28.5×195.9)·inv-bookshelf-kid(80×28.5×118.2 ×3), 앞 60' },
+
+    { n: 13, kind: 'fit', title: '간이옷장 (스탠드 행거)', where: function () { return '아이 방 = ' + roomName(kidRoom()) + (state.kid ? '' : ' (제안)'); },
+      measure: '간이옷장을 둘 벽 길이와, 그 벽에서 맞은편 가구·벽까지를 재세요. 옷을 걸면 앞뒤로 10~20cm 더 나와요.',
+      sizes: [['간이옷장 (마르 스탠드 행거)', '82 × 40 × 147.6cm'], ['쓰임 공간', '앞 60'], ['벽 길이', '몸체 82 · 여유 포함 102'], ['앞 빈 곳', '몸체 40 · 여유 포함 10 + 40 + 60 = 110']],
+      fields: [L('wall', '놓을 벽 길이', 82, 102), L('front', '그 벽 → 맞은편 가구·벽', 40, 110)],
+      spots: function () { var k = ROOMLAYOUT.kid[kidRoom()]; return { bodies: [k.hanger], uses: [k.hangerUse], lines: [k.hangerLine], dot: k.hangerDot }; },
+      src: 'data-seed.js inv-hanger(82×40×147.6, 앞 60)' },
+
+    { n: 14, group: '거실 · 주방', kind: 'fit', title: '소파', where: '거실 위쪽 벽 (복도 쪽 벽, 제안)',
+      measure: '소파를 둘 벽(거실 위쪽 벽 — 창 쪽 모서리부터 현관 벽까지)을 재고, 그 벽에서 맞은편(안방 쪽 벽)까지 거실 깊이를 재세요.',
+      sizes: [['3인 소파 (니토리 코우테이4)', '173 × 85 × 94cm · 앞 60'], ['벽 길이', '몸체 173 · 여유 포함 위아래 10 → 193'], ['앞 빈 곳', '몸체 85 · 여유 포함 10 + 85 + 60 = 155']],
+      fields: [L('wall', '소파 놓을 벽 길이', 173, 193), L('depth', '그 벽 → 맞은편 벽 (거실 깊이)', 85, 155)],
+      spots: function () { return { bodies: [[230, 10, 173, 85]], uses: [[230, 95, 173, 60]], lines: [[150, 6, 500, 6], [445, 0, 445, 360]], dot: [316, 52] }; },
+      src: 'data-seed.js inv-sofa(173×85×94, 앞 60) · 공간 가이드(소파 벽 193 이상)' },
+
+    { n: 15, kind: 'fit', title: '장난감장', where: '거실 아래쪽 벽 창 쪽 끝 (제안 — 아이 방도 돼요)',
+      measure: '장난감장을 둘 벽 길이와, 앞에 서랍을 뺄 빈 곳(그 벽 → 맞은편 가구)을 재세요.',
+      sizes: [['장난감장 (마카롱 2x5 슬림)', '66.5 × 39.5 × 118.1cm · 앞 50(박스 서랍)'], ['벽 길이', '몸체 66.5 · 여유 포함 86.5'], ['앞 빈 곳', '몸체 39.5 · 여유 포함 10 + 39.5 + 50 = 99.5']],
+      fields: [L('wall', '놓을 벽 길이', 66.5, 86.5), L('front', '그 벽 → 맞은편 가구·벽', 39.5, 99.5)],
+      spots: function () { return { bodies: [[170, 310.5, 66.5, 39.5]], uses: [[170, 260.5, 66.5, 50]], lines: [[150, 354, 395, 354]], dot: [203, 330] }; },
+      src: 'data-seed.js inv-toy-storage(66.5×39.5×118.1, 앞 50)' },
+
+    { n: 16, kind: 'fit', title: '식탁 + 의자 4개', where: '주방·식당 (7.21㎡, 제안)',
+      measure: '식탁을 둘 바닥의 가로·세로를 재세요. 조리대 앞 통로, 냉장고 문 앞, 욕실·방문 앞을 막지 않는 곳으로요. 의자를 빼고 앉을 자리까지 포함해요.',
+      sizes: [['식탁 (N컬렉션 T-01)', '135 × 80 × 70cm'], ['의자 × 4 (팔걸이)', '51 × 50.5 × 71cm · 뒤로 빼기 30'],
+              ['식탁 긴 쪽', '몸체 135 · 여유 포함 155'], ['의자 쪽', '몸체 80 + 의자 50.5 × 2 = 181 · 여유 포함 80 + 75 × 2 = 230']],
+      fields: [L('W', '식탁 긴 쪽 방향 길이', 135, 155), L('D', '의자 쪽 방향 길이', 181, 230)],
+      spots: function () { return { area: [[600, 318, 230, 155]], bodies: [[675, 328, 80, 135], [624.5, 338, 50.5, 51], [624.5, 400, 50.5, 51], [755, 338, 50.5, 51], [755, 400, 50.5, 51]], dot: [715, 395] }; },
+      src: 'data-seed.js inv-dining(135×80×70)·inv-dining-chair(51×50.5, 뒤 30) · 의자 빼고 앉기 75' },
+
+    { n: 17, kind: 'fit', title: '에어컨 스탠드', where: '거실 — 배관 구멍 옆 구석 (창 쪽 추정)',
+      measure: '거실 에어컨 배관 구멍을 찾아 바닥에서 높이와 구석에서 거리를 재세요. 스탠드를 둘 구석 폭과, 바람이 나갈 앞쪽 빈 곳(큰 가구 없이)을 재세요. 옆 콘센트도 보세요.',
+      sizes: [['스탠드 실내기 (2in1)', '36 × 24.6 × 184.7cm'], ['쓰임 공간', '바람 앞 150(큰 가구 없이) · 옆 10'], ['구석 폭', '몸체 36 · 여유 포함 56']],
+      fields: [L('corner', '스탠드 놓을 구석 폭', 36, 56), L('front', '스탠드 앞 빈 곳 (바람)', null, 150, { warnMsg: '바람 앞에 큰 가구가 걸려요' }),
+               L('holeH', '배관 구멍 높이 (바닥에서)'), L('holeX', '배관 구멍 ↔ 스탠드 자리'), C('outlet', '스탠드 옆 콘센트', YESNO_W)],
+      spots: function () { return { bodies: [[160, 10, 36, 24.6]], uses: [[160, 34.6, 36, 150]], dot: [178, 92] }; },
+      src: 'data-seed.js inv-ac-stand(36×24.6×184.7, 바람 앞 150·옆 10)' },
+
+    { n: 18, kind: 'fit', title: '실외기 자리', where: '발코니 (후보: 왼쪽 발코니 위쪽 끝)',
+      measure: '실외기를 둘 곳(발코니 바닥·실외기 칸·바깥 앵글)을 찾아 폭·깊이·높이를 재고, 바람 나갈 창이 열리는지 보세요. 사진을 설치 기사에게 보내요.',
+      sizes: [['실외기', '88 × 31 × 63.8cm (배관커버·가드·다리를 달면 98.2 × 36.7 × 63.8)'], ['자리', '몸체 88 × 31 · 여유 포함 98.2 × 36.7 · 칸이면 높이 63.8 → 73.8']],
+      fields: [C('where', '실외기 둘 곳', [['발코니 바닥', 'good'], ['실외기 칸', 'good'], ['바깥 앵글', 'warn'], ['못 찾았어요', 'warn']]),
+               L('w', '자리 폭', 88, 98.2), L('d', '자리 깊이', 31, 36.7), L('h', '칸 높이 (칸이면)', 63.8, 73.8), C('vent', '바람 나갈 창·환기창', YESNO_W)],
+      spots: function () { return { bodies: [[26, 10, 98.2, 36.7]], dot: [75, 95] }; },
+      src: 'data-seed.js inv-ac-stand 메모(실외기 88×31×63.8 / 98.2×36.7×63.8)' },
+
+    { n: 19, group: '방마다 같이', kind: 'fit', title: '천장 높이', where: '방마다 (몰딩 아래까지)',
+      measure: '방마다 바닥에서 천장(몰딩 아래)까지 재세요. 줄자를 천장에 대고 아래로 내리면 혼자도 잴 수 있어요.',
+      sizes: [['캐비닛장 ① (옷 방)', '200 · 위에 간이박스(28)까지 228'], ['책장 5단 (아이 방)', '195.9 · 눕혀 조립한 뒤 세우는 대각선 약 198'],
+              ['체스트랙 (안방)', '175 · 위에 간이박스까지 203'], ['스탠드 에어컨 (거실)', '184.7']],
+      fields: [L('closet', '옷 방 천장', 200, 228), L('kid', '아이 방 천장', 198, 206), L('master', '안방 천장', 175, 203), L('living', '거실 천장', 184.7, 194.7)],
+      spots: function () { return { dot: [390, 255] }; },
+      src: 'data-seed.js 각 가구 높이 · 공간 가이드(천장 약 230 추정)' },
+
+    { n: 20, kind: 'info', title: '창 크기 (커튼)', where: '거실 · 안방 · 작은방 두 개',
+      measure: '새 커튼은 사지 않고 지금 커튼을 가져가요. 방마다 창 폭(창틀 바깥 끝까지)과 높이(커튼 레일 → 바닥, 짧은 커튼이면 창틀 아래까지)를 재세요. 커튼 레일·박스가 있는지 사진을 찍으세요.',
+      sizes: [['커튼 폭', '보통 창 폭 + 양옆 10~20cm (추정)'], ['커튼 길이', '레일 → 바닥 − 1~2cm (추정)']],
+      fields: [L('lw', '거실 창 폭'), L('lh', '거실 레일 → 바닥'), L('mw', '안방 창 폭'), L('mh', '안방 레일 → 바닥'),
+               L('uw', '작은방(위) 창 폭'), L('uh', '작은방(위) 레일 → 바닥'), L('dw', '작은방(아래) 창 폭'), L('dh', '작은방(아래) 레일 → 바닥')],
+      spots: function () { return { lines: [[156, 20, 156, 340], [156, 395, 156, 595], [954, 40, 954, 200], [954, 520, 954, 680]], dot: [75, 470] }; },
+      src: '공간 가이드 \'커튼\'(지금 커튼을 가져가요)' },
+
+    { n: 21, kind: 'info', title: '신발장', where: '현관 (위치 확인)',
+      measure: '현관 신발장 문을 열고 칸 수, 한 칸 높이, 깊이, 전체 폭을 재세요. 신발장이 없거나 작으면 사진을 찍어 두세요.',
+      sizes: [['참고', '신발 수납 계획에 써요 — 정해진 기준은 없어요']],
+      fields: [N('rows', '칸 수'), L('rowH', '한 칸 높이'), L('depth', '깊이'), L('width', '전체 폭')],
+      spots: function () { return { bodies: [[620, 5, 40, 120]], dot: [640, 72] }; },
+      src: '공간 가이드 \'현관\'' }
+  );
+  POINTS.sort(function (a, b) { return a.n - b.n; });
+  var BYN = {}; POINTS.forEach(function (p) { BYN[p.n] = p; });
+  var TOTAL = POINTS.length;
+
+  /* ---------- 상태 ---------- */
+  var state = load();
+  function load() {
+    try { var s = JSON.parse(localStorage.getItem(KEY) || 'null'); if (s && typeof s === 'object' && s.v && typeof s.v === 'object') return { v: s.v, kid: typeof s.kid === 'string' ? s.kid : '' }; } catch (e) {}
+    return { v: {}, kid: '' };
+  }
+  function save() { try { localStorage.setItem(KEY, JSON.stringify({ v: state.v, kid: state.kid, t: Date.now() })); } catch (e) {} }
+  function vals(n) { return state.v[n] || (state.v[n] = {}); }
+  function num(raw) { if (raw == null) return null; var s = String(raw).replace(/,/g, '.').replace(/[^0-9.\-]/g, ''); if (!s) return null; var n = parseFloat(s); return isFinite(n) ? n : null; }
+  function fmt(n) { var r = Math.round(n * 10) / 10; return String(r); }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function txt(x) { return typeof x === 'function' ? x() : x; }
+  var RANK = { info: 0, good: 1, warn: 2, bad: 3 };
+
+  function fieldEval(f, raw) {
+    if (raw == null || String(raw).trim() === '') return null;
+    if (f.type === 'text') return { lv: 'info', msg: '' };
+    if (f.type === 'choice') { var o = (f.opts || []).filter(function (x) { return x[0] === raw; })[0]; return o ? { lv: o[1] || 'info', msg: '' } : null; }
+    var n = num(raw), u = f.unit || 'cm';
+    if (n == null) return { lv: 'info', msg: '숫자로 넣어 주세요', bad: true };
+    if (f.fit == null && f.need == null) return { lv: 'info', n: n, msg: '' };
+    if (f.type === 'num') {
+      if (f.fit != null && n < f.fit) return { lv: 'bad', n: n, msg: '모자라요 — ' + f.fit + u + ' 이상 필요해요' };
+      if (f.need != null && n < f.need) return { lv: 'warn', n: n, msg: '빠듯해요 — ' + f.need + u + '면 좋아요' };
+      return { lv: 'good', n: n, msg: '충분해요' };
+    }
+    if (f.fit != null && n < f.fit) return { lv: 'bad', n: n, msg: '안 들어가요 — 몸체 ' + fmt(f.fit) + u + '보다 ' + fmt(f.fit - n) + u + ' 작아요' + (f.badMsg ? '. ' + f.badMsg : '') };
+    if (f.need != null && n < f.need) return { lv: 'warn', n: n, msg: '빠듯해요 — ' + (f.fit != null ? '여유 포함 ' : '기준 ') + fmt(f.need) + u + '에 ' + fmt(f.need - n) + u + ' 모자라요' + (f.warnMsg ? '. ' + f.warnMsg : '') };
+    return { lv: 'good', n: n, msg: '들어가요' + (f.need != null ? ' — 여유 포함보다 ' + fmt(n - f.need) + u + ' 남아요' : '') };
+  }
+  function pointEval(p) {
+    var v = state.v[p.n] || {}, filled = false, worst = null, fe = {}, extra = [];
+    p.fields.forEach(function (f) {
+      var e = fieldEval(f, v[f.id]); fe[f.id] = e;
+      if (e && !e.bad) { filled = true; if (worst == null || RANK[e.lv] > RANK[worst]) worst = e.lv; }
+    });
+    if (p.custom) { var c = p.custom(v); if (c) { extra.push(c); if (worst == null || RANK[c.lv] > RANK[worst]) worst = c.lv; } }
+    if (p.derive) p.derive(v).forEach(function (d) { extra.push(d); if (d.lv && d.lv !== 'info' && (worst == null || RANK[d.lv] > RANK[worst])) worst = d.lv; });
+    if (!filled && v.memo && String(v.memo).trim()) filled = true;
+    return { filled: filled, st: filled ? (worst || 'info') : 'todo', fe: fe, extra: extra };
+  }
+  function chipText(p, st) {
+    if (st === 'todo') return '안 쟀어요';
+    if (st === 'info') return '쟀어요';
+    if (p.kind === 'fit') return { good: '들어가요', warn: '빠듯해요', bad: '안 들어가요' }[st];
+    return { good: '괜찮아요', warn: '확인 필요', bad: '문제 있어요' }[st];
+  }
+  function valSummary(p, max) {
+    var v = state.v[p.n] || {}, out = [];
+    p.fields.forEach(function (f) {
+      var r = v[f.id]; if (r == null || String(r).trim() === '') return;
+      if (f.type === 'len' || f.type === 'num') { var n = num(r); if (n != null) out.push(fmt(n)); }
+    });
+    if (max && out.length > max) return out.slice(0, max).join('·') + '…';
+    return out.join('·');
+  }
+
+  /* ---------- 도면 그리기 ---------- */
+  var svg = document.getElementById('plan');
+  var portrait = true;
+  var mq = window.matchMedia ? window.matchMedia('(min-width: 700px)') : null;
+  function setMode() { portrait = !(mq && mq.matches); }
+  function P(x, y) { return portrait ? [PLAN.H - y, x] : [x, y]; }
+  function R(r) { var a = P(r[0], r[1]), b = P(r[0] + r[2], r[1] + r[3]); var x = Math.min(a[0], b[0]), y = Math.min(a[1], b[1]); return [x, y, Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1])]; }
+  function n1(v) { return Math.round(v * 10) / 10; }
+  function rectEl(r, cls) { var q = R(r); return '<rect class="' + cls + '" x="' + n1(q[0]) + '" y="' + n1(q[1]) + '" width="' + n1(q[2]) + '" height="' + n1(q[3]) + '"/>'; }
+  function lineEl(x1, y1, x2, y2, cls) { var a = P(x1, y1), b = P(x2, y2); return '<line class="' + cls + '" x1="' + n1(a[0]) + '" y1="' + n1(a[1]) + '" x2="' + n1(b[0]) + '" y2="' + n1(b[1]) + '"/>'; }
+  function textEl(x, y, s, cls) { var a = P(x, y); return '<text class="' + cls + '" x="' + n1(a[0]) + '" y="' + n1(a[1]) + '">' + esc(s) + '</text>'; }
+  function polyEl(pts, cls) { return '<polygon class="' + cls + '" points="' + pts.map(function (p) { var a = P(p[0], p[1]); return n1(a[0]) + ',' + n1(a[1]); }).join(' ') + '"/>'; }
+  function dim(l) {
+    var a = P(l[0], l[1]), b = P(l[2], l[3]), dx = b[0] - a[0], dy = b[1] - a[1], len = Math.hypot(dx, dy) || 1, nx = -dy / len * 13, ny = dx / len * 13;
+    return '<line class="dl" x1="' + n1(a[0]) + '" y1="' + n1(a[1]) + '" x2="' + n1(b[0]) + '" y2="' + n1(b[1]) + '"/>' +
+      '<line class="dt" x1="' + n1(a[0] - nx) + '" y1="' + n1(a[1] - ny) + '" x2="' + n1(a[0] + nx) + '" y2="' + n1(a[1] + ny) + '"/>' +
+      '<line class="dt" x1="' + n1(b[0] - nx) + '" y1="' + n1(b[1] - ny) + '" x2="' + n1(b[0] + nx) + '" y2="' + n1(b[1] + ny) + '"/>';
+  }
+  function doorEl(d) {
+    var a = d.o === 'h' ? [d.x, d.y] : [d.x, d.y], b = d.o === 'h' ? [d.x + d.w, d.y] : [d.x, d.y + d.w];
+    var H = d.hinge === 'start' ? a : b, O = d.hinge === 'start' ? b : a, Lf;
+    if (d.o === 'h') Lf = [H[0], H[1] + (d.swing === 'down' ? d.w : -d.w)]; else Lf = [H[0] + (d.swing === 'right' ? d.w : -d.w), H[1]];
+    var h = P(H[0], H[1]), o = P(O[0], O[1]), l = P(Lf[0], Lf[1]);
+    var cross = (l[0] - h[0]) * (o[1] - h[1]) - (l[1] - h[1]) * (o[0] - h[0]);
+    return lineEl(a[0], a[1], b[0], b[1], 'gap') +
+      '<path class="swing" d="M' + n1(l[0]) + ' ' + n1(l[1]) + ' A' + d.w + ' ' + d.w + ' 0 0 ' + (cross > 0 ? 1 : 0) + ' ' + n1(o[0]) + ' ' + n1(o[1]) + '"/>' +
+      lineEl(H[0], H[1], Lf[0], Lf[1], 'leaf');
+  }
+  function staticPlan() {
+    var s = '';
+    s += rectEl([0, -60, PLAN.W, 54], 'corr');
+    PLAN.rooms.forEach(function (r) { s += r.p ? polyEl(r.p, 'rm k-' + r.kind) : rectEl(r.r, 'rm k-' + r.kind); });
+    // 현관 타일 무늬
+    for (var tx = 0; tx < 4; tx++) for (var ty = 0; ty < 3; ty++) if ((tx + ty) % 2 === 0) s += rectEl([500 + 6 + tx * 38, 6 + ty * 40, 34, 36], 'tile');
+    s += polyEl([[0, 0], [PLAN.W, 0], [PLAN.W, PLAN.H], [0, PLAN.H]], 'outer');
+    PLAN.fixtures.forEach(function (f) { s += rectEl(f.r, f.c); });
+    PLAN.burners.forEach(function (b) { var c = P(b[0], b[1]); s += '<circle class="fx-d" cx="' + n1(c[0]) + '" cy="' + n1(c[1]) + '" r="11"/>'; });
+    PLAN.openings.forEach(function (o) { var b = o.o === 'h' ? [o.x + o.w, o.y] : [o.x, o.y + o.w]; s += lineEl(o.x, o.y, b[0], b[1], 'gap') + lineEl(o.x, o.y, b[0], b[1], 'opn'); });
+    PLAN.windows.forEach(function (w) { var b = w.o === 'h' ? [w.x + w.w, w.y] : [w.x, w.y + w.w]; s += lineEl(w.x, w.y, b[0], b[1], 'winbg') + lineEl(w.x, w.y, b[0], b[1], 'win'); });
+    PLAN.doors.forEach(function (d) { s += doorEl(d); });
+    return s;
+  }
+  function labelsLayer() {
+    var s = '<g aria-hidden="true">';
+    var c = P(PLAN.W / 2 - 200, -33);
+    s += '<text class="corr-lab" x="' + n1(c[0]) + '" y="' + n1(c[1]) + '"' + (portrait ? ' transform="rotate(90 ' + n1(c[0]) + ' ' + n1(c[1]) + ')"' : '') + '>복도·계단·엘리베이터</text>';
+    PLAN.rooms.forEach(function (r) {
+      if (!r.name || !r.lab) return;
+      var a = P(r.lab[0], r.lab[1]);
+      s += '<text class="lab' + (r.small ? ' s' : '') + '" x="' + n1(a[0]) + '" y="' + n1(a[1]) + '">' + esc(r.name) + '</text>';
+      if (r.role) {
+        var isKid = r.role === kidRoom();
+        s += '<text class="lab role" x="' + n1(a[0]) + '" y="' + n1(a[1] + 26) + '">' + (isKid ? '아이 방' : '옷 방') + (state.kid ? '' : ' (제안)') + '</text>';
+      }
+    });
+    return s + '</g>';
+  }
+  function baseBox() {
+    var box = [-20, -70, PLAN.W + 20, PLAN.H + 20], a = P(box[0], box[1]), b = P(box[2], box[3]);
+    return [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1])];
+  }
+  function scaleBar(vb) { // 화면 기준으로 도면 아래 왼쪽에 1m 막대 (회전해도 길이는 같아요)
+    var x = vb[0] + 20, y = vb[1] + vb[3] + 25;
+    return '<g aria-hidden="true"><line class="scale" x1="' + x + '" y1="' + y + '" x2="' + (x + 100) + '" y2="' + y + '"/>' +
+      '<line class="scale" x1="' + x + '" y1="' + (y - 10) + '" x2="' + x + '" y2="' + (y + 10) + '"/><line class="scale" x1="' + (x + 100) + '" y1="' + (y - 10) + '" x2="' + (x + 100) + '" y2="' + (y + 10) + '"/>' +
+      '<text class="scale-lab" x="' + (x + 112) + '" y="' + (y + 7) + '">1m</text></g>';
+  }
+  var selected = 0;
+  function render() {
+    setMode();
+    var vb = baseBox();
+    svg.setAttribute('viewBox', [n1(vb[0]), n1(vb[1]), n1(vb[2]), n1(vb[3] + 50)].join(' '));
+    var shapes = '', dots = '', selS = '', selD = '';
+    POINTS.forEach(function (p) {
+      var ev = pointEval(p), sp = p.spots(), isSel = selected === p.n, cls = 'mp st-' + ev.st + (isSel ? ' sel' : '');
+      var g = '';
+      (sp.area || []).forEach(function (r) { g += rectEl(r, 'area'); });
+      (sp.uses || []).forEach(function (r) { g += rectEl(r, 'use'); });
+      (sp.bodies || []).forEach(function (r) { g += rectEl(r, 'body'); });
+      if (isSel) { // 잴 선·지나갈 길은 고른 곳만 (도면이 복잡해지지 않게)
+        (sp.lines || []).forEach(function (l) { g += dim(l); });
+        if (sp.path) g += '<polyline class="path" points="' + sp.path.map(function (q) { var a = P(q[0], q[1]); return n1(a[0]) + ',' + n1(a[1]); }).join(' ') + '"/>';
+      }
+      var gs = '<g class="' + cls + '" data-p="' + p.n + '">' + g + '</g>';
+      var d = P(sp.dot[0], sp.dot[1]), vs = ev.filled ? valSummary(p, 2) : '';
+      var dg = '<g class="' + cls + '" data-p="' + p.n + '" tabindex="0" role="button" aria-label="' + p.n + '번 ' + esc(p.title) + ' — ' + chipText(p, ev.st) + '">' +
+        '<circle class="hit" cx="' + n1(d[0]) + '" cy="' + n1(d[1]) + '" r="60"/>' +
+        '<circle class="dot" cx="' + n1(d[0]) + '" cy="' + n1(d[1]) + '" r="28"/>' +
+        '<text class="num" x="' + n1(d[0]) + '" y="' + n1(d[1]) + '">' + p.n + '</text>' +
+        (vs ? '<text class="val" x="' + n1(d[0]) + '" y="' + n1(d[1] + 43) + '">' + esc(vs) + '</text>' : '') + '</g>';
+      if (isSel) { selS = gs; selD = dg; } else { shapes += gs; dots += dg; }
+    });
+    svg.innerHTML = staticPlan() + '<g>' + shapes + selS + '</g>' + labelsLayer() + '<g>' + dots + selD + '</g>' + scaleBar(vb);
+    svg.classList.toggle('has-sel', !!selected);
+    var pn = document.getElementById('planNote');
+    if (pn) pn.textContent = portrait ? '휴대폰에서는 도면을 오른쪽으로 돌려 보여 드려요 — 복도·현관이 오른쪽, 왼쪽 발코니가 위예요. 가로로 돌리면 평면도와 같은 방향이 돼요.' : '평면도와 같은 방향이에요 — 위쪽이 복도·현관이에요.';
+  }
+
+  /* ---------- 목록·진행 ---------- */
+  var listEl = document.getElementById('list');
+  function renderList() {
+    var html = '', measured = 0, cnt = { good: 0, warn: 0, bad: 0, info: 0 };
+    POINTS.forEach(function (p) {
+      var ev = pointEval(p);
+      if (ev.filled) { measured++; cnt[ev.st] = (cnt[ev.st] || 0) + 1; }
+      if (p.group) html += '<li class="group-h" aria-hidden="true">' + esc(p.group) + '</li>';
+      var vs = ev.filled ? valSummary(p, 4) : '';
+      html += '<li><button type="button" class="row st-' + ev.st + '" data-p="' + p.n + '">' +
+        '<span class="no">' + p.n + '</span>' +
+        '<span><span class="t">' + esc(p.title) + '</span><span class="s">' + esc(txt(p.where)) + '</span>' +
+        (vs ? '<span class="v">' + esc(vs) + ' cm</span>' : '') + '</span>' +
+        '<span class="chip c-' + ev.st + '">' + chipText(p, ev.st) + '</span></button></li>';
+    });
+    listEl.innerHTML = html;
+    document.getElementById('progText').textContent = TOTAL + '곳 중 ' + measured + '곳 쟀어요';
+    document.getElementById('progBar').style.width = Math.round(measured / TOTAL * 100) + '%';
+    var c = '';
+    if (cnt.good) c += '<span class="chip c-good">들어가요·괜찮아요 ' + cnt.good + '</span>';
+    if (cnt.warn) c += '<span class="chip c-warn">빠듯해요·확인 필요 ' + cnt.warn + '</span>';
+    if (cnt.bad) c += '<span class="chip c-bad">안 들어가요·문제 ' + cnt.bad + '</span>';
+    if (cnt.info) c += '<span class="chip c-info">쟀어요 ' + cnt.info + '</span>';
+    if (!c) c = '<span class="chip c-todo">아직 잰 곳이 없어요</span>';
+    document.getElementById('counts').innerHTML = c;
+    var seg = document.querySelectorAll('#kidSeg button');
+    for (var i = 0; i < seg.length; i++) seg[i].setAttribute('aria-pressed', String(seg[i].getAttribute('data-kid') === state.kid));
+    document.getElementById('kidNote').textContent = state.kid
+      ? '아이 방 = ' + roomName(kidRoom()) + ', 옷 방 = ' + roomName(closetRoom()) + '로 정했어요.'
+      : '아직 안 정했어요 — 도면은 아이 방 = 작은방(위), 옷 방 = 작은방(아래)로 제안해 그렸어요.';
+  }
+  function refresh() { render(); renderList(); }
+
+  /* ---------- 패널 ---------- */
+  var sheet = document.getElementById('sheet'), back = document.getElementById('sheetBack'), lastFocus = null;
+  function fieldHtml(p, f) {
+    var v = vals(p.n)[f.id], e = fieldEval(f, v), lv = e ? e.lv : '', id = 'f' + p.n + '-' + f.id;
+    var range = '';
+    if (f.type === 'len' || f.type === 'num') {
+      var u = f.unit || 'cm', parts = [];
+      if (f.fit != null) parts.push('몸체 ' + fmt(f.fit) + u);
+      if (f.need != null) parts.push((f.fit != null ? '여유 포함 ' : '기준 ') + fmt(f.need) + u);
+      range = parts.join(' · ');
+    }
+    var hint = [range, f.hint].filter(Boolean).join(' — ');
+    var h = '<div class="fld' + (lv && lv !== 'info' ? ' lv-' + lv : '') + '" data-f="' + f.id + '">';
+    if (f.type === 'choice') {
+      h += '<span class="lb" id="' + id + '-l">' + esc(f.label) + '</span><div class="ch" role="group" aria-labelledby="' + id + '-l">';
+      f.opts.forEach(function (o) { h += '<button type="button" data-f="' + f.id + '" data-v="' + esc(o[0]) + '" aria-pressed="' + (v === o[0]) + '">' + esc(o[0]) + '</button>'; });
+      h += '</div>';
+    } else if (f.type === 'text') {
+      h += '<label for="' + id + '">' + esc(f.label) + '</label><input type="text" id="' + id + '" data-f="' + f.id + '" value="' + esc(v || '') + '" placeholder="' + esc(f.ph) + '" autocomplete="off">';
+    } else {
+      h += '<label for="' + id + '">' + esc(f.label) + (hint ? '<span class="hint">' + esc(hint) + '</span>' : '') + '</label>' +
+        '<div class="inrow"><input type="text" inputmode="decimal" id="' + id + '" data-f="' + f.id + '" value="' + esc(v || '') + '" placeholder="' + (f.type === 'num' ? '예: 2' : '예: 95') + '" autocomplete="off" enterkeyhint="next">' +
+        '<span class="u">' + (f.unit || 'cm') + '</span></div>';
+    }
+    h += '<p class="msg' + (e && e.msg ? ' lv-' + (e.bad ? 'bad' : e.lv) : '') + '" data-msg="' + f.id + '"' + (e && e.msg ? '' : ' hidden') + ' aria-live="polite">' + (e ? esc(e.msg) : '') + '</p>';
+    return h + '</div>';
+  }
+  function verdictHtml(p) {
+    var ev = pointEval(p), h = '<ul class="derive" id="shDerive">';
+    ev.extra.forEach(function (d) { h += '<li class="lv-' + (d.lv || 'info') + '">' + esc(d.t) + '</li>'; });
+    h += '</ul>';
+    var map = { todo: 'c-todo', info: 'c-info', good: 'c-good', warn: 'c-warn', bad: 'c-bad' };
+    h += '<p class="verdict ' + map[ev.st] + '" id="shVerdict">' + (ev.st === 'todo' ? '아직 안 쟀어요' : '이 자리: ' + chipText(p, ev.st)) + '</p>';
+    return h;
+  }
+  function openPoint(n, fromHash) {
+    var p = BYN[n]; if (!p) return;
+    if (!sheet.hidden && selected === n) return;
+    if (sheet.hidden) lastFocus = document.activeElement;
+    selected = n;
+    var idx = POINTS.indexOf(p), prev = POINTS[idx - 1], next = POINTS[idx + 1];
+    var h = '<div class="sh-head"><span class="no" id="shNo">' + p.n + '</span><h2 id="shTitle" tabindex="-1">' + esc(p.title) +
+      '<span class="where">' + esc(txt(p.where)) + '</span></h2><button type="button" class="x" id="shClose" aria-label="닫기">×</button></div>';
+    h += '<p class="sec-t">어디를, 어떻게 재나요</p><p>' + esc(p.measure) + '</p>';
+    h += '<p class="sec-t">우리 가구 크기와 필요한 공간</p><table class="sizes"><tbody>' +
+      p.sizes.map(function (r) { return '<tr><th scope="row">' + esc(r[0]) + '</th><td>' + esc(r[1]) + '</td></tr>'; }).join('') + '</tbody></table>';
+    if (p.link) h += '<p class="small"><a href="' + p.link.href + '">' + esc(p.link.t) + '</a></p>';
+    h += '<p class="sec-t">잰 값 넣기</p><div class="fields">' + p.fields.map(function (f) { return fieldHtml(p, f); }).join('') + '</div>';
+    h += '<div id="shV">' + verdictHtml(p) + '</div>';
+    h += '<div class="fld" style="margin-top:12px"><label for="memo' + p.n + '">메모</label><textarea id="memo' + p.n + '" data-f="memo" placeholder="걸리는 것, 사진 번호, 다른 자리 아이디어">' + esc(vals(p.n).memo || '') + '</textarea></div>';
+    h += '<p class="photo">📷 <b>사진 찍기</b>: 줄자 눈금이 보이게 한 장, 그 자리 전체가 보이게 한 장.</p>';
+    h += '<div class="sh-nav">' + (prev ? '<button type="button" class="btn" data-go="' + prev.n + '">← ' + prev.n + '번</button>' : '') +
+      (next ? '<button type="button" class="btn btn-primary" data-go="' + next.n + '">' + next.n + '번 →</button>' : '<button type="button" class="btn btn-primary" id="shDone">다 했어요</button>') + '</div>';
+    h += '<p class="src">근거: ' + esc(p.src) + '</p>';
+    sheet.innerHTML = h;
+    sheet.hidden = false; back.hidden = false;
+    document.body.style.overflow = 'hidden';
+    sheet.scrollTop = 0;
+    render();
+    var t = document.getElementById('shTitle'); if (t) t.focus({ preventScroll: true });
+    if (!fromHash) { try { history.replaceState(null, '', '#p' + n); } catch (e) {} }
+  }
+  function closeSheet() {
+    if (sheet.hidden) return;
+    sheet.hidden = true; back.hidden = true; sheet.innerHTML = '';
+    document.body.style.overflow = '';
+    selected = 0; refresh();
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
+    if (lastFocus && lastFocus.focus && document.contains(lastFocus)) lastFocus.focus();
+  }
+  function updateSheetLive(p, fid) {
+    var f = p.fields.filter(function (x) { return x.id === fid; })[0];
+    if (f) {
+      var e = fieldEval(f, vals(p.n)[fid]), box = sheet.querySelector('.fld[data-f="' + fid + '"]'), m = sheet.querySelector('[data-msg="' + fid + '"]');
+      if (box) { box.classList.remove('lv-good', 'lv-warn', 'lv-bad'); if (e && e.lv !== 'info') box.classList.add('lv-' + (e.bad ? 'bad' : e.lv)); }
+      if (m) { m.className = 'msg' + (e && e.msg ? ' lv-' + (e.bad ? 'bad' : e.lv) : ''); m.textContent = e ? e.msg : ''; m.hidden = !(e && e.msg); }
+    }
+    var vbox = document.getElementById('shV'); if (vbox) vbox.innerHTML = verdictHtml(p);
+    var no = document.getElementById('shNo'); if (no) no.style.background = '';
+  }
+  sheet.addEventListener('input', function (e) {
+    var el = e.target, fid = el.getAttribute && el.getAttribute('data-f'); if (!fid || !selected) return;
+    var p = BYN[selected]; vals(p.n)[fid] = el.value; if (!el.value) delete vals(p.n)[fid];
+    save(); updateSheetLive(p, fid); render(); renderList();
+  });
+  sheet.addEventListener('click', function (e) {
+    var t = e.target.closest ? e.target.closest('button') : null; if (!t) return;
+    if (t.id === 'shClose' || t.id === 'shDone') { closeSheet(); return; }
+    var go = t.getAttribute('data-go'); if (go) { openPoint(+go); return; }
+    var fid = t.getAttribute('data-f'), v = t.getAttribute('data-v');
+    if (fid && v != null && selected) {
+      var p = BYN[selected], cur = vals(p.n)[fid];
+      if (cur === v) delete vals(p.n)[fid]; else vals(p.n)[fid] = v;
+      var bs = sheet.querySelectorAll('.ch button[data-f="' + fid + '"]');
+      for (var i = 0; i < bs.length; i++) bs[i].setAttribute('aria-pressed', String(vals(p.n)[fid] === bs[i].getAttribute('data-v')));
+      save(); updateSheetLive(p, fid); render(); renderList();
+    }
+  });
+  back.addEventListener('click', closeSheet);
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && !sheet.hidden) { closeSheet(); return; }
+    if (e.key === 'Tab' && !sheet.hidden) { // 패널 안에서만 이동
+      var f = sheet.querySelectorAll('button, input, textarea, a[href], [tabindex="-1"]'); if (!f.length) return;
+      var first = f[0], last = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+  });
+  svg.addEventListener('click', function (e) { var g = e.target.closest ? e.target.closest('[data-p]') : null; if (g) openPoint(+g.getAttribute('data-p')); });
+  svg.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    var g = e.target.closest ? e.target.closest('[data-p]') : null; if (g) { e.preventDefault(); openPoint(+g.getAttribute('data-p')); }
+  });
+  listEl.addEventListener('click', function (e) { var b = e.target.closest ? e.target.closest('button[data-p]') : null; if (b) openPoint(+b.getAttribute('data-p')); });
+  document.getElementById('kidSeg').addEventListener('click', function (e) {
+    var b = e.target.closest ? e.target.closest('button[data-kid]') : null; if (!b) return;
+    state.kid = b.getAttribute('data-kid'); save(); refresh();
+  });
+
+  /* ---------- 결과 복사 · 다 지우기 ---------- */
+  function today() { var d = new Date(); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
+  function summaryText() {
+    var lines = [], bad = [], warn = [], todo = [], all = [], measured = 0;
+    POINTS.forEach(function (p) {
+      var ev = pointEval(p), v = state.v[p.n] || {};
+      if (!ev.filled) { todo.push(p.n + '. ' + p.title); return; }
+      measured++;
+      var block = [p.n + '. ' + p.title + ' (' + txt(p.where) + ') — ' + chipText(p, ev.st)];
+      p.fields.forEach(function (f) {
+        var r = v[f.id]; if (r == null || String(r).trim() === '') return;
+        var e = fieldEval(f, r), u = f.unit || 'cm', val = (f.type === 'len' || f.type === 'num') && num(r) != null ? fmt(num(r)) + u : String(r);
+        var ref = [];
+        if (f.fit != null) ref.push('몸체 ' + fmt(f.fit)); if (f.need != null) ref.push((f.fit != null ? '여유 포함 ' : '기준 ') + fmt(f.need));
+        block.push('  - ' + f.label + ': ' + val + (ref.length ? ' (' + ref.join(' / ') + ')' : '') + (e && e.msg ? ' → ' + e.msg : ''));
+        if (e && (e.lv === 'bad' || e.bad)) bad.push(p.n + '. ' + p.title + ' — ' + f.label + ' ' + val + ': ' + (e.msg || '확인 필요'));
+        else if (e && e.lv === 'warn') warn.push(p.n + '. ' + p.title + ' — ' + f.label + ' ' + val + (e.msg ? ': ' + e.msg : ''));
+      });
+      ev.extra.forEach(function (d) {
+        block.push('  * ' + d.t);
+        if (d.lv === 'bad') bad.push(p.n + '. ' + p.title + ' — ' + d.t); else if (d.lv === 'warn') warn.push(p.n + '. ' + p.title + ' — ' + d.t);
+      });
+      if (v.memo && String(v.memo).trim()) block.push('  - 메모: ' + String(v.memo).trim().replace(/\s*\n\s*/g, ' / '));
+      all.push(block.join('\n'));
+    });
+    lines.push('[새 집 실측 결과] ' + today());
+    lines.push('네이버 평면도 기준 · ' + TOTAL + '곳 중 ' + measured + '곳 쟀어요');
+    lines.push('아이 방: ' + (state.kid ? roomName(kidRoom()) : '아직 몰라요') + ' / 옷 방: ' + (state.kid ? roomName(closetRoom()) : '아직 몰라요'));
+    lines.push('');
+    lines.push('■ 안 들어가요·문제 (' + bad.length + ')'); lines.push(bad.length ? bad.map(function (s) { return '- ' + s; }).join('\n') : '- 없어요'); lines.push('');
+    lines.push('■ 빠듯해요·확인 필요 (' + warn.length + ')'); lines.push(warn.length ? warn.map(function (s) { return '- ' + s; }).join('\n') : '- 없어요'); lines.push('');
+    lines.push('■ 잰 값'); lines.push(all.length ? all.join('\n') : '- 아직 없어요'); lines.push('');
+    lines.push('■ 아직 안 잰 곳 (' + todo.length + ')'); lines.push(todo.length ? todo.join(', ') : '없어요');
+    return lines.join('\n');
+  }
+  var copyMsg = document.getElementById('copyMsg'), copyOut = document.getElementById('copyOut');
+  function showFallback(text) {
+    copyOut.hidden = false; copyOut.value = text; copyOut.focus(); copyOut.select();
+    var ok = false; try { ok = document.execCommand && document.execCommand('copy'); } catch (e) {}
+    copyMsg.hidden = false;
+    copyMsg.textContent = ok ? '복사했어요. 카카오톡에 붙여 넣으세요.' : '자동 복사가 안 돼요. 아래 글을 길게 눌러 전체 선택 → 복사하세요.';
+  }
+  document.getElementById('copyBtn').addEventListener('click', function () {
+    var text = summaryText(); copyOut.value = text;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function () {
+          copyMsg.hidden = false; copyMsg.textContent = '복사했어요. 카카오톡에 붙여 넣으세요.'; copyOut.hidden = true;
+        }, function () { showFallback(text); });
+      } else showFallback(text);
+    } catch (e) { showFallback(text); }
+  });
+  var confirmBox = document.getElementById('confirmBox');
+  document.getElementById('clearBtn').addEventListener('click', function () { confirmBox.hidden = false; document.getElementById('confirmNo').focus(); });
+  document.getElementById('confirmNo').addEventListener('click', function () { confirmBox.hidden = true; document.getElementById('clearBtn').focus(); });
+  document.getElementById('confirmYes').addEventListener('click', function () {
+    state = { v: {}, kid: '' }; try { localStorage.removeItem(KEY); } catch (e) {}
+    confirmBox.hidden = true; copyOut.hidden = true; copyMsg.hidden = false; copyMsg.textContent = '다 지웠어요.';
+    refresh(); document.getElementById('clearBtn').focus();
+  });
+
+  /* ---------- 시작 ---------- */
+  if (mq) { var onMq = function () { render(); }; if (mq.addEventListener) mq.addEventListener('change', onMq); else if (mq.addListener) mq.addListener(onMq); }
+  function fromHash() { var m = /^#p(\d+)$/.exec(location.hash || ''); if (m && BYN[+m[1]]) openPoint(+m[1], true); }
+  window.addEventListener('hashchange', fromHash);
+  refresh();
+  fromHash();
+})();
+</script>
+</body>
+</html>
