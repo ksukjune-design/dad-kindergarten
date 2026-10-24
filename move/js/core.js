@@ -999,7 +999,7 @@
     { id: 'table', label: '책상·식탁', icon: '🪑' },
     { id: 'sofa', label: '소파·의자', icon: '🛋️' },
     { id: 'shelf', label: '책장·선반', icon: '📚' },
-    { id: 'electronics', label: 'TV·전자기기', icon: '📺' },
+    { id: 'electronics', label: '전자기기', icon: '🔌' },
     { id: 'kids', label: '아이 물건', icon: '🧸' },
     { id: 'misc', label: '기타', icon: '📦' },
   ];

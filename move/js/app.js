@@ -100,7 +100,7 @@
       el('h3', '함께 쓰기'),
       FB.configured
         ? el('p', { class: 'small' }, fbText())
-        : el('p', { class: 'small' }, '아내와 같은 기록을 보고 함께 고치려면 함께 쓰기를 설정하세요 (처음 한 번, 약 15분).'),
+        : el('p', { class: 'small' }, '💾 이 브라우저는 아직 함께 쓰기에 연결되지 않았어요. 지금 체크·메모한 것은 이 브라우저에만 저장되고 공유 기록에는 올라가지 않아요. 다른 기기에서 쓰던 공유 기록을 보려면 아래 \'함께 쓰기 설정\'에서 초대 링크로 열거나 설정값을 붙여 넣고 로그인하세요.'),
       FB.configured && Y.empty && !Y.readOnly && Y.mode === 'shared' ? el('button', { class: 'btn btn-kid', type: 'button', onclick: () => {
         MV.ui.confirm('지금 이 기기의 체크·메모·짐 목록으로 공유를 시작할까요?', { okLabel: '공유 시작' }).then((ok) => {
           if (ok) Y.initFromLocal().then((r) => { m.close(); if (r) MV.ui.toast('공유를 시작했어요.'); });
