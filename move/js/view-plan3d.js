@@ -250,8 +250,9 @@
     } else if (shape === 'chair') {
       // 닫힘: 식탁 밑으로 넣은 모습(it.tuck — 식탁 쪽으로 의자 깊이 − 12cm) · 열림: 빼 둔 모습(도면 자리)
       const sh = !ctx.open && it.tuck ? it.tuck : 0;
+      const ci = sh ? Object.assign({}, it, { x: it.x + (it.tuckDx || 0), y: it.y + (it.tuckDy || 0) }) : it;
       const seatZ = Math.min(45, H * 0.62), leg = 4, back = Math.min(7, it.dd * 0.16);
-      const lb = (lx, ly, lw, ld, za, zb) => localBox(it, lx, ly + sh, lw, ld, za, zb);
+      const lb = (lx, ly, lw, ld, za, zb) => localBox(ci, lx, ly + sh, lw, ld, za, zb);
       parts = parts.concat(box(world, lb(0, 0, it.dw, it.dd, z0 + seatZ - 5, z0 + seatZ), o));
       [[1, 1], [it.dw - leg - 1, 1], [1, it.dd - leg - 1], [it.dw - leg - 1, it.dd - leg - 1]].forEach(([lx, ly]) => {
         parts = parts.concat(box(world, lb(lx, ly, leg, leg, z0, z0 + seatZ - 5), Object.assign({}, o, { top: false })));
@@ -459,8 +460,15 @@
       if (shapeOf(it) !== 'chair') return;
       const d = 4, b = it.rot === 180 ? { x: it.x, y: it.y - d, w: it.w, h: d } : it.rot === 90 ? { x: it.x - d, y: it.y, w: d, h: it.h }
         : it.rot === 270 ? { x: it.x + it.w, y: it.y, w: d, h: it.h } : { x: it.x, y: it.y + it.h, w: it.w, h: d };
-      const hit = tables.some((t) => b.x < t.x + t.w && t.x < b.x + b.w && b.y < t.y + t.h && t.y < b.y + b.h);
-      it.tuck = hit ? Math.max(0, it.dd - 12) : 0;
+      const t = tables.find((q) => b.x < q.x + q.w && q.x < b.x + b.w && b.y < q.y + q.h && q.y < b.y + b.h);
+      it.tuck = t ? Math.max(0, it.dd - 12) : 0;
+      it.tuckDx = 0; it.tuckDy = 0;
+      if (!t) return;
+      // 넣을 때 식탁 다리에 걸리지 않게 옆으로 맞춰요(식탁 끝 의자가 벽 쪽에 붙어 있으면 가운데 쪽으로)
+      const leg = Math.min(6, t.dw / 8, t.dd / 6) + 1;
+      const fit = (pos, len, lo, hi) => Math.min(Math.max(pos, lo), Math.max(lo, hi - len)) - pos;
+      if (it.rot === 0 || it.rot === 180) it.tuckDx = fit(it.x, it.w, t.x + leg, t.x + t.w - leg);
+      else it.tuckDy = fit(it.y, it.h, t.y + leg, t.y + t.h - leg);
     });
     const byInv = {};
     P.items.forEach((it) => {

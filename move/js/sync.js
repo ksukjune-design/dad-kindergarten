@@ -669,11 +669,22 @@
     } else if (rewrite) diffAndWrite();
     settle();                          // 보낼 것이 없으면 공유 중 / 일부 못 올림 / 보기 전용
   }
+  // 서버가 확인하지 않은 캐시 스냅샷(claude 공유 기록: metadata.fromCache)은 믿지 않아요 — readAll 로 읽은 것보다 옛 내용일 수 있어서
+  // (10/24: 다시 연 창이 옛 캐시를 '받은 내용'으로 적용했다가 그대로 다시 올려 완료 표시가 되돌아갔어요). 파이어베이스 어댑터는 스스로 걸러서
+  // metadata 를 넘기지 않아요. 건너뛴 뒤 첫 확인 스냅샷의 docChanges 는 캐시 기준이라, 그때는 모든 문서를 srv 와 다시 비교해요.
+  const cacheSkipped = new Set();
   function onSnap(col) {
     return (snap) => {
+      if (snap.metadata && snap.metadata.fromCache) { cacheSkipped.add(col); return; }
       let metaArrived = false;
       const changes = [];
-      snap.docChanges().forEach((ch) => {
+      let list = snap.docChanges();
+      if (cacheSkipped.delete(col) && Array.isArray(snap.docs)) {
+        const ids = new Set(snap.docs.map((d) => d.id));
+        list = snap.docs.map((d) => ({ type: 'modified', doc: d }));
+        srv.forEach((j, p) => { if (p.startsWith(col + '/') && !ids.has(p.slice(col.length + 1))) list.push({ type: 'removed', doc: { id: p.slice(col.length + 1) } }); });
+      }
+      list.forEach((ch) => {
         const id = ch.doc.id;
         if (col === 'move' && id === 'meta' && ch.type !== 'removed') metaArrived = true;
         if (ch.type === 'removed') { changes.push({ id, removed: true }); return; }
