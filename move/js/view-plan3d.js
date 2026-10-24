@@ -405,10 +405,30 @@
       it.tuckDx = 0; it.tuckDy = 0;
       if (!t) return;
       // 넣을 때 식탁 다리에 걸리지 않게 옆으로 맞춰요(식탁 끝 의자가 벽 쪽에 붙어 있으면 가운데 쪽으로)
-      const leg = Math.min(6, t.dw / 8, t.dd / 6) + 1;
+      const TB = MV.plan3dGL && MV.plan3dGL.TABLE;
+      const leg = Math.min(TB ? TB.inset + TB.leg : 9, t.dw / 8, t.dd / 6) + 1;
       const fit = (pos, len, lo, hi) => Math.min(Math.max(pos, lo), Math.max(lo, hi - len)) - pos;
       if (it.rot === 0 || it.rot === 180) it.tuckDx = fit(it.x, it.w, t.x + leg, t.x + t.w - leg);
       else it.tuckDy = fit(it.y, it.h, t.y + leg, t.y + t.h - leg);
+      it.tuckTable = t.pid;
+    });
+    // 같은 식탁에 넣은 의자끼리 겹치면 둘 다 조금씩 덜 넣어요
+    const tucked = (c) => {
+      const dx = c.tuckDx + (c.rot === 90 ? -c.tuck : c.rot === 270 ? c.tuck : 0), dy = c.tuckDy + (c.rot === 0 ? c.tuck : c.rot === 180 ? -c.tuck : 0);
+      return { x: c.x + dx, y: c.y + dy, w: c.w, h: c.h };
+    };
+    const hit = (a, b) => a.x < b.x + b.w - 1 && b.x < a.x + a.w - 1 && a.y < b.y + b.h - 1 && b.y < a.y + a.h - 1;
+    tables.forEach((t) => {
+      const cs = P.items.filter((c) => c.tuckTable === t.pid && c.tuck > 0);
+      for (let k = 0; k < 40; k++) {
+        let any = false;
+        cs.forEach((a, i) => cs.slice(i + 1).forEach((b) => {
+          if (!hit(tucked(a), tucked(b))) return;
+          any = true;
+          a.tuck = Math.max(0, a.tuck - 2); b.tuck = Math.max(0, b.tuck - 2);
+        }));
+        if (!any) break;
+      }
     });
   }
 
@@ -436,8 +456,10 @@
       const r = s.v ? { x: s.at - t / 2, y: s.a, w: t, d: s.b - s.a } : { x: s.a, y: s.at - t / 2, w: s.b - s.a, d: t };
       if (wallH <= 0) { box(world, Object.assign({}, r, { z0: 0, z1: 3 }), { bg: s.win ? 'var(--p3-glass)' : 'var(--p3-wall)', cls: 'p3-wall' }); return; }
       if (!s.win) { box(world, Object.assign({}, r, { z0: 0, z1: wallH }), { bg: 'var(--p3-wall)', topBg: 'var(--p3-wall-top)', cls: 'p3-wall' }); return; }
-      const sill = Math.min(WIN_SILL, wallH - 6);
-      box(world, Object.assign({}, r, { z0: 0, z1: sill }), { bg: 'var(--p3-wall)', topBg: 'var(--p3-wall-top)', cls: 'p3-wall' });
+      // 바닥까지 내려오는 문(거실 분합문 등)은 바닥부터 유리
+      const w = (P.windows || []).find((x) => x.v === s.v && Math.abs((x.v ? x.x : x.y) - s.at) < 3 && (x.v ? x.y : x.x) <= s.a + 1 && (x.v ? x.y : x.x) + x.w >= s.b - 1);
+      const sill = w && /분합문|미닫이|나가는 문|바닥까지 문/.test(w.note || '') ? 0 : Math.min(WIN_SILL, wallH - 6);
+      if (sill > 0) box(world, Object.assign({}, r, { z0: 0, z1: sill }), { bg: 'var(--p3-wall)', topBg: 'var(--p3-wall-top)', cls: 'p3-wall' });
       const gTop = Math.min(WIN_TOP, wallH);
       box(world, Object.assign({}, r, s.v ? { x: s.at - 1.5, w: 3 } : { y: s.at - 1.5, d: 3 }, { z0: sill, z1: gTop }), { bg: 'var(--p3-glass)', cls: 'p3-glass' });
       if (wallH > gTop + 1) box(world, Object.assign({}, r, { z0: gTop, z1: wallH }), { bg: 'var(--p3-wall)', topBg: 'var(--p3-wall-top)', cls: 'p3-wall' });
@@ -604,7 +626,10 @@
       cur.engine = 'gl';
       mark = (pid) => E.select(pid);
       hint.textContent = '끌어서 돌리고 · 휠이나 두 손가락으로 확대 · 오른쪽 끌기(두 손가락 끌기)로 옮기기 · 짐을 누르면 정보가 나와요. 문·서랍을 여는 비율을 바꿔 보세요 — 앞이 막혀 끝까지 못 여는 것은 열 수 있는 만큼만 열고 주황 테두리로 보여요. 고치기는 2D 도면에서 해요.';
-      foot.textContent = '가구·가전 모양은 실제 제품을 본떠 그린 것이라 세부는 달라요. 크기·자리·문 열림 범위는 2D 도면과 같아요. 의자는 닫힘에서 식탁 밑으로 넣고 열림에서 빼 둬요.';
+      const nLim = E.limitedCount ? E.limitedCount() : 0, nTuck = E.tuckedChairs ? E.tuckedChairs() : 0;
+      foot.textContent = '가구·가전 모양은 실제 제품을 본떠 그린 것이라 세부는 달라요. 크기·자리·문 열림 범위는 2D 도면과 같아요.'
+        + (nTuck ? ' 의자 ' + nTuck + '개는 닫힘에서 식탁 밑으로 넣고 열림에서 빼 둬요.' : '')
+        + (nLim ? ' 앞이 막혀 끝까지 못 여는 짐 ' + nLim + '개는 주황 테두리예요.' : ' 문·서랍을 끝까지 못 여는 짐은 없어요.');
 
       // 문·의자 열림 비율: 닫힘 0 · 부분 45% · 열림 100% + 끌기
       const pct = el('span', { class: 'p3-pct num', 'aria-live': 'polite' });
@@ -873,7 +898,7 @@ body.p3-lock { overflow: hidden; }
 .p3gl-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
 .p3gl-label { position: absolute; left: 0; top: 0; padding: 1px 6px; border-radius: 999px; font-size: .7rem; font-weight: 700; white-space: nowrap;
   color: #e2e8f0; background: rgba(15,23,42,.72); border: 1px solid rgba(148,163,184,.35); will-change: transform; }
-.p3-stage.is-gl .p3-hint { color: #94a3b8; }
+.p3-stage.is-gl .p3-hint { color: #e2e8f0; background: rgba(15,23,42,.72); padding: 6px 10px; border-radius: 10px; right: auto; max-width: min(560px, calc(100% - 20px)); }
 .p3-wait { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--ink-3, #777); font-size: .9rem; }
 .p3-lab { font-size: .78rem; color: var(--ink-3, #777); align-self: center; }
 .p3-ratio { align-items: center; }
