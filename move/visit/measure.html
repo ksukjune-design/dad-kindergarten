@@ -148,7 +148,7 @@ textarea { min-height: 70px; font-size: .95rem; }
     </div>
     <div id="bigplan"></div>
     <div class="legend"><span><i style="background:var(--line-2)"></i>벽</span><span><i style="background:var(--brand)"></i>문</span><span><i style="background:var(--kid)"></i>창</span><span><i style="background:var(--good)"></i>잰 값</span><span><i style="background:var(--kid-bg);border:1px solid var(--kid)"></i>가구(제안 자리)</span></div>
-    <p class="small muted">네이버 부동산 평면도(전용 59.67㎡)를 세로로 돌린 그림이에요 — 왼쪽 끝이 복도·현관, 아래가 큰 발코니예요. 크기는 대략이라 실제와 달라요. 두 손가락으로 크게 볼 수 있어요.</p>
+    <p class="small muted">네이버 부동산 평면도(전용 59.67㎡)를 세로로 돌리고 좌우를 뒤집은 우리 집 방향이에요 — 오른쪽 끝이 복도·현관, 아래가 큰 발코니예요. 크기는 대략이라 실제와 달라요. 두 손가락으로 크게 볼 수 있어요.</p>
     <details class="room"><summary><span class="nm">목록으로 입력하기</span><span class="cnt">도면 대신 칸으로</span></summary><div class="body"><div id="rooms"></div></div></details>
   </section>
 
@@ -201,17 +201,49 @@ textarea { min-height: 70px; font-size: .95rem; }
 <script>
 (function () {
   'use strict';
-  var KEY = 'mv:visit:v3';
+  var KEY = 'mv:visit:v4';
   var S = load();
   function load() {
     var s = null;
     try { s = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) { s = null; }
-    if (!s) { s = fromV2(); if (s) { try { localStorage.setItem(KEY, JSON.stringify(s)); } catch (e) { /* 무시 */ } } }
+    if (!s) { s = fromV3() || mirror(fromV2()); if (s) { try { localStorage.setItem(KEY, JSON.stringify(s)); } catch (e) { /* 무시 */ } } }
     if (!s || typeof s !== 'object') s = {};
     s.r = s.r || {}; s.i = s.i || {}; s.x = Array.isArray(s.x) ? s.x : []; s.p = s.p || {};
     return s;
   }
   function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { /* 저장이 막힌 브라우저 — 이번 화면에서만 */ } }
+  /* v3(뒤집기 전 세로 도면) 기록 → v4(좌우를 뒤집은 우리 집 방향) */
+  function fromV3() {
+    var o = null;
+    try { o = JSON.parse(localStorage.getItem('mv:visit:v3') || 'null'); } catch (e) { o = null; }
+    return o && typeof o === 'object' ? mirror(o) : null;
+  }
+  function mirror(o) {
+    if (!o) return null;
+    var SW = { left: 'right', right: 'left' };
+    var PLAN_W = { anbang: 360, smallTop: 240, smallBot: 240, living: 360, dining: 195 };
+    var DOOR0 = { anbang: ['left', 85], smallTop: ['bottom', 80], smallBot: ['left', 85] };
+    var r = {};
+    Object.keys(o.r || {}).forEach(function (id) {
+      var a = o.r[id] || {}, b = {};
+      Object.keys(a).forEach(function (k) {
+        if (k === 'wall_left') b.wall_right = a[k];
+        else if (k === 'wall_right') b.wall_left = a[k];
+        else if (k === 'doorSide') b.doorSide = SW[a[k]] || a[k];
+        else b[k] = a[k];
+      });
+      var side = a.doorSide || (DOOR0[id] ? DOOR0[id][0] : '');
+      var at = parseFloat(a.doorAt);
+      if ((side === 'top' || side === 'bottom') && isFinite(at)) {
+        var W = parseFloat(a.w) || PLAN_W[id] || 0, dw = parseFloat(a.doorW) || (DOOR0[id] ? DOOR0[id][1] : 80);
+        b.doorAt = String(Math.max(0, Math.round((W - at - dw) * 10) / 10));
+      }
+      r[id] = b;
+    });
+    var pl = {};
+    Object.keys(o.p || {}).forEach(function (id) { var q = o.p[id] || {}; pl[id] = { room: q.room || '', wall: SW[q.wall] || q.wall || '' }; });
+    return { r: r, i: o.i || {}, x: o.x || [], p: pl };
+  }
   /* v2(가로 도면: 위 = 복도) 기록 → v3(세로 도면: 왼쪽 = 복도). 벽 방향을 시계 반대로 한 칸 돌리고 가로·세로를 바꿔요 */
   function fromV2() {
     var o = null;
@@ -254,29 +286,29 @@ textarea { min-height: 70px; font-size: .95rem; }
   var SIDES = { top: '위', right: '오른쪽', bottom: '아래', left: '왼쪽' };
   // 세로 도면(네이버 평면도를 시계 반대로 돌림, cm) — 방 자리(x·y)와 대략 크기, 문·창이 있는 벽(at = 그 벽의 위/왼쪽 끝에서, len = 길이)
   var ROOMS = [
-    { id: 'anbang', name: '안방', x: 360, y: 630, w: 360, d: 330, door: 'left', doorAt0: 5, doorLen0: 85, win: 'bottom', winAt0: 60, winLen0: 240,
-      walls: { top: '욕실·식당 쪽', right: '바깥벽', bottom: '창·발코니 쪽', left: '거실 쪽 (문)' },
-      hint: '문은 왼쪽 벽 위쪽(거실 쪽), 큰 창은 아래 벽(발코니). 벽걸이 에어컨 배관 구멍 위치도 메모해요.' },
-    { id: 'smallTop', name: '작은방(현관 쪽)', x: 0, y: 150, w: 240, d: 300, door: 'bottom', doorAt0: 150, doorLen0: 80, win: 'top', winAt0: 30, winLen0: 180,
-      walls: { top: '창·발코니 쪽', right: '주방 조리대 쪽', bottom: '현관 쪽 (문)', left: '복도 쪽 바깥벽' },
-      hint: '문은 아래 벽 오른쪽(현관 쪽), 창은 위 벽(발코니).' },
-    { id: 'smallBot', name: '작은방(욕실 쪽)', x: 480, y: 150, w: 240, d: 300, door: 'left', doorAt0: 210, doorLen0: 85, win: 'top', winAt0: 40, winLen0: 160,
-      walls: { top: '창·발코니 쪽', right: '바깥벽', bottom: '안방·욕실 쪽', left: '식당 쪽 (문)' },
-      hint: '문은 왼쪽 벽 아래쪽(식당 쪽), 창은 위 벽(발코니).' },
-    { id: 'living', name: '거실', x: 0, y: 450, w: 360, d: 510, door: '', win: 'bottom', winAt0: 40, winLen0: 280,
-      walls: { top: '작은방(현관 쪽) 벽', right: '식당·안방 쪽', bottom: '창·발코니 쪽', left: '현관·복도 쪽' },
-      hint: '왼쪽 위 모서리가 현관이에요(현관 바닥 약 130 × 160 빼고). 오른쪽 위는 식당과 트여 있고, 아래는 큰 창(발코니 문). 스탠드 에어컨 배관 구멍 위치를 메모해요.' },
-    { id: 'dining', name: '주방·식당', x: 285, y: 150, w: 195, d: 480, door: '', win: '',
-      walls: { top: '발코니 쪽', right: '작은방(욕실 쪽) 벽', bottom: '거실·안방 쪽 (트임)', left: '조리대 쪽' },
-      hint: '왼쪽 벽 위쪽 3m가 조리대예요(싱크·가스레인지 자리). 가로는 조리대 앞 바닥 공간 기준.' },
+    { id: 'anbang', name: '안방', x: 0, y: 630, w: 360, d: 330, door: 'right', doorAt0: 5, doorLen0: 85, win: 'bottom', winAt0: 60, winLen0: 240,
+      walls: { top: '욕실·식당 쪽', right: '거실 쪽 (문)', bottom: '창·발코니 쪽', left: '바깥벽' },
+      hint: '문은 오른쪽 벽 위쪽(거실 쪽), 큰 창은 아래 벽(발코니). 벽걸이 에어컨 배관 구멍 위치도 메모해요.' },
+    { id: 'smallTop', name: '작은방(현관 쪽)', x: 480, y: 150, w: 240, d: 300, door: 'bottom', doorAt0: 10, doorLen0: 80, win: 'top', winAt0: 30, winLen0: 180,
+      walls: { top: '창·발코니 쪽', right: '복도 쪽 바깥벽', bottom: '현관 쪽 (문)', left: '주방 조리대 쪽' },
+      hint: '문은 아래 벽 왼쪽(현관 쪽), 창은 위 벽(발코니).' },
+    { id: 'smallBot', name: '작은방(욕실 쪽)', x: 0, y: 150, w: 240, d: 300, door: 'right', doorAt0: 210, doorLen0: 85, win: 'top', winAt0: 40, winLen0: 160,
+      walls: { top: '창·발코니 쪽', right: '식당 쪽 (문)', bottom: '안방·욕실 쪽', left: '바깥벽' },
+      hint: '문은 오른쪽 벽 아래쪽(식당 쪽), 창은 위 벽(발코니).' },
+    { id: 'living', name: '거실', x: 360, y: 450, w: 360, d: 510, door: '', win: 'bottom', winAt0: 40, winLen0: 280,
+      walls: { top: '작은방(현관 쪽) 벽', right: '현관·복도 쪽', bottom: '창·발코니 쪽', left: '식당·안방 쪽' },
+      hint: '오른쪽 위 모서리가 현관이에요(현관 바닥 약 130 × 160 빼고). 왼쪽 위는 식당과 트여 있고, 아래는 큰 창(발코니 문). 스탠드 에어컨 배관 구멍 위치를 메모해요.' },
+    { id: 'dining', name: '주방·식당', x: 240, y: 150, w: 195, d: 480, door: '', win: '',
+      walls: { top: '발코니 쪽', right: '조리대 쪽', bottom: '거실·안방 쪽 (트임)', left: '작은방(욕실 쪽) 벽' },
+      hint: '오른쪽 벽 위쪽 3m가 조리대예요(싱크·가스레인지 자리). 가로는 조리대 앞 바닥 공간 기준.' },
   ];
   var SPOTS = [
-    { id: 'fridge', mk: [[262, 490, '냉장고']], name: '냉장고 자리', hint: '우리 냉장고 91.3 × 73.5 × 179cm → 폭 93cm 이상(권장 101cm). 위에 장이 있으면 그 아래까지 높이.', f: [['w', '폭'], ['d', '깊이'], ['h', '높이']], c: [['outlet', '콘센트 있음']] },
-    { id: 'laundry', mk: [[665, 1040, '세탁 A'], [515, 75, '세탁 B'], [275, 75, '세탁 C']], name: '세탁기·건조기 자리', hint: '어디인지 먼저 찾아요(수전·배수구가 있는 곳 — 도면의 A 왼쪽 아래 작은 칸, B·C 위쪽 발코니·작은 칸). 통돌이 63.2 + 건조기 68.6 = 나란히 약 140cm 이상, 깊이 약 95cm, 높이는 위 선반·창틀까지(통돌이 뚜껑 열면 약 135cm).', where: true, f: [['w', '벽 폭'], ['d', '깊이'], ['h', '선반·창틀까지 높이'], ['door', '들어가는 문 폭']], c: [['water', '수전'], ['drain', '배수구'], ['outlet', '콘센트']] },
-    { id: 'induction', mk: [[262, 195, '인덕션']], name: '인덕션 자리', hint: '가스레인지는 안 써요. 지금 가스레인지 자리(조리대 위쪽 끝)의 폭·깊이, 220V 콘센트가 가까이 있는지.', f: [['w', '폭'], ['d', '깊이'], ['hood', '후드까지 높이']], c: [['outlet', '220V 콘센트'], ['breaker', '분전반에 인덕션 차단기']] },
-    { id: 'path', mk: [[40, 560, '현관']], name: '들어오는 길 (냉장고·매트리스·캐비닛장)', hint: '가장 좁은 곳 기준. 냉장고는 폭 약 93cm가 지나가야 해요(옆으로 돌리면 약 80cm).', f: [['door', '현관문 폭'], ['doorH', '현관문 높이'], ['ev', '엘리베이터 문 폭'], ['evD', '엘리베이터 안 깊이'], ['evH', '엘리베이터 안 높이'], ['hall', '주방 들어가는 좁은 곳'], ['bath', '욕실 문 폭']] },
-    { id: 'ac', mk: [[190, 1035, '에어컨·실외기']], name: '에어컨 자리', hint: '거실 스탠드·안방 벽걸이 배관 구멍이 어느 벽 어디쯤인지, 실외기 놓을 곳 크기(실외기 88 × 31 × 63.8cm).', f: [['ow', '실외기 자리 폭'], ['od', '실외기 자리 깊이'], ['oh', '실외기 자리 높이']], memo: '배관 구멍 위치 (예: 거실 왼쪽 벽 위쪽, 바닥에서 2m)' },
-    { id: 'shoe', mk: [[95, 480, '신발장']], name: '신발장', hint: '칸 수와 한 칸 높이를 보면 신발 정리 기준을 정할 수 있어요.', f: [['w', '폭'], ['d', '깊이'], ['h', '높이'], ['n', '칸 수']] },
+    { id: 'fridge', mk: [[458, 490, '냉장고']], name: '냉장고 자리', hint: '우리 냉장고 91.3 × 73.5 × 179cm → 폭 93cm 이상(권장 101cm). 위에 장이 있으면 그 아래까지 높이.', f: [['w', '폭'], ['d', '깊이'], ['h', '높이']], c: [['outlet', '콘센트 있음']] },
+    { id: 'laundry', mk: [[55, 1040, '세탁 A'], [205, 75, '세탁 B'], [445, 75, '세탁 C']], name: '세탁기·건조기 자리', hint: '어디인지 먼저 찾아요(수전·배수구가 있는 곳 — 도면의 A 왼쪽 아래 작은 칸, B·C 위쪽 발코니·작은 칸). 통돌이 63.2 + 건조기 68.6 = 나란히 약 140cm 이상, 깊이 약 95cm, 높이는 위 선반·창틀까지(통돌이 뚜껑 열면 약 135cm).', where: true, f: [['w', '벽 폭'], ['d', '깊이'], ['h', '선반·창틀까지 높이'], ['door', '들어가는 문 폭']], c: [['water', '수전'], ['drain', '배수구'], ['outlet', '콘센트']] },
+    { id: 'induction', mk: [[458, 195, '인덕션']], name: '인덕션 자리', hint: '가스레인지는 안 써요. 지금 가스레인지 자리(조리대 위쪽 끝)의 폭·깊이, 220V 콘센트가 가까이 있는지.', f: [['w', '폭'], ['d', '깊이'], ['hood', '후드까지 높이']], c: [['outlet', '220V 콘센트'], ['breaker', '분전반에 인덕션 차단기']] },
+    { id: 'path', mk: [[680, 560, '현관']], name: '들어오는 길 (냉장고·매트리스·캐비닛장)', hint: '가장 좁은 곳 기준. 냉장고는 폭 약 93cm가 지나가야 해요(옆으로 돌리면 약 80cm).', f: [['door', '현관문 폭'], ['doorH', '현관문 높이'], ['ev', '엘리베이터 문 폭'], ['evD', '엘리베이터 안 깊이'], ['evH', '엘리베이터 안 높이'], ['hall', '주방 들어가는 좁은 곳'], ['bath', '욕실 문 폭']] },
+    { id: 'ac', mk: [[530, 1035, '에어컨·실외기']], name: '에어컨 자리', hint: '거실 스탠드·안방 벽걸이 배관 구멍이 어느 벽 어디쯤인지, 실외기 놓을 곳 크기(실외기 88 × 31 × 63.8cm).', f: [['ow', '실외기 자리 폭'], ['od', '실외기 자리 깊이'], ['oh', '실외기 자리 높이']], memo: '배관 구멍 위치 (예: 거실 왼쪽 벽 위쪽, 바닥에서 2m)' },
+    { id: 'shoe', mk: [[625, 480, '신발장']], name: '신발장', hint: '칸 수와 한 칸 높이를 보면 신발 정리 기준을 정할 수 있어요.', f: [['w', '폭'], ['d', '깊이'], ['h', '높이'], ['n', '칸 수']] },
     { id: 'spare', name: '작은 칸들 (왼쪽 발코니 끝·주방 옆)', hint: '무엇에 쓰는 칸인지(세탁·보일러·실외기·창고) 보고 크기를 적어요.', f: [['w', '폭'], ['d', '깊이'], ['h', '높이']], memo: '어디·무슨 칸인지' },
   ];
 
@@ -383,25 +415,25 @@ textarea { min-height: 70px; font-size: .95rem; }
   /* ---------- 2차: 지금 집 가구 ---------- */
   // 알던 값 = data-seed.js 짐 목록 (use: 앞에 비워 둘 자리 cm)
   var ITEMS = [
-    { id: 'bed', name: '라지킹 매트리스 (프레임 없음)', w: 200, d: 200, h: 36, use: 50, room: 'anbang', wall: 'right', at: 60 },
+    { id: 'bed', name: '라지킹 매트리스 (프레임 없음)', w: 200, d: 200, h: 36, use: 50, room: 'anbang', wall: 'left', at: 60 },
     { id: 'vanity', name: '화장대 (낮은 좌식)', w: 100, d: 50, h: 50, use: 60, room: 'anbang', wall: 'top', at: 110 },
     { id: 'chest', name: '수납장 (니토리 체스트랙)', w: 45, d: 43, h: 175, use: 50, room: 'anbang', wall: 'top' },
-    { id: 'cab1a', name: '캐비닛장 ① 2단 행어형 (1)', w: 76, d: 50, h: 200, use: 70, room: 'smallBot', wall: 'right' },
-    { id: 'cab1b', name: '캐비닛장 ① 2단 행어형 (2)', w: 76, d: 50, h: 200, use: 70, room: 'smallBot', wall: 'right' },
-    { id: 'cab2', name: '캐비닛장 ② 3단 수납형', w: 76, d: 50, h: 169, use: 70, room: 'smallBot', wall: 'right' },
+    { id: 'cab1a', name: '캐비닛장 ① 2단 행어형 (1)', w: 76, d: 50, h: 200, use: 70, room: 'smallBot', wall: 'left' },
+    { id: 'cab1b', name: '캐비닛장 ① 2단 행어형 (2)', w: 76, d: 50, h: 200, use: 70, room: 'smallBot', wall: 'left' },
+    { id: 'cab2', name: '캐비닛장 ② 3단 수납형', w: 76, d: 50, h: 169, use: 70, room: 'smallBot', wall: 'left' },
     { id: 'desk', name: '책상 (데스커)', w: 120, d: 60, h: 72, use: 75, room: 'smallBot', wall: 'top' },
     { id: 'alex', name: '책상 서랍 (이케아 알렉스)', w: 36, d: 58, h: 70, use: 60, room: 'smallBot', wall: 'top' },
-    { id: 'book5', name: '책장 5단 (폭 80)', w: 80, d: 28.5, h: 195.9, use: 60, room: 'smallTop', wall: 'left' },
-    { id: 'bookk1', name: '어린이 책장 3단 (1)', w: 80, d: 28.5, h: 118.2, use: 60, room: 'smallTop', wall: 'left' },
-    { id: 'bookk2', name: '어린이 책장 3단 (2)', w: 80, d: 28.5, h: 118.2, use: 60, room: 'smallTop', wall: 'left' },
-    { id: 'bookk3', name: '어린이 책장 3단 (3)', w: 80, d: 28.5, h: 118.2, use: 60, room: 'smallTop', wall: 'right' },
-    { id: 'hanger', name: '간이옷장 (스탠드 행거)', w: 82, d: 40, h: 147.6, use: 60, room: 'smallTop', wall: 'right' },
-    { id: 'toy', name: '장난감장', w: 66.5, d: 39.5, h: 118.1, use: 50, room: 'living', wall: 'left', at: 175 },
-    { id: 'sofa', name: '소파 (3인)', w: 173, d: 85, h: 94, use: 60, room: 'living', wall: 'right', at: 250 },
+    { id: 'book5', name: '책장 5단 (폭 80)', w: 80, d: 28.5, h: 195.9, use: 60, room: 'smallTop', wall: 'right' },
+    { id: 'bookk1', name: '어린이 책장 3단 (1)', w: 80, d: 28.5, h: 118.2, use: 60, room: 'smallTop', wall: 'right' },
+    { id: 'bookk2', name: '어린이 책장 3단 (2)', w: 80, d: 28.5, h: 118.2, use: 60, room: 'smallTop', wall: 'right' },
+    { id: 'bookk3', name: '어린이 책장 3단 (3)', w: 80, d: 28.5, h: 118.2, use: 60, room: 'smallTop', wall: 'left' },
+    { id: 'hanger', name: '간이옷장 (스탠드 행거)', w: 82, d: 40, h: 147.6, use: 60, room: 'smallTop', wall: 'left' },
+    { id: 'toy', name: '장난감장', w: 66.5, d: 39.5, h: 118.1, use: 50, room: 'living', wall: 'right', at: 175 },
+    { id: 'sofa', name: '소파 (3인)', w: 173, d: 85, h: 94, use: 60, room: 'living', wall: 'left', at: 275 },
     { id: 'acStand', name: '에어컨 스탠드 (바람 앞 150cm 비우기)', w: 36, d: 24.6, h: 184.7, use: 150, room: 'living', wall: 'bottom', at: 315 },
-    { id: 'table', name: '식탁', w: 135, d: 80, h: 70, use: 75, room: 'dining', wall: 'right', at: 60 },
+    { id: 'table', name: '식탁', w: 135, d: 80, h: 70, use: 75, room: 'dining', wall: 'left', at: 60 },
     { id: 'chairs', name: '식탁 의자 4개 (1개 크기)', w: 51, d: 50.5, h: 71, use: 0, qty: 4, room: '', wall: '' },
-    { id: 'fridge', name: '냉장고 (손잡이 포함 깊이)', w: 91.3, d: 73.5, h: 179, use: 90, room: 'dining', wall: 'left', at: 315 },
+    { id: 'fridge', name: '냉장고 (손잡이 포함 깊이)', w: 91.3, d: 73.5, h: 179, use: 90, room: 'dining', wall: 'right', at: 315 },
     { id: 'dryer', name: '건조기 (문 포함 깊이)', w: 68.6, d: 87.6, h: 98.4, use: 90, room: '', wall: '' },
     { id: 'washer', name: '통돌이 LG T17MX3 (새로 사요 — 안 재도 돼요)', w: 63.2, d: 67, h: 101.8, use: 60, fixed: true, room: '', wall: '' },
   ];
@@ -641,21 +673,21 @@ textarea { min-height: 70px; font-size: .95rem; }
     if (!box) return;
     var showF = $('#show-furn').checked;
     var o = [];
-    o.push('<svg class="bigplan" viewBox="-70 -20 810 1150" role="img" aria-label="새 집 세로 도면 — 선을 누르면 칸이 떠요">');
+    o.push('<svg class="bigplan" viewBox="-20 -20 810 1150" role="img" aria-label="새 집 세로 도면 — 선을 누르면 칸이 떠요">');
     // 복도·바깥 칸
-    o.push('<rect x="-60" y="0" width="45" height="1110" fill="var(--bg-3)"/><text x="-37" y="555" font-size="20" fill="var(--ink-3)" text-anchor="middle" transform="rotate(-90 -37 555)">복도·계단·엘리베이터</text>');
-    o.push('<g fill="var(--bg-3)" stroke="var(--line-2)" stroke-width="3"><rect x="0" y="0" width="240" height="150"/><rect x="240" y="0" width="70" height="150"/><rect x="310" y="0" width="410" height="150"/><rect x="0" y="960" width="720" height="150"/></g>');
-    o.push('<rect x="610" y="970" width="110" height="140" fill="var(--line)" stroke="var(--line-2)" stroke-width="3"/>');
-    o.push('<g font-size="18" fill="var(--ink-3)" text-anchor="middle"><text x="120" y="80">발코니</text><text x="515" y="80">발코니</text><text x="300" y="1040">큰 발코니</text><text x="275" y="80" font-size="14">작은 칸</text><text x="665" y="1030" font-size="14">작은 칸</text></g>');
+    o.push('<rect x="735" y="0" width="45" height="1110" fill="var(--bg-3)"/><text x="757" y="555" font-size="20" fill="var(--ink-3)" text-anchor="middle" transform="rotate(90 757 555)">복도·계단·엘리베이터</text>');
+    o.push('<g fill="var(--bg-3)" stroke="var(--line-2)" stroke-width="3"><rect x="480" y="0" width="240" height="150"/><rect x="410" y="0" width="70" height="150"/><rect x="0" y="0" width="410" height="150"/><rect x="0" y="960" width="720" height="150"/></g>');
+    o.push('<rect x="0" y="970" width="110" height="140" fill="var(--line)" stroke="var(--line-2)" stroke-width="3"/>');
+    o.push('<g font-size="18" fill="var(--ink-3)" text-anchor="middle"><text x="600" y="80">발코니</text><text x="205" y="80">발코니</text><text x="420" y="1040">큰 발코니</text><text x="445" y="80" font-size="14">작은 칸</text><text x="55" y="1030" font-size="14">작은 칸</text></g>');
     // 방 바닥
     o.push('<g fill="var(--bg-2)" stroke="var(--line-2)" stroke-width="3">');
-    o.push('<rect x="285" y="150" width="195" height="480"/><rect x="0" y="450" width="360" height="510"/>');
+    o.push('<rect x="240" y="150" width="195" height="480"/><rect x="360" y="450" width="360" height="510"/>');
     ROOMS.forEach(function (r) { if (r.id !== 'living' && r.id !== 'dining') o.push('<rect x="' + r.x + '" y="' + r.y + '" width="' + r.w + '" height="' + r.d + '"/>'); });
     o.push('</g>');
     // 현관·욕실·조리대
-    o.push('<rect x="0" y="450" width="130" height="160" fill="var(--bg-3)" stroke="var(--line-2)" stroke-width="2"/><text x="65" y="500" font-size="16" fill="var(--ink-3)" text-anchor="middle">현관</text>');
-    o.push('<rect x="480" y="450" width="190" height="180" fill="var(--kid-bg)" stroke="var(--line-2)" stroke-width="3"/><text x="575" y="545" font-size="18" fill="var(--ink-3)" text-anchor="middle">욕실</text>');
-    o.push('<rect x="240" y="150" width="45" height="300" fill="var(--bg-3)" stroke="var(--line-2)" stroke-width="2"/><text x="262" y="300" font-size="13" fill="var(--ink-3)" text-anchor="middle" transform="rotate(-90 262 300)">조리대 (싱크)</text>');
+    o.push('<rect x="590" y="450" width="130" height="160" fill="var(--bg-3)" stroke="var(--line-2)" stroke-width="2"/><text x="655" y="500" font-size="16" fill="var(--ink-3)" text-anchor="middle">현관</text>');
+    o.push('<rect x="50" y="450" width="190" height="180" fill="var(--kid-bg)" stroke="var(--line-2)" stroke-width="3"/><text x="145" y="545" font-size="18" fill="var(--ink-3)" text-anchor="middle">욕실</text>');
+    o.push('<rect x="435" y="150" width="45" height="300" fill="var(--bg-3)" stroke="var(--line-2)" stroke-width="2"/><text x="457" y="300" font-size="13" fill="var(--ink-3)" text-anchor="middle" transform="rotate(90 457 300)">조리대 (싱크)</text>');
     // 가구 음영 (1차 제안 자리 — 평면도 크기 기준)
     if (showF) {
       ROOMS.forEach(function (r) {
