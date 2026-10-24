@@ -690,7 +690,7 @@
       .forEach((k) => { if (isNumF(fs[k])) numbers[k] = Math.round(fs[k]); });
     return {
       howToRead: '"' + moveMD() + '에 현금 모자라?"·예산·부족 질문의 답은 cashVsEssential(netEssential — 꼭 드는 이사 비용 기준, 예산 화면(#/money/budget) 머리 숫자)이에요. 그다음 withPurchases, allIncluded 순서로. ' +
-        'rentNote(월세를 계약서대로 후불로 하면 달라지는 숫자)와 beforeMove(이사 전에 먼저 나갈 돈)도 함께 말하세요. "부족"을 하나로 뭉뚱그리지 마세요. numbers 는 원 단위.',
+        'rentNote(11/3 돈 흐름에 월세가 들어 있을 때만 — 지금은 후불 확정이라 보통 없음)와 beforeMove(이사 전에 먼저 나갈 돈)도 함께 말하세요. "부족"을 하나로 뭉뚱그리지 마세요. numbers 는 원 단위.',
       cashVsEssential: f.text.headline,
       withPurchases: f.text.withPurchases,
       allIncluded: f.text.allIncluded,
@@ -851,7 +851,7 @@
       '6. 할 일을 추가·수정할 때 "!중요"는 priority high("!보통" mid, "!여유" low)예요. 파트를 말하지 않으면 가장 알맞은 파트를 고르세요.',
       '6-1. 할 일을 사람에게 나눠 배정하지 마세요. 할 일은 모두 "우리 집 할 일"이에요 — "아내가 할 일", "남편 담당", "각자 맡을 일"처럼 사람별로 나누거나 정리하지 말고, 날짜·파트·일의 종류(💰 돈·서류, 📦 짐 등)로만 묶으세요. 같은 시간에 두 곳에서 일이 있으면 "그날 편하게 나눠 맡으세요" 정도로만 말하세요. 사용자가 "@아내" 같은 표시를 붙여도 담당으로 다루지 말고 제목에서 빼세요. (옷·돈의 주인을 말하는 사실, 예: 아내 옷은 캐비닛장으로 — 은 그대로 써도 돼요.)',
       '7. 앱 화면 링크를 마크다운으로 붙일 수 있어요: [할 일](#/checklist/<partId>/<itemId>), [지금 할 일](#/checklist/~focus), [예산](#/money/budget), [' + D.fmt(move) + ' 돈 흐름](#/money/flow), [업체 견적](#/stuff/quotes), [이사 견적](#/stuff/estimate), [짐 목록](#/stuff/inventory), [규격 확인](#/stuff/inventory/spec), [대시보드](#/dashboard), [가이드](#/guide/<partId>), [HUG 보증 비교](#/guide/hug). finance.warnings 끝의 (화면: #/money/…)는 그 경고의 링크예요.',
-      '8. 예산·부족을 물으면(예: "' + moveMD() + '에 현금 모자라?") 예산 화면(#/money/budget)과 같은 순서로 답하세요: ① 꼭 드는 이사 비용 기준 ' + D.fmt(move) + ' 전후 현금 여유/부족(머리 숫자 — finance.cashVsEssential, numbers.netEssential) ② 새로 사는 살림까지 ③ 선택·나중에까지 전부. "부족"을 한 숫자로 뭉뚱그리지 마세요. 돈 흐름에 11월 월세가 들어 있으면 계약서대로 후불일 때의 숫자(finance.rentNote)도 같이 말하고, 이사 전에 먼저 나갈 돈(finance.beforeMove)도 알려 주세요. 중개보수·잔금·대출 상환·월세는 예산이 아니라 돈 흐름에 이미 들어 있어요.',
+      '8. 예산·부족을 물으면(예: "' + moveMD() + '에 현금 모자라?") 예산 화면(#/money/budget)과 같은 순서로 답하세요: ① 꼭 드는 이사 비용 기준 ' + D.fmt(move) + ' 전후 현금 여유/부족(머리 숫자 — finance.cashVsEssential, numbers.netEssential) ② 새로 사는 살림까지 ③ 선택·나중에까지 전부. "부족"을 한 숫자로 뭉뚱그리지 마세요. 월세는 후불 확정(첫 월세 12/3)이라 11/3 돈 흐름에도 예산에도 없어요(사용자가 자금흐름에서 11/3 월세를 다시 켰을 때만 finance.rentNote 를 말하세요), 이사 전에 먼저 나갈 돈(finance.beforeMove)도 알려 주세요. 중개보수·잔금·대출 상환·월세는 예산이 아니라 돈 흐름에 이미 들어 있어요.',
       '9. 지난 답에 "(이 답에서 앱에 이미 반영한 변경: …)"이 붙어 있으면 그 변경은 이미 저장됐어요 — 같은 변경을 다시 하지 마세요.',
       '10. 대화의 마지막 사용자 메시지에만 답하세요. 지난 질문 뒤에 "(사용자가 이 요청을 중지했어요…)", "(…처리하지 못했어요…)", "(…끊겼어요…)" 같은 표시가 있으면 그 요청은 끝난 것이니 실행하거나 이어서 하지 마세요 — 사용자가 마지막 메시지에서 다시 해 달라고 할 때만 하세요.',
       '11. [가족 결정]을 따르세요. 그와 다른 옛 안내(에어컨을 제조사 서비스로 이사 전에 설치·이사 전 새 집 출입 동의, 이사업체 방문견적 3곳 받고 고르기, 냉장고·건조기를 LG 서비스로 옮기기, 이사 전 옷장 주문·벽 고정 동의, 간이옷장 하나 더 사기, \'나\' 잡화를 간이옷장에 넣기, 입주청소 업체, 예비비, 새 커튼·소품 구매)는 권하지 마세요. 앱 데이터(짐 목록 inventory.bigAppliances·예산)가 결정과 다르면 다르다고 알려 주고 고칠지 물어보세요. 짐의 lg=true 는 "제조사 서비스(LG 베스트케어·삼성전자서비스)로 옮김", brand 는 제조사예요.',
@@ -1069,7 +1069,7 @@
     const f = moneyFrame(fs);
     const w = financeWarnings(fs, 5);
     return {
-      howToRead: '"얼마나 부족해?"·"' + moveMD() + '에 현금 모자라?"에는 text.headline(netEssential — 꼭 드는 이사 비용 기준, 예산 화면 머리 숫자)을 먼저, 그다음 withPurchases, allIncluded 순서로 답하세요. 월세 후불이면 netEssentialIfRentDeferred(text.rent). 금액은 원.',
+      howToRead: '"얼마나 부족해?"·"' + moveMD() + '에 현금 모자라?"에는 text.headline(netEssential — 꼭 드는 이사 비용 기준, 예산 화면 머리 숫자)을 먼저, 그다음 withPurchases, allIncluded 순서로 답하세요. 월세는 후불 확정이라 보통 11/3 숫자에 없어요(text.rent 가 있을 때만 말하기). 금액은 원.',
       leftoverAfterMoveDay: f.leftoverAfterMoveDay,
       essentialToPay: f.essentialToPay, purchaseToPay: f.purchaseToPay, optionalToPay: f.optionalToPay,
       netEssential: f.netEssential, netWithPurchases: f.netWithPurchases, netAll: f.netAll,
@@ -1524,7 +1524,7 @@
           lines: fin.budget.lines.filter((x) => x && typeof x === 'object').map((l) => lineView(st, l)),
           refunds: (fin.budget.refunds || []).filter((x) => x && typeof x === 'object').map((r) => ({ id: r.id, label: r.label, amount: Math.round(num(r.amount)), amountTxt: amt(r.amount), received: !!r.got, memo: clip(r.memo, 120) })),
           summary: budgetSummary(),
-          note: '중개보수·잔금·보증금·대출 상환·11월 월세는 예산이 아니라 ' + D.fmt(D.moveDate()) + ' 돈 흐름(#/money/flow)에 들어 있어요 (leftoverAfterMoveDay 에 이미 반영).',
+          note: '중개보수·잔금·보증금·대출 상환은 예산이 아니라 ' + D.fmt(D.moveDate()) + ' 돈 흐름(#/money/flow)에 들어 있어요 (leftoverAfterMoveDay 에 이미 반영). 월세는 후불이라 ' + D.fmt(D.moveDate()) + '엔 안 내고 첫 월세는 12/3이에요.',
           link: '#/money/budget',
         };
       },
@@ -1612,7 +1612,8 @@
         const label = str(a.label, 80);
         if (!label) throw new Error('항목 이름이 비어 있어요.');
         const refund = str(a.type, 10) === 'refund';
-        if (!refund && /중개\s*보수|복비|잔금|보증금|대출\s*상환|월세/.test(label)) throw new Error('“' + label + '”은(는) ' + D.fmt(D.moveDate()) + ' 돈 흐름(#/money/flow)에 이미 들어 있어 예산에 넣으면 두 번 세져요. 금액을 바꾸려면 자금흐름 화면에서 직접 고치도록 안내하세요.');
+        if (!refund && /월세/.test(label)) throw new Error('“' + label + '”은(는) 매달 3일 내는 월세(후불, 첫 월세 12/3)라 이사 예산에 넣지 않아요. 금액을 바꾸려면 자금흐름 화면에서 고치도록 안내하세요.');
+        if (!refund && /중개\s*보수|복비|잔금|보증금|대출\s*상환/.test(label)) throw new Error('“' + label + '”은(는) ' + D.fmt(D.moveDate()) + ' 돈 흐름(#/money/flow)에 이미 들어 있어 예산에 넣으면 두 번 세져요. 금액을 바꾸려면 자금흐름 화면에서 직접 고치도록 안내하세요.');
         const amount = parseAmount(a.amount, '금액');
         const norm = (s) => String(s || '').replace(/\s+/g, '').toLowerCase();
         const dup = (refund ? fin.budget.refunds : fin.budget.lines).find((x) => x && norm(x.label) === norm(label));
