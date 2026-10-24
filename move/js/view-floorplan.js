@@ -697,9 +697,12 @@
     if (u.top > 0.5) parts.push('위 ' + Math.round(u.top));
     return USE_LABEL[u.kind] + (parts.length ? ' · ' + parts.join(' · ') + 'cm' : '');
   }
+  /** 배치 하나에 쌓은 개수 (리빙박스처럼 쌓는 짐 — placement.n, 없으면 1) · 짐 하나를 몇 개까지 쌓을 수 있는지 (inventory.stack, 없으면 0) */
+  const plN = (p) => { const v = Math.round(+(p && p.n)); return v >= 2 ? Math.min(v, 99) : 1; };
+  const stackMax = (it) => { const v = Math.round(+(it && it.stack)); return v >= 2 ? Math.min(v, 20) : 0; };
   function placedCount(key) {
     const c = {};
-    pls(key).forEach((p) => { c[p.invId] = (c[p.invId] || 0) + 1; });
+    pls(key).forEach((p) => { c[p.invId] = (c[p.invId] || 0) + plN(p); });
     return c;
   }
 
@@ -2122,10 +2125,10 @@
         class: 'fp-item' + (isSel ? ' is-sel' : '') + (issue ? ' is-' + issue : '') + ' is-' + fate,
         'data-pid': p.id, transform: 'translate(' + r1(r.x) + ' ' + r1(r.y) + ')',
         tabindex: live ? '0' : null, role: live ? 'button' : null,
-        'aria-label': live ? it.name + ' ' + Math.round(r.w) + '×' + Math.round(r.h) + 'cm, 정면 ' + FRONT_WORD[rotOf(p)] + (issue === 'bad' ? ' (문제 있음)' : issue === 'warn' ? ' (주의)' : '') : null,
+        'aria-label': live ? it.name + (plN(p) > 1 ? ' ' + plN(p) + '개 쌓음' : '') + ' ' + Math.round(r.w) + '×' + Math.round(r.h) + 'cm, 정면 ' + FRONT_WORD[rotOf(p)] + (issue === 'bad' ? ' (문제 있음)' : issue === 'warn' ? ' (주의)' : '') : null,
       });
       const uu = useOf(it);
-      g.appendChild(svg('title', it.name + ' · ' + Math.round(num(it.w, 0)) + '×' + Math.round(num(it.d, 0)) + '×' + Math.round(num(it.h, 0)) + 'cm · ' + MV.inv.fate(fate).label
+      g.appendChild(svg('title', it.name + (plN(p) > 1 ? ' · ' + plN(p) + '개 쌓음(높이 약 ' + Math.round(num(it.h, 0) * plN(p)) + 'cm)' : '') + ' · ' + Math.round(num(it.w, 0)) + '×' + Math.round(num(it.d, 0)) + '×' + Math.round(num(it.h, 0)) + 'cm · ' + MV.inv.fate(fate).label
         + ' · 정면 ' + FRONT_WORD[rotOf(p)] + (uu ? ' · 쓰임 공간 ' + useSummary(uu) : '')));
       if (live) {
         const hw = Math.max(r.w, 26 / s), hh = Math.max(r.h, 26 / s);
@@ -2182,6 +2185,16 @@
         } else {
           g.appendChild(T(cx, cy, nm.text, nm.fs, { 'data-fit': fitW, fill: 'var(--ink)', 'font-weight': 700 }));
         }
+      }
+      // 쌓은 개수 (오른쪽 위 작은 표)
+      const nStack = plN(p);
+      if (nStack > 1) {
+        const bf = fz(9), txt = '×' + nStack, bh = bf * 1.45, bw = textW(txt, bf) + bf * 0.8;
+        const bx = Math.max(0, r.w - bw - fz(1.5)), by = fz(1.5);
+        const sg = svg('g', { class: 'fp-stack', 'aria-hidden': 'true' });
+        sg.appendChild(svg('rect', { x: r1(bx), y: r1(by), width: r1(bw), height: r1(bh), rx: r1(bh / 2), fill: 'var(--brand)', 'fill-opacity': 0.92 }));
+        sg.appendChild(T(bx + bw / 2, by + bh / 2, txt, bf, { fill: '#fff', 'font-weight': 800, class: 'num' }));
+        g.appendChild(sg);
       }
       gItems.appendChild(g);
     });
@@ -2823,6 +2836,9 @@
           out ? sb('in', '↩', '도면 안으로', () => fixPlacement(o.p.id, 'in'), { class: 'btn btn-primary', short: '안으로', title: '도면 안으로 가져오기' }) : null,
           sb('rot', '↻', '정면 돌리기 (90°, 지금 ' + FRONT_WORD[rotOf(o.p)] + ')', () => rotateSel(90), { short: '정면 90°', title: coarse ? '정면 돌리기 — 90°씩 4방향' : '정면 돌리기 — 90°씩 4방향 (알 키)' }),
           sb('flip', '⇅', '정면 반대로 (180°, 지금 ' + FRONT_WORD[rotOf(o.p)] + ')', () => rotateSel(180), { short: '반대로', title: '정면만 반대로 — 자리는 그대로' }),
+          stackMax(o.it) ? sb('stack', '⬆', '하나 더 쌓기 (지금 ' + plN(o.p) + '개, 최대 ' + stackMax(o.it) + '개)', () => stackSel(1),
+            { short: '쌓기 ' + plN(o.p) + '→' + (plN(o.p) + 1), disabled: plN(o.p) >= stackMax(o.it) || (placedCount(key)[o.it.id] || 0) >= qtyOf(o.it), title: '같은 자리에 하나 더 쌓아요 (짐 목록 개수 안에서)' }) : null,
+          stackMax(o.it) && plN(o.p) > 1 ? sb('unstack', '⬇', '하나 내리기 (지금 ' + plN(o.p) + '개)', () => stackSel(-1), { short: '내리기', title: '쌓은 것을 하나 내려요 — 내린 것은 “배치할 짐”에 다시 보여요' }) : null,
           sb('spec', '✎', '규격 수정', () => editSpec(o.it.id), { short: '규격', title: '가로·깊이·높이 고치기' }),
           sb('del', '🗑', '도면에서 빼기', removeSel, { class: 'btn btn-danger', short: '빼기', title: coarse ? '도면에서 빼기' : '도면에서 빼기 (딜리트 키)' }),
           el('button', { type: 'button', class: 'btn btn-ghost btn-icon', 'data-act': 'close', onclick: () => { sel = null; refresh(); }, 'aria-label': '선택 해제' }, '✕')),
@@ -2946,7 +2962,7 @@
           return el('span', { class: 'chip ' + (ok ? 'good' : 'warn'), title: ok ? '평면도 사진 축척·위치를 맞췄어요' : cur.bg.calibrated ? '축척은 맞췄고, 도면 왼쪽 위 모서리(위치)를 아직 안 맞췄어요' : '평면도 사진 축척을 아직 안 맞췄어요' },
             '🖼 사진' + (ok ? ' · 축척 맞춤' : cur.bg.calibrated ? ' · 위치 미확인' : ' · 축척 미확인'));
         })() : null,
-        el('span', { class: 'chip kid' }, '놓은 짐 ' + items.length + '개'),
+        el('span', { class: 'chip kid' }, '놓은 짐 ' + items.reduce((t, o) => t + plN(o.p), 0) + '개'),
         v.bad ? el('span', { class: 'chip bad' }, '문제 ' + v.bad) : null,
         v.warn ? el('span', { class: 'chip warn' }, '주의 ' + v.warn) : null);
       drawEditBar();
@@ -3472,7 +3488,7 @@
     side.addEventListener('scroll', () => { sideTop = side.scrollTop; }, { passive: true });
     function drawSideRaw(force) {
       const cnt = {};
-      cur.items.forEach((o) => { cnt[o.it.id] = (cnt[o.it.id] || 0) + 1; });
+      cur.items.forEach((o) => { cnt[o.it.id] = (cnt[o.it.id] || 0) + plN(o.p); });
       const all = MV.inv.list((it) => eligible(key, it));
       const sg = [prefs().filter, all.map((it) => [it.id, it.name, it.fate, it.cat, it.qty, it.w, it.d, it.h, it.assumed, it[roomField(key)], cnt[it.id] || 0])];
       if (!changed('side', sg) && !force) return;
@@ -3642,7 +3658,7 @@
       if (offHome) {
         laundry.appendChild(el('div', { class: 'row mt-8' },
           el('button', { type: 'button', class: 'btn fp-b btn-primary', onclick: () => backHome(home) }, '↩ 기본 배치 자리로'),
-          el('span', { class: 'tiny muted' }, '지금 자리가 기본 배치(10/24 저녁 가족 배치 그림)와 달라요')));
+          el('span', { class: 'tiny muted' }, '지금 자리가 기본 배치(10/24 밤 가족 배치 그림)와 달라요')));
       }
     }
     /** 세탁기·건조기의 기본 배치 자리(data-layouts.js 새 집 기본 배치)와 지금 자리가 다른지 */
@@ -3995,6 +4011,24 @@
           setTimeout(() => toast(q(saved) + jo(spoken(saved.name), '이', '가') + ' ' + rm.name + '(' + Math.round(rm.w) + '×' + Math.round(rm.h) + 'cm)보다 커요' + (tooBig.turn ? ' — 돌리면 들어가요' : ''), { ms: 4500 }), 30);
         }
       } });
+    }
+    /** 쌓기 ±1 — 짐 목록 개수(qty)와 최대 쌓기 수(inventory.stack) 안에서 */
+    function stackSel(delta) {
+      const o = curSel();
+      if (!o || !stackMax(o.it)) return;
+      const pid = o.p.id, max = stackMax(o.it), qty = qtyOf(o.it);
+      let msg = '';
+      MV.store.update((st) => {
+        const P = layoutsOf(st)[key].placements;
+        const p = P.find((x) => x.id === pid);
+        if (!p) return;
+        const total = P.filter((x) => x.invId === p.invId).reduce((t, x) => t + plN(x), 0);
+        let n = plN(p) + delta;
+        if (delta > 0 && (n > max || total >= qty)) { msg = total >= qty ? '짐 목록 개수(' + qty + '개)를 모두 놓았어요' : '최대 ' + max + '개까지 쌓아요'; return; }
+        n = Math.max(1, n);
+        if (n > 1) p.n = n; else delete p.n;
+      });
+      if (msg) toast(msg);
     }
     function removeSel() {
       const o = curSel();
@@ -5291,12 +5325,12 @@
           rot, x: r.x, y: r.y, w: r.w, h: r.h, dw: Math.max(5, num(it.w, 60)), dd: Math.max(5, num(it.d, 60)),
           hgt: Math.max(3, num(it.h, 0) || 60), wall: wallMounted(it), img: typeof it.img === 'string' ? it.img : '',
           room: String(it[roomField(key)] || ''), url: typeof it.url === 'string' ? it.url : '', front: FRONT_WORD[rot],
-          open: frontFree(plan, list, o) });
+          open: frontFree(plan, list, o), n: plN(p) });
       });
       // 바닥에 안 놓고 다른 짐 위에 올리는 짐(전자레인지 등 floor: false) — 3D 에서 받침 짐 위에 그려요
       const extras = Array.from(inv.values()).filter((it) => it && it.floor === false && FATES_FOR[key].includes(fateOf(it)))
         .map((it) => ({ invId: it.id, name: String(it.name || ''), cat: String(it.cat || 'misc'), tag: String(it.tag || ''), fate: fateOf(it),
-          dw: Math.max(5, num(it.w, 40)), dd: Math.max(5, num(it.d, 30)), hgt: Math.max(3, num(it.h, 20)), use: useOf(it), url: typeof it.url === 'string' ? it.url : '' }));
+          dw: Math.max(5, num(it.w, 40)), dd: Math.max(5, num(it.d, 30)), hgt: Math.max(3, num(it.h, 20)), use: useOf(it), url: typeof it.url === 'string' ? it.url : '', qty: qtyOf(it) }));
       return {
         key, name: plan.name, width: plan.width, depth: plan.depth, bounds: plan.bounds,
         rooms: plan.rooms.filter((r) => r.w > 0 && r.h > 0).map((r) => ({ id: r.id, name: r.name, kind: r.kind, x: r.x, y: r.y, w: r.w, h: r.h })),
