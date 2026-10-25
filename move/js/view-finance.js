@@ -2646,7 +2646,7 @@ div.fn-alert { cursor: default; }
     const move = P.c.move;
     const PREP = [
       { key: 'otp', re: [/OTP|이체\s*한도/], off: -20, text: 'OTP 발급 + 이체한도 1회 1억·1일 5억으로 증액 (영업점 방문이 필요할 수 있어요)' },
-      { key: 'aSend', re: [/A의\s*송금/], off: -18, text: 'A에게 송금 시각·1일 이체한도(' + eok(nn(P.c.f.old.receive)) + ' 이상) 확인 요청, 우리 수취계좌는 문자로 전달' },
+      { key: 'aSend', re: [/A의\s*송금/], off: -8, text: '지금 집 중개사를 통해 A의 송금 시각(10:30 전)·1일 이체한도(' + eok(nn(P.c.f.old.receive)) + ' 이상) 확인, 우리 수취계좌는 문자로 전달' },
       /* 지연이체·한도제한계좌는 가이드(통장업무 → 이체 준비)·체크리스트 OTP 항목과 같은 10/14까지 */
       { key: 'delay', off: -20, text: '지연이체·안심이체(입금계좌지정)가 켜져 있으면 해제하거나 C·중개사·대출 상환계좌를 미리 등록' },
       { key: 'limitAcct', off: -20, text: '받는 통장이 한도제한계좌(1일 100만원 안팎)가 아닌지 확인' },
