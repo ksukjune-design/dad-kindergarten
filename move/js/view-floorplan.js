@@ -706,6 +706,200 @@
     return c;
   }
 
+  /* ---------------- 배치 저장 · 기본 배치로 되돌리기 ----------------
+     바꾼 자리는 늘 바로 저장되고, '💾 지금 배치 저장'은 그때 배치를 이름 붙여 따로 남겨 두는 것(체크포인트)이에요.
+     layouts[key].saves = [{ id: 'ls_…', at: ISO, name, auto?: true, placements: [{ id, invId, x, y, rot, n? }] }]  최신이 앞, 많아야 SAVE_MAX 개
+       · move/layouts 한 문서라 두 기기가 같이 저장해도 id 로 합쳐져요(sync.js) — 저장한 것은 고치지 않고 더하거나 지우기만
+       · 꽉 차면 오래된 자동 저장부터, 그다음 오래된 것부터 빼요 · 기본값 이전 규칙(core migrateSeed)은 placements 만 봐요
+     기본 배치 = MV.seedLayouts[key] (data-layouts.js — 새 집은 10/24 밤 가족 배치). 방 치수·문(planEdits)은 그대로 둬요.
+     불러오기·되돌리기: 짐 목록에서 지웠거나 이 집에 안 가져가는 짐은 빼고, 짐 개수(qty)를 넘는 배치는 줄여요.
+       놓인 방 이름(room/roomNew)은 끌어 옮길 때(commitPos)처럼 놓인 방으로 맞춰요 (그 짐이 놓인 방 중 하나면 그대로).
+       한 번의 저장(MV.store.update)으로 바꾸고, 바꾸기 전 배치가 저장한 것·기본 배치와 다르면 먼저 자동 저장해요. */
+  const SAVE_MAX = 10;
+  const DEFAULT_NAME = { new: '기본 배치 (10/24 밤 가족 배치)', old: '기본 배치 (큰 가전 자리)' };
+  const plCopy = (p) => { const o = { id: String(p.id), invId: String(p.invId), x: r1(num(p.x, 0)), y: r1(num(p.y, 0)), rot: rotOf(p) }; if (plN(p) > 1) o.n = plN(p); return o; };
+  const okPl = (p) => !!p && typeof p === 'object' && p.id != null && typeof p.invId === 'string';
+  function savesOf(L) {
+    return (L && Array.isArray(L.saves) ? L.saves : []).filter((s) => s && typeof s === 'object' && s.id != null && Array.isArray(s.placements))
+      .slice().sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
+  }
+  function seedPls(key) {
+    const S = MV.seedLayouts && MV.seedLayouts[key];
+    return S && Array.isArray(S.placements) ? S.placements.filter(okPl) : null;
+  }
+  /** 짐 목록에 맞춘 배치: 없는 짐·이 집에 안 가져가는 짐은 빼고(dropped), 개수(qty)를 넘는 만큼 쌓은 것부터 줄여요(cut) */
+  function fitArrangement(st, key, list) {
+    const inv = new Map((st.inventory || []).filter((i) => i && i.id).map((i) => [i.id, i]));
+    const left = {};
+    const out = [];
+    let dropped = 0, cut = 0;
+    (list || []).filter(okPl).forEach((p0) => {
+      const it = inv.get(p0.invId);
+      if (!it || !eligible(key, it)) { dropped += plN(p0); return; }
+      if (!(p0.invId in left)) left[p0.invId] = qtyOf(it);
+      const p = plCopy(p0);
+      const n = Math.min(plN(p), left[p0.invId]);
+      cut += plN(p) - n;
+      if (n < 1) return;
+      left[p0.invId] -= n;
+      if (n > 1) p.n = n; else delete p.n;
+      out.push(p);
+    });
+    // 같은 배치 id 가 두 번 들어가지 않게 (동기화 합치기는 id 로 해요)
+    const seen = new Set();
+    return { list: out.filter((p) => (seen.has(p.id) ? false : (seen.add(p.id), true))), dropped, cut };
+  }
+  /** 배치 모양 서명 (배치 id 는 빼고 짐·자리·정면·쌓은 수만) — '지금 배치와 같아요' 판단용 */
+  const arrSig = (list) => JSON.stringify(list.map((p) => [p.invId, r1(num(p.x, 0)), r1(num(p.y, 0)), rotOf(p), plN(p)]).sort());
+  const fitSig = (st, key, list) => arrSig(fitArrangement(st, key, list).list);
+  const fmtAt = (iso) => {
+    const d = new Date(iso);
+    if (!iso || isNaN(d)) return '';
+    return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  };
+  const saveCount = (s) => s.placements.filter(okPl).reduce((t, p) => t + plN(p), 0);
+  /** 저장 하나를 더함 (store.update 안에서). 꽉 차면 오래된 자동 저장부터 빼요 */
+  function pushSave(st, key, name, auto, keepId) {
+    const L = layoutsOf(st)[key];
+    const s = { id: MV.uid('ls'), at: MV.nowISO(), name: String(name || '').trim().slice(0, 40) || fmtAt(MV.nowISO()) + ' 배치', placements: L.placements.filter(okPl).map(plCopy) };
+    if (auto) s.auto = true;
+    const list = savesOf(L);
+    list.unshift(s);
+    while (list.length > SAVE_MAX) {
+      let i = -1;
+      // 지금 불러오는 저장(keepId)은 빼지 않아요
+      for (let k = list.length - 1; k > 0; k--) if (list[k].auto && list[k].id !== keepId) { i = k; break; }
+      if (i < 0) for (let k = list.length - 1; k > 0; k--) if (list[k].id !== keepId) { i = k; break; }
+      if (i < 0) break;
+      list.splice(i, 1);
+    }
+    L.saves = list;
+    return s;
+  }
+  /** 지금 배치를 잃지 않게: 저장한 것·기본 배치 어느 것과도 다르고 비어 있지 않으면 자동 저장 (store.update 안에서) */
+  function autoSaveIfNew(st, key, why, keepId) {
+    const L = layoutsOf(st)[key];
+    const now = fitSig(st, key, L.placements);
+    if (now === '[]') return null;
+    const sd = seedPls(key);
+    if (sd && fitSig(st, key, sd) === now) return null;
+    if (savesOf(L).some((s) => fitSig(st, key, s.placements) === now)) return null;
+    return pushSave(st, key, why + ' 자동 저장', true, keepId);
+  }
+  /** 배치를 통째로 바꿈 (store.update 안에서) → { before, dropped, cut, rooms: { invId: [옛 방, 새 방] } } */
+  function applyArrangement(st, key, list, plan, preferSeed) {
+    const L = layoutsOf(st)[key];
+    const before = L.placements.map((p) => MV.clone(p));
+    const fit = fitArrangement(st, key, list);
+    L.placements = fit.list;
+    const rooms = {};
+    if (plan) {
+      const f = roomField(key);
+      const inv = new Map((st.inventory || []).filter((i) => i && i.id).map((i) => [i.id, i]));
+      const byInv = new Map();
+      fit.list.forEach((p) => {
+        const it = inv.get(p.invId);
+        if (!it) return;
+        const r = rectOf(p, it);
+        const rm = roomAt(plan, r.x + r.w / 2, r.y + r.h / 2);
+        if (!rm) return;
+        if (!byInv.has(p.invId)) byInv.set(p.invId, []);
+        byInv.get(p.invId).push(rm.name);
+      });
+      byInv.forEach((names, iid) => {
+        const it = inv.get(iid);
+        const curV = it[f];
+        if (names.includes(curV)) return;
+        const sv = preferSeed && MV.seed && Array.isArray(MV.seed.inventory) ? MV.seed.inventory.find((z) => z && z.id === iid) : null;
+        const nv = sv && names.includes(sv[f]) ? sv[f] : names[0];
+        rooms[iid] = [curV, nv];
+        it[f] = nv;
+      });
+    }
+    return { before, after: fit.list.map((p) => MV.clone(p)), dropped: fit.dropped, cut: fit.cut, rooms };
+  }
+  const samePl = (p, q) => !!p && !!q && p.invId === q.invId && Math.abs(num(p.x, 0) - num(q.x, 0)) < 0.05 && Math.abs(num(p.y, 0) - num(q.y, 0)) < 0.05 && rotOf(p) === rotOf(q) && plN(p) === plN(q);
+  /** 바로 되돌리기: 바꾼 배치만 바꾸기 전으로 — 그 뒤 다른 기기·직접 옮긴 배치는 그대로, 그 사이 지운 짐은 빼요.
+      방 이름도 우리가 바꾼 그대로일 때만 되돌려요 */
+  function undoArrangement(key, res, log) {
+    MV.store.update((st) => {
+      const ids = new Set((st.inventory || []).map((i) => i && i.id));
+      const L = layoutsOf(st)[key];
+      const B = new Map(res.before.map((p) => [p.id, p]));
+      const A = new Map((res.after || []).map((p) => [p.id, p]));
+      // 바꾼 뒤 그대로인 배치: 예전에 없던 것은 빼고, 있던 것은 예전 자리로
+      const out = [];
+      L.placements.forEach((p) => {
+        const a = A.get(p.id);
+        if (!a || !samePl(p, a)) { out.push(p); return; }
+        const b = B.get(p.id);
+        if (!b) return;
+        ['x', 'y', 'rot', 'n'].forEach((k) => { if (b[k] === undefined) delete p[k]; else p[k] = b[k]; });
+        out.push(p);
+      });
+      // 바꾸면서 뺀 배치는 다시 (아직 없으면)
+      const have = new Set(out.map((p) => p.id));
+      res.before.forEach((b) => { if (!A.has(b.id) && !have.has(b.id) && ids.has(b.invId)) out.push(MV.clone(b)); });
+      L.placements = out.filter((p) => ids.has(p.invId));
+      const f = roomField(key);
+      Object.keys(res.rooms || {}).forEach((iid) => {
+        const it = (st.inventory || []).find((i) => i && i.id === iid);
+        const [o, n] = res.rooms[iid];
+        if (!it || it[f] !== n) return;
+        if (o === undefined) delete it[f]; else it[f] = o;
+      });
+    }, { log });
+  }
+  /** 다른 화면·시험에서도 같은 규칙으로 (화면은 아래 편집 화면의 '💾 저장·되돌리기') */
+  MV.calc = MV.calc || {};
+  MV.calc.planSaves = {
+    list: (key) => savesOf(layoutsOf(MV.store.get())[key === 'old' ? 'old' : 'new']).map((s) => ({ id: s.id, at: s.at, name: s.name, auto: !!s.auto, count: saveCount(s) })),
+    save(key, name) {
+      key = key === 'old' ? 'old' : 'new';
+      let s = null;
+      MV.store.update((st) => { s = pushSave(st, key, name, false); }, { log: '💾 ' + PLAN_LABEL[key] + ' 배치 저장: ' + (String(name || '').trim().slice(0, 40) || '이름 없음') });
+      return s && { id: s.id, name: s.name, at: s.at, count: saveCount(s) };
+    },
+    remove(key, id) {
+      key = key === 'old' ? 'old' : 'new';
+      let gone = null;
+      MV.store.update((st) => {
+        const L = layoutsOf(st)[key];
+        gone = savesOf(L).find((s) => s.id === id) || null;
+        if (gone) L.saves = savesOf(L).filter((s) => s.id !== id);
+      }, { log: '🗑 저장한 ' + PLAN_LABEL[key] + ' 배치 지움' });
+      return gone;
+    },
+    /** what = 저장 id 또는 'default' → { same } | { name, before, dropped, cut, rooms, auto } | null */
+    restore(key, what) {
+      key = key === 'old' ? 'old' : 'new';
+      const st0 = MV.store.get();
+      const L0 = layoutsOf(st0)[key];
+      const isDef = what === 'default';
+      const src = isDef ? seedPls(key) : (savesOf(L0).find((s) => s.id === what) || {}).placements;
+      if (!src) return null;
+      const name = isDef ? DEFAULT_NAME[key] : (savesOf(L0).find((s) => s.id === what) || {}).name || '저장한 배치';
+      if (fitSig(st0, key, src) === fitSig(st0, key, L0.placements)) return { same: true, name };
+      const plan = getPlan(key);
+      let res = null;
+      MV.store.update((st) => {
+        const auto = autoSaveIfNew(st, key, isDef ? '되돌리기 전' : '불러오기 전', isDef ? null : what);
+        res = applyArrangement(st, key, src, plan, isDef);
+        res.auto = auto ? auto.name : null;
+        res.name = name;
+      }, { log: isDef ? '⟲ ' + PLAN_LABEL[key] + ' 배치를 ' + DEFAULT_NAME[key] + '로 되돌림' : '📂 ' + PLAN_LABEL[key] + ' 배치 불러오기: ' + name });
+      return res;
+    },
+    undo: (key, res) => undoArrangement(key === 'old' ? 'old' : 'new', res, '↩ ' + PLAN_LABEL[key === 'old' ? 'old' : 'new'] + ' 배치 바꾸기 취소'),
+    same(key, what) {
+      key = key === 'old' ? 'old' : 'new';
+      const st = MV.store.get();
+      const L = layoutsOf(st)[key];
+      const src = what === 'default' ? seedPls(key) : (savesOf(L).find((s) => s.id === what) || {}).placements;
+      return !!src && fitSig(st, key, src) === fitSig(st, key, L.placements);
+    },
+  };
+
   /* ---------------- 도면 (원본 + 실측 수정 병합) ---------------- */
   const validKind = (k) => (typeof k === 'string' && k.trim() ? k.trim() : 'other');
   function getPlan(key) {
@@ -2067,7 +2261,7 @@
     //      작은 것도 손가락으로 누를 수 있게 화면에서 FX_TAP px 이상, 큰 것부터 깔아 작은 것이 위로 (짐은 이 위에 그려져 짐 누르기가 먼저)
     if (live) {
       const gf = svg('g', { class: 'fp-fxhits' });
-      const minS = FX_TAP / s;
+      const minS = (o.fxTap || FX_TAP) / s;
       plan.fixtures.map((f, i) => ({ f, i, r: fxRect(f) })).filter((x) => x.r.w > 0 && x.r.h > 0 && (x.f.note || x.f.name))
         .sort((a, c) => c.r.w * c.r.h - a.r.w * a.r.h)
         .forEach(({ f, i, r }) => {
@@ -2131,7 +2325,9 @@
       g.appendChild(svg('title', it.name + (plN(p) > 1 ? ' · ' + plN(p) + '개 쌓음(높이 약 ' + Math.round(num(it.h, 0) * plN(p)) + 'cm)' : '') + ' · ' + Math.round(num(it.w, 0)) + '×' + Math.round(num(it.d, 0)) + '×' + Math.round(num(it.h, 0)) + 'cm · ' + MV.inv.fate(fate).label
         + ' · 정면 ' + FRONT_WORD[rotOf(p)] + (uu ? ' · 쓰임 공간 ' + useSummary(uu) : '')));
       if (live) {
-        const hw = Math.max(r.w, 26 / s), hh = Math.max(r.h, 26 / s);
+        // 손가락 칸: 터치 화면은 40px, 마우스는 26px 이상 (겹치면 누른 자리에서 고르는 규칙은 편집 화면 pickItem)
+        const tm = o.tapMin || 26;
+        const hw = Math.max(r.w, tm / s), hh = Math.max(r.h, tm / s);
         g.appendChild(svg('rect', { class: 'fp-hit', x: r1((r.w - hw) / 2), y: r1((r.h - hh) / 2), width: r1(hw), height: r1(hh), fill: 'transparent' }));
       }
       g.appendChild(svg('rect', Object.assign({
@@ -2339,7 +2535,9 @@
 .fp-stage { position: relative; margin: 0 auto; }
 .fp-svg { display: block; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; font-family: var(--font); }
 .fp-svg text, .fp-svg .fp-deco { pointer-events: none; }
-.fp-svg.is-live .fp-item { cursor: grab; touch-action: none; }
+.fp-svg.is-live .fp-item { cursor: grab; }
+/* 손가락: 고른 짐만 끌어요 — 안 고른 짐 위를 쓸면 화면이 움직여요 (편집 화면 pointerdown·touchstart 와 같은 규칙) */
+.fp-svg.is-live .fp-item.is-sel { touch-action: none; }
 .fp-svg.is-dragging, .fp-svg.is-dragging .fp-item { cursor: grabbing; }
 .fp-svg .fp-item:focus { outline: none; }
 .fp-svg .fp-item.is-sel .fp-body { stroke-width: 2.6px; fill-opacity: .34; }
@@ -2382,15 +2580,29 @@
 .fp-selinfo strong { margin-right: 4px; }
 .fp-selbtns { display: flex; gap: 4px; flex-wrap: wrap; }
 .fp-selbtns .btn { min-height: 36px; padding: 0 10px; font-size: .84rem; gap: 4px; }
-@media (max-width: 600px) {
-  .fp-selbar { padding: 4px; gap: 2px; border-radius: 10px; max-width: 182px; }
-  .fp-selinfo { font-size: .72rem; padding: 0 2px; }
-  .fp-selinfo strong { display: block; overflow: hidden; text-overflow: ellipsis; }
-  .fp-selbtns { flex-wrap: nowrap; gap: 3px; }
-  .fp-selbtns .btn { padding: 0; width: 38px; min-width: 38px; font-size: 1rem; }
-  .fp-selbtns .btn .fp-bl { display: none; }
-  .fp-selfxb { font-size: .72rem; padding: 0 4px; }
+/* 폰(좁거나 낮은 화면): 짐 도구는 아래 메뉴 바로 위에 붙는 띠 — 도면 창 밖이라 창을 넓히거나 고른 짐을 가리지 않아요 */
+.fp-selbar.is-sheet { position: fixed; left: 8px; right: 8px; top: auto; bottom: calc(var(--bottom-h) + 8px + env(safe-area-inset-bottom)); z-index: 25;
+  width: auto; max-width: 560px; margin: 0 auto; padding: 8px; gap: 6px; border-radius: 14px; }
+.fp-selbar.is-sheet .fp-selinfo { font-size: .82rem; white-space: normal; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 6px; padding: 0 2px; }
+.fp-selbar.is-sheet .fp-selinfo strong { flex: 0 1 auto; min-width: 0; max-width: 100%; font-size: .9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: 0; }
+.fp-selbar.is-sheet .fp-selbtns { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 4px; }
+.fp-selbar.is-sheet .fp-selbtns .btn { flex-direction: column; gap: 1px; width: auto; min-width: 0; min-height: 50px; padding: 4px 2px; line-height: 1.1; }
+.fp-selbar.is-sheet .fp-selbtns .btn .fp-bi { font-size: 1.05rem; }
+.fp-selbar.is-sheet .fp-selbtns .btn .fp-bl { font-size: .7rem; font-weight: 750; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.fp-selbar.is-sheet .fp-selbtns .btn .fp-bl .fp-wl { display: none; }
+.fp-selbar.is-sheet .fp-selbtns .btn .fp-bl .fp-ws, .fp-selbar.is-sheet .fp-selx .fp-bl { display: inline; }
+.fp-selbar.is-sheet .fp-selfxb { min-height: 40px; font-size: .8rem; }
+.fp-selbar:not(.is-sheet) .fp-bl .fp-ws, .fp-selbar:not(.is-sheet) .fp-selx .fp-bl { display: none; }
+.fp-selbar:not(.is-sheet) .fp-bl .fp-wl { display: inline; }
+/* 가로로 눕힌 폰: 이름과 단추를 한 줄에 (띠를 낮게) */
+@media (max-height: 500px) {
+  .fp-selbar.is-sheet { flex-direction: row; align-items: center; max-width: 820px; padding: 6px 8px; }
+  .fp-selbar.is-sheet .fp-selinfo { flex: 1 1 200px; min-width: 0; }
+  .fp-selbar.is-sheet .fp-selbtns { flex: 0 1 auto; grid-auto-columns: minmax(56px, 72px); }
+  .fp-selbar.is-sheet .fp-selbtns .btn { min-height: 46px; }
+  .fp-selbar.is-sheet .fp-selfx { flex: 0 1 160px; border-top: 0; padding-top: 0; }
 }
+body.fp-sheet:not(:has(.modal-back)) .toast-wrap { bottom: calc(var(--bottom-h) + var(--fp-sheet-h, 96px) + 18px + env(safe-area-inset-bottom)); }
 .fp-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: .75rem; color: var(--ink-3); margin: 8px 4px 0; align-items: center; }
 .fp-legend span { display: inline-flex; align-items: center; gap: 5px; }
 .fp-legend svg { width: 22px; height: 12px; flex: none; }
@@ -2415,6 +2627,7 @@
 .toast.fp-toast { width: max-content; max-width: min(520px, calc(100vw - 32px)); border-radius: 18px; }
 .toast.fp-toast > span { min-width: 0; line-height: 1.4; }
 .toast.fp-toast > button { flex: none; white-space: nowrap; min-height: 32px; padding: 0 2px; }
+@media (pointer: coarse) { .toast.fp-toast > button { min-height: 44px; padding: 0 10px; margin: -10px -8px -10px 0; } }
 .fp-cmp-tbl td:first-child { word-break: keep-all; overflow-wrap: anywhere; min-width: 6.5em; }
 .fp-link:hover { color: var(--brand); }
 .fp-row-meta { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; margin-top: 3px; }
@@ -2460,7 +2673,8 @@
 .fp-kv dt { color: var(--ink-3); }
 .fp-kv dd { margin: 0; overflow-wrap: anywhere; }
 .fp-cmp-plans { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
-@media (max-width: 700px) { .fp-cmp-plans { grid-template-columns: minmax(0, 1fr); } }
+.fp-cmp-stack { display: none; }
+@media (max-width: 700px) { .fp-cmp-plans { grid-template-columns: minmax(0, 1fr); } .fp-cmp-side { display: none; } .fp-cmp-stack { display: inline; } }
 .fp-cmp-cell { min-width: 0; }
 .fp-cmp-cell h3 { margin: 0 0 2px; font-size: 1rem; }
 .fp-cmp-svg { margin-top: 6px; overflow: hidden; }
@@ -2528,6 +2742,7 @@
 .fp-bgrow .spacer { flex: 1; }
 .fp-range { display: flex; align-items: center; gap: 8px; flex: 1 1 220px; min-width: 0; font-size: .8rem; color: var(--ink-2); font-weight: 700; }
 .fp-range input[type=range] { flex: 1 1 auto; min-width: 90px; height: 36px; accent-color: var(--brand); margin: 0; }
+.fp-range > span { white-space: nowrap; }
 .fp-range output { min-width: 2.8em; text-align: right; font-variant-numeric: tabular-nums; }
 .fp-help { flex: 0 1 auto; min-width: 0; }
 .fp-help[open] { flex: 1 1 100%; }
@@ -2580,32 +2795,119 @@
 .fp-kindsel button[aria-pressed="true"] { background: var(--brand-bg); border-color: var(--brand); color: var(--brand); }
 .fp-del-list { list-style: none; margin: 4px 0 0; padding: 0; }
 .fp-del-list li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 4px 0; font-size: .88rem; }
-@media (max-width: 600px) {
-  .fp-bgbar { padding: 6px 8px; }
-  .fp-bgdesc { display: none; }
-  .fp-tools { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .fp-tools .btn { padding: 0 6px; }
-  /* 폰: [도구 2×2] / [설명] / [전체 크기 · 원래대로 · 완료] — 줄 수를 줄여 도면과 가깝게 */
-  .fp-editbar > .fp-break { display: none; }
-  .fp-editbar > .fp-edittip { order: 1; flex: 1 1 100%; }
-  .fp-editbar > .fp-sizebtn { order: 2; }
-  .fp-editbar > .fp-ebtn { order: 3; }
-  .fp-editbar > .fp-done { margin-left: auto; }
-  .fp-editbar { padding: 10px; gap: 8px 4px; }
-  .fp-editbar > .fp-sizebtn, .fp-editbar > .fp-ebtn { padding: 0 7px; }
+/* ---- 도구 줄: 넓은 화면은 한두 줄에 모두 펼치고, 폰은 [3D · 저장 · 치수 · ⋯ 더보기] 한 줄 (아래 폰 규칙) ---- */
+.fp-tb .btn .fp-tico, .fp-tools .btn .fp-tico { line-height: 1; }
+.fp-tbmore { display: contents; }
+.fp-morebtn, .fp-conly, .fp-under, .fp-jump { display: none; }
+.fp-legwrap > summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 6px; margin-top: 4px; font-size: .84rem; font-weight: 700; color: var(--ink-2); }
+.fp-legwrap > summary::-webkit-details-marker { display: none; }
+.fp-legwrap > summary::before { content: '▸'; color: var(--ink-3); transition: transform .15s; }
+.fp-legwrap[open] > summary::before { transform: rotate(90deg); }
+@media (min-width: 601px) and (min-height: 501px) { .fp-legwrap > summary { display: none; } }
+.fp-touchtip { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; padding: 4px 4px 4px 12px; font-size: .86rem; line-height: 1.45; }
+.fp-touchtip > span { flex: 1 1 auto; min-width: 0; }
+.fp-touchtip .btn { flex: none; }
+.fp-side, .fp-checks, .fp-laundry, .fp-info { scroll-margin-top: calc(var(--topbar-h) + 8px); }
+/* ---- 💾 배치 저장 · 되돌리기 창 ---- */
+.fp-saves { display: flex; flex-direction: column; gap: 12px; }
+.fp-savenew { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; padding: 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); }
+.fp-savelab { display: flex; flex-direction: column; gap: 4px; flex: 1 1 180px; min-width: 0; }
+.fp-savenew .btn { flex: 0 0 auto; }
+.fp-saveh { display: flex; align-items: center; gap: 8px; }
+.fp-saveh h3, .fp-savedef h3 { margin: 0; font-size: .95rem; }
+.fp-savelist { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.fp-saverow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg-2); }
+.fp-saverow.is-now { border-color: color-mix(in srgb, var(--good) 45%, var(--line)); }
+.fp-saveinfo { flex: 1 1 180px; min-width: 0; }
+.fp-savename { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fp-saveinfo .chip { margin-left: 6px; font-size: .7rem; padding: 0 7px; }
+.fp-savebtns { display: flex; gap: 6px; flex: 0 0 auto; }
+.fp-savedef { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; padding-bottom: 12px; border-bottom: 1px dashed var(--line); }
+@media (pointer: coarse) { .modal:has(.fp-saves) .modal-head .btn, .modal:has(.fp-saves) .modal-foot .btn { min-height: 44px; min-width: 44px; } }
+.fp-savedef:empty { display: none; }
+@media (max-width: 460px) {
+  .fp-savebtns { flex: 1 1 100%; }
+  .fp-savebtns .btn { flex: 1 1 0; }
+  .fp-savenew > .btn { flex: 1 1 100%; }
+  .fp-savedef > .btn { align-self: stretch; }
+}
+/* ---- 폰: 좁은 화면(≤600px) 또는 가로로 눕힌 낮은 화면(높이 ≤500px) ---- */
+@media (max-width: 600px), (max-height: 500px) {
+  /* 짧은 글자로 바꿔 단추 줄이 한 줄에 들어가게 */
+  .fp-wl { display: none; }
+  .fp-ws { display: inline; }
+  /* 첫 화면에 도면이 보이게: 설명 글·체크리스트 단추는 숨기고(⋯ 더보기 안에), 도구는 한 줄 */
+  .fp-vh.has-tools { margin-bottom: 8px; }
+  .fp-vh.has-tools .sub, .fp-vh.has-tools .actions { display: none; }
+  .fp-vh.has-tools h1 { font-size: 1.3rem; }
+  .fp-headrow { gap: 8px; margin-bottom: 8px; }
+  .fp-tabs { margin-bottom: 0; }
+  .fp-tb { flex: 1 1 100%; gap: 6px; margin-bottom: 0; }
+  .fp-tb > .fp-zoomtb { display: none; }
+  .fp-tb > .btn { flex: 1 1 auto; min-height: 44px; padding: 0 8px; gap: 4px; }
+  .fp-morebtn { display: inline-flex; position: relative; }
+  .fp-morebtn.has-on::after { content: ''; position: absolute; top: 6px; right: 6px; width: 7px; height: 7px; border-radius: 50%; background: var(--brand); }
+  .fp-tbmore { display: none; flex: 1 1 100%; flex-wrap: wrap; gap: 6px; padding: 8px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg-2); }
+  .fp-tb.is-more .fp-tbmore { display: flex; }
+  .fp-tbmore .fp-conly { display: inline-flex; }
+  .fp-chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-bottom: 6px; }
+  .fp-chips::-webkit-scrollbar { display: none; }
+  .fp-chips > * { flex: none; }
+  .fp-chips .chip { font-size: .78rem; }
+  .fp-plan { padding: 8px; }
+  /* 확대·축소는 도면 바로 아래 */
+  .fp-under { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 6px 0 0; }
+  .fp-under .fp-grp { display: inline-flex; align-items: center; gap: 2px; background: var(--bg-3); border-radius: 12px; padding: 2px; }
+  .fp-under .fp-grp .btn { border-color: transparent; background: transparent; min-width: 44px; }
+  .fp-jump { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .fp-jump .btn { flex: 1 1 auto; }
+  .fp-hint, .fp-legend { font-size: .8rem; }
+  /* 치수 수정 띠: [도구 4개 · 완료] / [전체 크기 · 숫자로 · 원래대로] / 한 줄 안내 */
+  .fp-editbar { padding: 8px; gap: 6px; }
+  .fp-editbar > .fp-tools { order: 0; flex: 1 1 220px; width: auto; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); }
+  .fp-editbar > .fp-tools .btn { flex-direction: column; gap: 1px; min-height: 48px; padding: 3px 2px; line-height: 1.1; }
+  .fp-editbar > .fp-tools .btn .fp-tlab { font-size: .7rem; font-weight: 750; white-space: nowrap; }
+  .fp-editbar > .fp-done { order: 1; min-height: 48px; padding: 0 12px; }
+  .fp-editbar > .fp-break { display: block; order: 2; flex: 0 0 100%; height: 0; }
+  .fp-editbar > .fp-sizebtn { order: 3; padding: 0 8px; }
+  .fp-editbar > .fp-ebtn:not(.fp-done) { order: 4; padding: 0 8px; }
+  .fp-editbar > .fp-edittip { order: 5; flex: 1 1 150px; font-size: .8rem; line-height: 1.4; }
   .fp-dock .btn { min-width: 54px; padding: 3px 4px; }
-  .fp-bgscale { display: none; }
+  /* 평면도 사진: 도구 줄은 옆으로 밀어 보기 (줄 수를 줄여 도면과 가깝게) */
+  .fp-bgbar { padding: 6px 8px; }
+  .fp-bgdesc, .fp-bgscale { display: none; }
+  .fp-bgbody .fp-bgrow { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+  .fp-bgbody .fp-bgrow::-webkit-scrollbar { display: none; }
+  .fp-bgbody .fp-bgrow > * { flex: none; }
+  .fp-bgbody .fp-range { flex: 1 0 190px; }
+  .fp-bgbody .fp-help { white-space: normal; }
+  .fp-bgbody .fp-help[open] { flex: 0 0 calc(100% - 4px); }
+  /* 사진 맞추기 안내 띠: 낮게 (설명은 '설명 보기'로), 길이를 넣는 2단계는 띠가 따라오지 않게 (자판과 함께 찍은 점을 가리지 않게) */
   .fp-wizbar { top: calc(var(--topbar-h) + 4px); padding: 8px 10px; }
-  /* 폰: 안내 띠를 낮게 (설명은 '설명 보기'로), 길이를 넣는 2단계는 띠가 따라오지 않게 (자판과 함께 찍은 점을 가리지 않게) */
   .fp-wizhelpbtn { display: inline-flex; }
   .fp-wizrow { gap: 4px; }
   .fp-wizrow > .btn { padding: 0 8px; }
   .fp-wizbar:not(.is-help) .fp-wizhelp { display: none; }
   .fp-wizbar.is-typing { position: static; }
-  /* 폰: 짧은 글자로 바꿔 단추 줄이 한 줄에 들어가게 */
-  .fp-wl { display: none; }
-  .fp-ws { display: inline; }
   .fp-lenin { flex-basis: 150px; }
+}
+/* 폰 세로: 도면 창은 화면의 72%까지 (창 밖에 화면을 쓸어 넘길 자리를 남김) */
+@media (max-width: 600px) and (min-height: 501px) {
+  .fp-scroll { max-height: min(72vh, calc(100vh - var(--topbar-h) - var(--bottom-h) - 24px)); }
+}
+/* 가로로 눕힌 폰: 제목은 숨기고 탭·도구를 한 줄에, 도면 창은 위 막대와 아래 메뉴 사이를 채워요 */
+@media (max-height: 500px) {
+  .fp-vh.has-tools { display: none; }
+  .fp-tb { flex: 1 1 300px; }
+  .fp-scroll { max-height: calc(100vh - var(--topbar-h) - var(--bottom-h) - 12px); }
+}
+/* 손가락: 누르는 단추는 44px 이상 */
+@media (pointer: coarse) {
+  .fp-b, .fp-tabs button, .fp-filter button, .fp-tools .btn, .fp-selbtns .btn, .fp-nudge .btn, .fp-fix, .fp-msg, .fp-row-btns .btn, .fp-lenalt .btn,
+  .fp-margin-pick .fp-msel, .fp-roomsel .select, .fp-help > summary, .fp-details > summary, .fp-legwrap > summary, .fp-err-more > summary, .fp-kindsel button, .fp-selfxb,
+  .fp-fxtip-h .btn, .fp-fxtip-a .btn, .fp-row-name.fp-link { min-height: 44px; }
+  .fp-b.btn-icon, .fp-row-btns .btn-icon, .fp-fxtip-h .btn, .fp-nudge .btn { width: 44px; }
+  .fp-range input[type=range] { height: 44px; }
 }
 `);
 
@@ -2667,7 +2969,7 @@
   /* ============================================================
      편집 화면 (#/plan/new · #/plan/old)
      ============================================================ */
-  function renderEditor(root, key, ctx, headRow) {
+  function renderEditor(root, key, ctx, headRow, spaceLink) {
     const ui = modalTracker(ctx);   // 이 화면에서 연 창 (화면을 떠나면 함께 닫음)
     let sel = null;           // 선택된 배치 id
     let editMode = false;     // ✏️ 치수 수정
@@ -2688,32 +2990,57 @@
     let fxSel = null;         // 설명을 보여 주는 설비 자리 (이름·x·y 로 만든 키)
 
     // ---- 뼈대 ----
+    // 폰(좁거나 낮은 화면): 도구 줄은 한 줄 [3D · 저장 · 치수 · ⋯ 더보기], 확대·축소는 도면 바로 아래 줄, 짐 도구는 아래에 붙는 띠
+    const COMPACT_Q = '(max-width: 600px), (max-height: 500px)';
+    const compact = () => mm(COMPACT_Q);
+    /** 단추 글: 넓은 화면은 긴 글, 폰은 짧은 글 (.fp-wl / .fp-ws) */
+    const TL = (ico, long, short) => [el('span', { class: 'fp-tico', 'aria-hidden': 'true' }, ico), el('span', { class: 'fp-tlab' }, el('span', { class: 'fp-wl' }, long), el('span', { class: 'fp-ws' }, short || long))];
     const zoomV = el('span', { class: 'fp-zoomv', 'aria-live': 'polite' }, '100%');
+    const zoomV2 = el('span', { class: 'fp-zoomv' }, '100%');
+    const zoomGrp = (v, cls) => el('div', { class: 'fp-grp ' + cls, role: 'group', 'aria-label': '확대·축소' },
+      btn('−', () => setZoom(curZoom() / 1.25), { class: 'btn fp-b btn-icon', 'aria-label': '축소' }),
+      btn('맞춤', () => setZoom(1), { title: '화면에 맞추기', 'aria-label': '화면에 맞추기 (100%)' }),
+      btn('+', () => setZoom(curZoom() * 1.25), { class: 'btn fp-b btn-icon', 'aria-label': '확대' }),
+      v);
     const bGrid = btn('▦ 격자', () => { setPref('grid', !prefs().grid); refresh(); }, { 'aria-pressed': 'true', title: '50cm 격자 보이기' });
     const bSnap = btn('🧲 스냅 5cm', () => { setPref('snap', !prefs().snap); syncToolbar(); }, { 'aria-pressed': 'true', title: '끌 때 5cm 단위·벽에 맞춤' });
-    const bEdit = btn('✏️ 치수 수정', () => {
+    const bEdit = btn(TL('✏️', '치수 수정', '치수'), () => {
       if (wiz) finishWiz(true);
       editMode = !editMode; sel = null; tool = 'room'; preview = null;
       syncStageMode(); refresh();
-    }, { 'aria-pressed': 'false', title: '방 치수 고치기 · 방 그리기/삭제 · 문 추가/삭제 · 전체 크기' });
+      // 폰: 고치기 도구 줄이 도면을 밀어내므로 도면이 위 막대 바로 아래 오게 (아래 메뉴 위에 따라다니는 도구 줄이 떠요)
+      if (editMode && compact()) requestAnimationFrame(() => {
+        const r = scroll.getBoundingClientRect();
+        const dy = r.top - pxv('--topbar-h', 56) - 6;
+        if (dy > 8) window.scrollBy({ top: dy, behavior: 'smooth' });
+      });
+    }, { 'aria-pressed': 'false', 'aria-label': '치수 수정', title: '방 치수 고치기 · 방 그리기/삭제 · 문 추가/삭제 · 전체 크기' });
     const bExport = btn('⬇ 이미지 저장', () => doExport(), { title: '그림 파일로 저장' });
     // 3D 보기 (view-plan3d.js) — 고치기는 이 2D 도면에서, 3D 는 보기만
-    const b3d = MV.plan3d ? btn('🧊 3D로 보기', () => MV.plan3d.open(key), { title: '지금 배치를 입체로 돌려 보기 (고치기는 2D 도면에서)' }) : null;
+    const b3d = MV.plan3d ? btn(TL('🧊', '3D로 보기', '3D'), () => MV.plan3d.open(key), { 'aria-label': '3D로 보기', title: '지금 배치를 입체로 돌려 보기 (고치기는 2D 도면에서)' }) : null;
+    // 배치 저장 · 저장한 배치 불러오기 · 기본 배치로 되돌리기
+    const bSave = btn(TL('💾', '저장·되돌리기', '저장'), () => openSaves(), { 'aria-label': '배치 저장·되돌리기', title: '지금 배치를 이름 붙여 남기거나, 저장한 배치·기본 배치로 되돌리기', 'aria-haspopup': 'dialog' });
     const bUse = btn('🧭 쓰임 공간', () => { setPref('useView', !prefs().useView); refresh(); },
       { 'aria-pressed': 'true', title: '서랍·문·앉는 자리처럼 가구를 쓸 때 필요한 공간을 빗금으로 보기' });
     const selMargin = el('select', { class: 'select fp-msel', 'aria-label': '오차 여유 (가구 둘레에 비워 둘 거리)', title: '실측 오차를 흡수하려고 가구 둘레에 비워 둘 거리 — 점선 상자로 보여요' },
       MARGINS.map((v) => el('option', { value: String(v) }, v ? v + 'cm' : '끔')));
     selMargin.addEventListener('change', () => { const v = +selMargin.value; setPref('margin', MARGINS.includes(v) ? v : 10); refresh(); });
     const marginBox = el('label', { class: 'fp-margin-pick' }, el('span', { 'aria-hidden': 'true' }, '오차 여유'), selMargin);
-    const bBg = btn('🖼 평면도 사진', () => { setPref('bgPanel', !prefs().bgPanel); drawBgBar(true); syncToolbar(); if (prefs().bgPanel) revealEl(bgBar); },
-      { 'aria-pressed': 'true', title: '진짜 평면도 사진을 깔고 축척 맞추기' });
+    // 평면도 사진 줄: 사진이 있거나 이번에 직접 열었을 때만 (사진 없이 예전에 켜 둔 값만으로는 빈 줄을 띄우지 않음)
+    let bgAsk = false;
+    const bgOpen = () => !!prefs().bgPanel && (!!bgOf(key) || bgAsk);
+    const bBg = btn('🖼 평면도 사진', () => {
+      const on = !bgOpen();
+      bgAsk = on;
+      setPref('bgPanel', on); drawBgBar(true); syncToolbar(); if (on) revealEl(bgBar);
+    }, { 'aria-pressed': 'false', title: '진짜 평면도 사진을 깔고 축척 맞추기' });
+    const moreId = 'fptbmore-' + key;
+    let moreOpen = false;
+    const bMore = btn(TL('⋯', '더보기', '더보기'), () => { moreOpen = !moreOpen; syncToolbar(); }, { class: 'btn fp-b fp-morebtn', 'aria-expanded': 'false', 'aria-controls': moreId, 'aria-label': '도구 더보기 (격자·스냅·쓰임 공간·오차 여유·평면도 사진·이미지 저장)' });
     const tb = el('div', { class: 'fp-tb', role: 'toolbar', 'aria-label': '도면 도구' },
-      el('div', { class: 'fp-grp' },
-        btn('−', () => setZoom(curZoom() / 1.25), { class: 'btn fp-b btn-icon', 'aria-label': '축소' }),
-        btn('맞춤', () => setZoom(1), { title: '화면에 맞추기' }),
-        btn('+', () => setZoom(curZoom() * 1.25), { class: 'btn fp-b btn-icon', 'aria-label': '확대' }),
-        zoomV),
-      b3d, bGrid, bSnap, bUse, marginBox, bEdit, bBg, bExport);
+      zoomGrp(zoomV, 'fp-zoomtb'), b3d, bSave, bEdit, bMore,
+      el('div', { class: 'fp-tbmore', id: moreId, role: 'group', 'aria-label': '도면 보기 도구' }, bGrid, bSnap, bUse, marginBox, bBg, bExport,
+        spaceLink ? el('a', { class: 'btn fp-b fp-conly', href: spaceLink.href }, spaceLink.label) : null));
     if (headRow) headRow.appendChild(tb);
     const chips = el('div', { class: 'fp-chips' });
     const bgBar = el('div', { class: 'fp-bgbar', role: 'region', 'aria-label': PLAN_LABEL[key] + ' 평면도 사진' });
@@ -2731,15 +3058,36 @@
     const mm = (qq) => !!(window.matchMedia && window.matchMedia(qq).matches);
     const coarse = mm('(pointer: coarse)') || (navigator.maxTouchPoints > 0 && !mm('(hover: hover)'));
     const hint = el('p', { class: 'fp-hint' }, coarse
-      ? '짐을 손가락으로 끌어 옮기고, 톡 누르면 정면 돌리기·빼기 메뉴가 나와요. 짐의 작은 삼각형이 정면(문·서랍·앉는 쪽)이에요. 냉장고 자리·배관구 같은 설비 자리를 누르면 설명이 나와요. 빈 곳을 끌면 화면이 움직이고, 두 손가락으로 벌리면 도면이 커져요.'
+      ? '짐을 톡 눌러 고른 뒤 끌어서 옮기세요 — 고르지 않은 짐 위를 쓸면 화면이 움직여요. 고르면 아래에 정면 돌리기·빼기 단추가 나와요. 짐의 작은 삼각형이 정면(문·서랍·앉는 쪽)이에요. 냉장고 자리·배관구 같은 설비 자리를 누르면 설명이 나와요. 두 손가락으로 벌리면 도면이 커지고, 빈 곳을 두 번 톡 누르면 2배 ↔ 맞춤으로 바뀌어요.'
       // 키보드 안내는 마우스·키보드가 있는 화면에서만 (터치 기기에선 숨김)
       : '짐을 끌어서 옮기고, 눌러서 선택하면 정면 돌리기·빼기를 할 수 있어요. 짐의 작은 삼각형이 정면(문·서랍·앉는 쪽)이에요. 냉장고 자리·배관구 같은 설비 자리를 누르면 설명이 나와요. 키보드(도면 위에서): 방향키: 1cm씩 · 쉬프트+방향키: 10cm씩 · 알 키(ㄱ): 정면 돌리기(90°) · 쉬프트+알 키: 정면 반대로(180°) · 딜리트: 빼기 · 이스케이프: 해제 · 컨트롤+휠: 확대');
     const planErr = el('div', { class: 'fp-errwrap', hidden: true });   // 도면을 그리다 오류가 나면 여기에 안내
-    const planCard = el('section', { class: 'card fp-plan', 'aria-label': PLAN_LABEL[key] + ' 도면' }, chips, bgBar, wizBar, editBar, planErr, scroll, legend(), hint, fileIn);
+    // 짐·설비 자리를 누르는 칸 (화면 px): 손가락이면 40, 마우스면 26·28
+    const TAP_MIN = coarse ? 40 : 26;
+    const FX_TAP_NOW = coarse ? 40 : FX_TAP;
+    // 터치 화면: 처음 한 번만 도면 위에 짧은 안내 (닫으면 이 기기에서 다시 안 보임)
+    const TIP_KEY = 'mv:plan:touchtip1';
+    let tipSeen = true;
+    try { tipSeen = !coarse || localStorage.getItem(TIP_KEY) === '1'; } catch (e) { tipSeen = !coarse; }
+    const tipBox = tipSeen ? null : el('div', { class: 'callout kid fp-touchtip', role: 'note' },
+      el('span', '👆 짐을 톡 눌러 고른 뒤 끌어서 옮기세요 · 두 손가락으로 벌리면 커져요'),
+      el('button', { type: 'button', class: 'btn btn-ghost btn-icon fp-b', 'aria-label': '안내 닫기', onclick: () => { try { localStorage.setItem(TIP_KEY, '1'); } catch (e) { /* 이 기기에 못 남기면 이번만 닫음 */ } if (tipBox) tipBox.remove(); } }, '✕'));
+    // 폰: 확대·축소는 도면 바로 아래 (위 도구 줄이 화면 밖으로 밀려나도 도면과 함께 보이게)
+    const underRow = el('div', { class: 'fp-under' }, zoomGrp(zoomV2, 'fp-zoomun'), coarse ? el('span', { class: 'tiny muted fp-dbl' }, '빈 곳 두 번 톡: 2배 ↔ 맞춤') : null);
+    // 범례·도움말: 넓은 화면은 늘 펼침, 폰은 접어 둠
+    const legWrap = el('details', { class: 'fp-legwrap', open: !compact() }, el('summary', '범례 · 도움말'), legend(), hint);
     const side = el('aside', { class: 'card fp-side', 'aria-label': '배치할 짐 목록' });
     const checks = el('section', { class: 'card fp-checks', 'aria-label': '배치 점검' });
     const laundry = key === 'new' ? el('section', { class: 'card fp-laundry', 'aria-label': '다용도실 세탁기·건조기 점검' }) : null;
     const info = el('section', { class: 'card fp-info' });
+    // 폰: 긴 화면 아래 카드로 바로 가기
+    const jumpTo = (node) => () => { if (node && node.isConnected) node.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+    const jump = el('nav', { class: 'fp-jump', 'aria-label': '이 화면 안에서 바로 가기' },
+      el('button', { type: 'button', class: 'btn fp-b', onclick: jumpTo(side) }, '📦 짐 목록'),
+      el('button', { type: 'button', class: 'btn fp-b', onclick: jumpTo(checks) }, '🔎 배치 점검'),
+      laundry ? el('button', { type: 'button', class: 'btn fp-b', onclick: jumpTo(laundry) }, '🧺 세탁기') : null,
+      el('button', { type: 'button', class: 'btn fp-b', onclick: jumpTo(info) }, '📄 도면 정보'));
+    const planCard = el('section', { class: 'card fp-plan', 'aria-label': PLAN_LABEL[key] + ' 도면' }, chips, tipBox, bgBar, wizBar, editBar, planErr, scroll, underRow, legWrap, jump, fileIn);
     root.appendChild(el('div', { class: 'fp-wrap' },
       el('div', { class: 'fp-main' }, headRow ? null : tb, planCard), side, el('div', { class: 'fp-more' }, checks, laundry, info)));
 
@@ -2773,7 +3121,8 @@
       // 다른 창에서 사진을 지웠으면 맞추기 안내를 닫음
       if (wiz && !cur.bg) { wiz = null; drawWizBar(); syncStageMode(); }
       // 칸마다 따로 그려서, 한 칸에서 오류가 나도 나머지는 보이게 (각 draw* 는 아래 guard 로 감싼 것 — 오류 난 칸엔 쉬운 안내)
-      [drawPlan, drawChips, syncToolbar, () => drawBgBar(false), () => drawSide(false), drawChecks, () => drawLaundry(false), () => drawInfo(false)]
+      [drawPlan, drawChips, syncToolbar, () => drawBgBar(false), () => drawSide(false), drawChecks, () => drawLaundry(false), () => drawInfo(false),
+        () => { if (savesUI && savesUI.m && savesUI.m.root && savesUI.m.root.isConnected) savesUI.draw(); }]
         .forEach((fn) => { try { fn(); } catch (e) { console.error('[plan]', e); } });
     }
     function drawPlanRaw() {
@@ -2782,7 +3131,9 @@
       const cw = lastW || planCard.clientWidth || 340;
       // 도면 창의 CSS 최대 높이와 맞춰야 100%(맞춤)에서 창 안쪽 스크롤이 생기지 않음 (생기면 첫 손가락 쓸기가 페이지 대신 도면 창을 굴림)
       const cssMax = parseFloat(getComputedStyle(scroll).maxHeight);
-      const maxH = Math.max(300, Math.min(window.innerHeight - 190, isFinite(cssMax) ? cssMax - 2 : Infinity));
+      // 가로로 눕힌 폰처럼 CSS 최대 높이가 300px 보다 낮으면 그 높이에 맞춤 (더 크게 그리면 100% 에서도 창 안쪽이 굴러요)
+      const cap = isFinite(cssMax) && cssMax > 0 ? cssMax - 2 : Infinity;
+      const maxH = Math.min(cap, Math.max(Math.min(300, cap), window.innerHeight - 190));
       const bg = bgOf(key);
       const showBg = !!bg && bg.show;
       // 사진 전체가 보여야 할 때(맞추는 중·치수 수정 중·아직 축척을 안 맞춤)만 사진 외곽까지 그림 범위를 넓힘
@@ -2794,7 +3145,7 @@
       const focusRid = ae && svgEl && svgEl.contains(ae) && ae.getAttribute && ae.getAttribute('data-rid');
       const focusFxk = ae && svgEl && svgEl.contains(ae) && ae.getAttribute && ae.getAttribute('data-fxk');
       const focusBtn = ae && selBar.contains(ae) && ae.getAttribute && ae.getAttribute('data-act');
-      const node = buildSVG(plan, key, Object.assign({ s, vb, interactive: !editMode && !wiz, edit: editMode && !wiz, tool, grid: prefs().grid, sel, issues: v.lv, items,
+      const node = buildSVG(plan, key, Object.assign({ s, vb, interactive: !editMode && !wiz, edit: editMode && !wiz, tool, grid: prefs().grid, sel, issues: v.lv, items, tapMin: TAP_MIN, fxTap: FX_TAP_NOW,
         bg: showBg ? { bg, href: bgHref(key, bg.src) } : null, bgFade: showBg && bg.fade, wiz: !!wiz }, useDrawOpts(v)));
       if (svgEl && svgEl.parentNode === stage) stage.replaceChild(node, svgEl); else stage.insertBefore(node, stage.firstChild);
       svgEl = node;
@@ -2816,32 +3167,45 @@
         if (b2 && !selBar.hidden) b2.focus({ preventScroll: true }); else if (g) g.focus({ preventScroll: true });
       }
     }
+    /** 폰: 짐 도구 띠는 아래 메뉴 위에 붙는 띠(도면 창 밖 — 도면 창을 넓히거나 짐을 가리지 않게), 넓은 화면은 짐 위에 뜨는 작은 상자 */
+    function selSheetOff() {
+      document.body.classList.remove('fp-sheet');
+      document.body.style.removeProperty('--fp-sheet-h');
+    }
+    ctx.onCleanup(selSheetOff);
     function drawSelBar() {
       const o = curSel();
-      if (!o || editMode || wiz || !cur) { selBar.hidden = true; selBar.textContent = ''; return; }
+      if (!o || editMode || wiz || !cur) { selBar.hidden = true; selBar.textContent = ''; selSheetOff(); return; }
       const { plan, s } = cur;
+      const sheet = compact();
+      const parent = sheet ? planCard : stage;
+      if (selBar.parentNode !== parent) parent.appendChild(selBar);
+      selBar.classList.toggle('is-sheet', sheet);
       const room = roomAt(plan, o.r.x + o.r.w / 2, o.r.y + o.r.h / 2);
       const out = !within(o.r, plan.bounds, 1);
+      // 단추 글: 넓은 화면 = 아이콘 + 짧은 글(short), 폰 띠 = 아이콘 아래 작은 글(tiny)
       const sb = (act, ico, label, onclick, o2) => el('button', Object.assign({ type: 'button', class: 'btn', 'data-act': act, onclick, 'aria-label': label }, o2 || {}),
-        el('span', { 'aria-hidden': 'true' }, ico), el('span', { class: 'fp-bl', 'aria-hidden': 'true' }, ' ' + ((o2 && o2.short) || label)));
+        el('span', { class: 'fp-bi', 'aria-hidden': 'true' }, ico),
+        el('span', { class: 'fp-bl', 'aria-hidden': 'true' }, el('span', { class: 'fp-wl' }, ' ' + ((o2 && o2.short) || label)), el('span', { class: 'fp-ws' }, (o2 && o2.tiny) || (o2 && o2.short) || label)));
       // 이 짐이 덮어서 누를 수 없게 된 설비 자리(냉장고 자리·세탁 수전·배관구 등) → 같은 설명을 여는 작은 단추
       const under = fxUnder(o, plan, s);
       selBar.textContent = '';
       put(selBar,
-        el('div', { class: 'fp-selinfo' }, el('strong', shortName(o.it.name, 20)),
+        el('div', { class: 'fp-selinfo', title: o.it.name }, el('strong', shortName(o.it.name, sheet ? 40 : 20)),
           // 정면 방향은 잘리지 않게 크기·방 이름보다 앞에
           el('span', { class: 'fp-selfront', title: '정면(문·서랍·앉는 쪽)이 ' + FRONT_WORD[rotOf(o.p)] }, '정면 ' + FRONT_ARROW[rotOf(o.p)]),
-          el('span', { class: 'muted num' }, ' · ' + Math.round(o.r.w) + '×' + Math.round(o.r.h) + 'cm' + (out ? ' · 도면 밖' : room ? ' · ' + room.name : ' · 방 밖'))),
+          el('span', { class: 'muted num' }, ' · ' + Math.round(o.r.w) + '×' + Math.round(o.r.h) + 'cm' + (plN(o.p) > 1 ? ' · ' + plN(o.p) + '개 쌓음' : '') + (out ? ' · 도면 밖' : room ? ' · ' + room.name : ' · 방 밖'))),
         el('div', { class: 'fp-selbtns' },
-          out ? sb('in', '↩', '도면 안으로', () => fixPlacement(o.p.id, 'in'), { class: 'btn btn-primary', short: '안으로', title: '도면 안으로 가져오기' }) : null,
-          sb('rot', '↻', '정면 돌리기 (90°, 지금 ' + FRONT_WORD[rotOf(o.p)] + ')', () => rotateSel(90), { short: '정면 90°', title: coarse ? '정면 돌리기 — 90°씩 4방향' : '정면 돌리기 — 90°씩 4방향 (알 키)' }),
-          sb('flip', '⇅', '정면 반대로 (180°, 지금 ' + FRONT_WORD[rotOf(o.p)] + ')', () => rotateSel(180), { short: '반대로', title: '정면만 반대로 — 자리는 그대로' }),
+          out ? sb('in', '↩', '도면 안으로', () => fixPlacement(o.p.id, 'in'), { class: 'btn btn-primary', short: '안으로', tiny: '안으로', title: '도면 안으로 가져오기' }) : null,
+          sb('rot', '↻', '정면 돌리기 (90°, 지금 ' + FRONT_WORD[rotOf(o.p)] + ')', () => rotateSel(90), { short: '정면 90°', tiny: '돌리기', title: coarse ? '정면 돌리기 — 90°씩 4방향' : '정면 돌리기 — 90°씩 4방향 (알 키)' }),
+          sb('flip', '⇅', '정면 반대로 (180°, 지금 ' + FRONT_WORD[rotOf(o.p)] + ')', () => rotateSel(180), { short: '반대로', tiny: '반대로', title: '정면만 반대로 — 자리는 그대로' }),
           stackMax(o.it) ? sb('stack', '⬆', '하나 더 쌓기 (지금 ' + plN(o.p) + '개, 최대 ' + stackMax(o.it) + '개)', () => stackSel(1),
-            { short: '쌓기 ' + plN(o.p) + '→' + (plN(o.p) + 1), disabled: plN(o.p) >= stackMax(o.it) || (placedCount(key)[o.it.id] || 0) >= qtyOf(o.it), title: '같은 자리에 하나 더 쌓아요 (짐 목록 개수 안에서)' }) : null,
-          stackMax(o.it) && plN(o.p) > 1 ? sb('unstack', '⬇', '하나 내리기 (지금 ' + plN(o.p) + '개)', () => stackSel(-1), { short: '내리기', title: '쌓은 것을 하나 내려요 — 내린 것은 “배치할 짐”에 다시 보여요' }) : null,
-          sb('spec', '✎', '규격 수정', () => editSpec(o.it.id), { short: '규격', title: '가로·깊이·높이 고치기' }),
-          sb('del', '🗑', '도면에서 빼기', removeSel, { class: 'btn btn-danger', short: '빼기', title: coarse ? '도면에서 빼기' : '도면에서 빼기 (딜리트 키)' }),
-          el('button', { type: 'button', class: 'btn btn-ghost btn-icon', 'data-act': 'close', onclick: () => { sel = null; refresh(); }, 'aria-label': '선택 해제' }, '✕')),
+            { short: '쌓기 ' + plN(o.p) + '→' + (plN(o.p) + 1), tiny: '쌓기', disabled: plN(o.p) >= stackMax(o.it) || (placedCount(key)[o.it.id] || 0) >= qtyOf(o.it), title: '같은 자리에 하나 더 쌓아요 (짐 목록 개수 안에서)' }) : null,
+          stackMax(o.it) && plN(o.p) > 1 ? sb('unstack', '⬇', '하나 내리기 (지금 ' + plN(o.p) + '개)', () => stackSel(-1), { short: '내리기', tiny: '내리기', title: '쌓은 것을 하나 내려요 — 내린 것은 “배치할 짐”에 다시 보여요' }) : null,
+          sb('spec', '✎', '규격 수정', () => editSpec(o.it.id), { short: '규격', tiny: '규격', title: '가로·깊이·높이 고치기' }),
+          sb('del', '🗑', '도면에서 빼기', removeSel, { class: 'btn btn-danger', short: '빼기', tiny: '빼기', title: coarse ? '도면에서 빼기' : '도면에서 빼기 (딜리트 키)' }),
+          el('button', { type: 'button', class: 'btn btn-ghost btn-icon fp-selx', 'data-act': 'close', onclick: () => { sel = null; refresh(); }, 'aria-label': '선택 해제' },
+            el('span', { class: 'fp-bi', 'aria-hidden': 'true' }, '✕'), el('span', { class: 'fp-bl fp-ws', 'aria-hidden': 'true' }, '닫기'))),
         under.length ? el('div', { class: 'fp-selfx' }, under.map((x) => {
           const nm = fxShortName(x.f);
           return el('button', { type: 'button', class: 'fp-selfxb', 'data-act': 'fx' + x.i, title: nm + ' 설명 보기', 'aria-label': '이 짐 아래 설비 설명 보기: ' + nm, onclick: () => openFxFromSel(x.i) },
@@ -2849,19 +3213,46 @@
             el('span', { 'aria-hidden': 'true' }, nm));
         })) : null);
       selBar.hidden = false;
+      const pid = o.p.id;
+      cancelAnimationFrame(selRaf);
+      if (sheet) {
+        selBar.style.left = selBar.style.top = '';
+        selBar.style.opacity = '';
+        document.body.classList.add('fp-sheet');
+        // 띠 높이만큼 알림을 올리고, 고른 짐이 띠 뒤에 숨으면 화면을 조금 올려요 (끄는 중·두 손가락 중엔 그대로)
+        selRaf = requestAnimationFrame(() => {
+          if (selBar.hidden || sel !== pid) return;
+          const br = selBar.getBoundingClientRect();
+          document.body.style.setProperty('--fp-sheet-h', Math.round(br.height) + 'px');
+          if (drag || pinch || gest || Date.now() - revealAt < 700) return;   // revealSel 이 따로 굴리는 중이면 그대로
+          const g = svgEl && svgEl.querySelector('[data-pid="' + CSS.escape(pid) + '"]');
+          if (!g) return;
+          const gr = g.getBoundingClientRect();
+          const top = pxv('--topbar-h', 56) + 8;
+          if (gr.bottom > br.top - 8) {
+            const dy = Math.min(gr.bottom - br.top + 16, gr.top - top);
+            if (dy > 4) window.scrollBy({ top: dy, behavior: 'smooth' });
+          }
+        });
+        return;
+      }
+      selSheetOff();
       selBar.style.opacity = '0';   // 자리 잡기 전 한 프레임 숨김 (visibility 와 달리 초점은 받을 수 있음)
       const vb = cur.vb || plan.vb;
       const x0 = (o.r.x - vb.x) * s, y0 = (o.r.y - vb.y) * s, w0 = o.r.w * s, h0 = o.r.h * s;
-      const pid = o.p.id;
       // 크기 측정은 다음 프레임에 한 번만 (강제 레이아웃 방지)
-      cancelAnimationFrame(selRaf);
       selRaf = requestAnimationFrame(() => {
         if (selBar.hidden || sel !== pid) return;
         const bw = selBar.offsetWidth, bh = selBar.offsetHeight;
         const sw = stage.offsetWidth, sh = stage.offsetHeight;
+        // 화면에 보이는 범위(위 막대 아래 ~ 아래 메뉴 위, 도면 창 안)를 도면 좌표로 — 그 안에서 짐 위, 안 되면 아래
+        const st = stage.getBoundingClientRect(), sr = scroll.getBoundingClientRect();
+        const minT = Math.max(0, Math.max(pxv('--topbar-h', 56) + 4, sr.top) - st.top);
+        const maxB = Math.min(sh, Math.min(window.innerHeight - pxv('--bottom-h', 0) - 4, sr.bottom) - st.top);
         let top = y0 - bh - 8;
-        if (top < 0) top = y0 + h0 + 8;
-        if (top + bh > sh) top = Math.max(0, y0 - bh - 8);
+        if (top < minT) top = y0 + h0 + 8;
+        if (top + bh > maxB) top = Math.max(minT, y0 - bh - 8);
+        top = MV.clamp(top, 0, Math.max(0, sh - bh));
         const left = MV.clamp(x0 + w0 / 2 - bw / 2, 0, Math.max(0, sw - bw));
         selBar.style.left = Math.round(left) + 'px';
         selBar.style.top = Math.round(top) + 'px';
@@ -2874,9 +3265,9 @@
     ctx.onCleanup(() => cancelAnimationFrame(fxRaf));
     /** 고른 짐(o)이 덮은 설비 자리 (화면에서 누르는 칸 기준): 설비 가운데가 짐의 누르는 칸 안이거나, 설비 누르는 칸이 절반 넘게 가려지면 → 작은 것부터 2개 */
     function fxUnder(o, plan, s) {
-      const hw = Math.max(o.r.w, 26 / s), hh = Math.max(o.r.h, 26 / s);
+      const hw = Math.max(o.r.w, TAP_MIN / s), hh = Math.max(o.r.h, TAP_MIN / s);
       const hitR = { x: o.r.x + (o.r.w - hw) / 2, y: o.r.y + (o.r.h - hh) / 2, w: hw, h: hh };
-      const minS = FX_TAP / s;
+      const minS = FX_TAP_NOW / s;
       return plan.fixtures.map((f, i) => ({ f, i, r: fxRect(f) })).filter((x) => x.r.w > 0 && x.r.h > 0 && (x.f.note || x.f.name)).filter((x) => {
         const cx = x.r.x + x.r.w / 2, cy = x.r.y + x.r.h / 2;
         if (hasPt(hitR, cx, cy)) return true;
@@ -2939,9 +3330,14 @@
         if (fxTip.hidden || fxSel !== key0) return;
         const bw = fxTip.offsetWidth, bh = fxTip.offsetHeight;
         const sw = stage.offsetWidth, sh = stage.offsetHeight;
+        // 화면에 보이는 범위(위 막대 아래 ~ 아래 메뉴 위, 도면 창 안) 안에서 설비 위, 안 되면 아래
+        const st = stage.getBoundingClientRect(), sr = scroll.getBoundingClientRect();
+        const minT = Math.max(0, Math.max(pxv('--topbar-h', 56) + 4, sr.top) - st.top);
+        const maxB = Math.min(sh, Math.min(window.innerHeight - pxv('--bottom-h', 0) - 4, sr.bottom) - st.top);
         let top = y0 - bh - 10;
-        if (top < 0) top = y0 + h0 + 10;
-        if (top + bh > sh) top = Math.max(0, Math.min(y0 - bh - 10, sh - bh));
+        if (top < minT) top = y0 + h0 + 10;
+        if (top + bh > maxB) top = Math.max(minT, Math.min(y0 - bh - 10, maxB - bh));
+        top = MV.clamp(top, 0, Math.max(0, sh - bh));
         const left = MV.clamp(x0 + w0 / 2 - bw / 2, 0, Math.max(0, sw - bw));
         fxTip.style.left = Math.round(left) + 'px';
         fxTip.style.top = Math.round(top) + 'px';
@@ -2973,6 +3369,14 @@
       doorAdd: '문을 달 방의 벽(가장자리) 가까이를 누르세요 — 90cm 문이 그 방 안쪽으로 열리게 달려요.',
       doorDel: '지울 문(빨간 점선 칸)을 누르세요.',
     };
+    // 폰·따라다니는 도구 줄용 한 줄 안내
+    const TOOL_SHORT = {
+      room: '방을 누르면 치수·이름을 고쳐요 · 짐은 잠시 잠겨요',
+      draw: '도면을 끌어서 새 방을 네모로 그리세요',
+      doorAdd: '문을 달 벽 가까이를 누르세요',
+      doorDel: '지울 문(빨간 점선 칸)을 누르세요',
+    };
+    const toolTipped = new Set();   // 따라다니는 줄에서 도구를 바꿀 때 안내는 도구마다 한 번만
     const TOOL_DEFS = [['room', '✏️', '방 고치기'], ['draw', '＋', '방 그리기'], ['doorAdd', '🚪', '문 추가'], ['doorDel', '🚪', '문 삭제']];
     const finishEdit = () => { editMode = false; tool = 'room'; preview = null; syncStageMode(); refresh(); };
     function drawEditBar() {
@@ -2984,7 +3388,8 @@
       const ae = document.activeElement;
       const fTool = ae && editBar.contains(ae) && ae.getAttribute && ae.getAttribute('data-tool');
       editBar.textContent = '';
-      const T = ([id, ico, label]) => el('button', { type: 'button', class: 'btn fp-b', 'data-tool': id, 'aria-pressed': String(tool === id), onclick: () => setTool(id) }, ico + ' ' + label);
+      const T = ([id, ico, label]) => el('button', { type: 'button', class: 'btn fp-b', 'data-tool': id, 'aria-pressed': String(tool === id), 'aria-label': label, onclick: () => setTool(id) },
+        el('span', { class: 'fp-tico', 'aria-hidden': 'true' }, ico), el('span', { class: 'fp-tlab', 'aria-hidden': 'true' }, label));
       // 한 줄로 펼쳐 두고 순서(order)로 배치: 넓은 화면 = [도구 · 전체 크기] / [설명 · 단추들], 폰 = [도구] / [설명] / [전체 크기 · 단추들]
       put(editBar,
         el('div', { class: 'fp-tools', role: 'group', 'aria-label': '치수 수정 도구' }, TOOL_DEFS.map(T)),
@@ -2994,8 +3399,8 @@
         // 폰에선 짧은 글로 (도구 줄이 길어져 도면이 밀려나지 않게)
         el('div', { class: 'fp-edittip', 'aria-live': 'polite' }, tool === 'room' && plan.fixtures.some(fxMeasurable)
           ? [el('span', { class: 'fp-wl' }, TOOL_TIPS.room + ' 냉장고 자리를 누르면 사전방문 때 잰 폭·높이를 넣어요. 짐은 잠시 잠겨요.'),
-            el('span', { class: 'fp-ws' }, '방을 누르면 치수·이름을 고치거나 지우고, 냉장고 자리를 누르면 잰 폭을 넣어요.')]
-          : TOOL_TIPS[tool] + ' 짐은 잠시 잠겨요.'),
+            el('span', { class: 'fp-ws' }, '방을 누르면 치수를 고치고, 냉장고 자리를 누르면 잰 폭을 넣어요')]
+          : [el('span', { class: 'fp-wl' }, TOOL_TIPS[tool] + ' 짐은 잠시 잠겨요.'), el('span', { class: 'fp-ws' }, TOOL_SHORT[tool])]),
         tool === 'draw' ? el('button', { type: 'button', class: 'btn btn-sm fp-b fp-ebtn', 'data-act': 'typed', onclick: () => openRoomEditor(null, typedRoomRect(), true), title: '끌지 않고 크기·위치를 숫자로 넣어 방 추가' }, '🔢 숫자로 넣기') : null,
         plan.edited ? el('button', { type: 'button', class: 'btn btn-sm btn-danger fp-b fp-ebtn', onclick: resetAllRooms, title: '도면 전체 원래대로' }, el('span', { class: 'fp-wl' }, '도면 전체 '), '원래대로') : null,
         el('button', { type: 'button', class: 'btn btn-sm btn-primary fp-b fp-ebtn fp-done', onclick: finishEdit }, '완료'));
@@ -3014,7 +3419,10 @@
       if (!editMode || wiz) { placeDock(); return; }
       const D = (id, ico, label, onclick, cls) => el('button', { type: 'button', class: 'btn fp-b ' + (cls || ''), 'data-dock': id, 'aria-pressed': cls ? null : String(tool === id), onclick, 'aria-label': label },
         el('span', { class: 'fp-dico', 'aria-hidden': 'true' }, ico), el('span', { class: 'fp-dlab', 'aria-hidden': 'true' }, label));
-      put(dock, TOOL_DEFS.map(([id, ico, label]) => D(id, ico, label, () => { setTool(id); toast(TOOL_TIPS[id], { ms: 3200 }); })),
+      put(dock, TOOL_DEFS.map(([id, ico, label]) => D(id, ico, label, () => {
+        setTool(id);
+        if (!toolTipped.has(id)) { toolTipped.add(id); toast(TOOL_SHORT[id], { ms: 1800 }); }
+      })),
         D('done', '✓', '완료', finishEdit, 'btn-primary'));
       placeDock();
       if (fd) { const b2 = dock.querySelector('[data-dock="' + fd + '"]'); if (b2 && !dock.hidden) b2.focus({ preventScroll: true }); }
@@ -3055,10 +3463,14 @@
       bGrid.setAttribute('aria-pressed', String(!!p.grid));
       bSnap.setAttribute('aria-pressed', String(!!p.snap));
       bEdit.setAttribute('aria-pressed', String(editMode));
-      bBg.setAttribute('aria-pressed', String(!!p.bgPanel));
+      bBg.setAttribute('aria-pressed', String(bgOpen()));
       bUse.setAttribute('aria-pressed', String(!!p.useView));
       if (selMargin.value !== String(p.margin)) selMargin.value = String(p.margin);
-      zoomV.textContent = Math.round(curZoom() * 100) + '%';
+      zoomV.textContent = zoomV2.textContent = Math.round(curZoom() * 100) + '%';
+      bMore.setAttribute('aria-expanded', String(moreOpen));
+      tb.classList.toggle('is-more', moreOpen);
+      // 더보기 안 단추가 켜져 있으면 ⋯ 에 작은 점 (닫혀 있어도 무엇이 켜졌는지 알 수 있게)
+      bMore.classList.toggle('has-on', !p.grid || !p.snap || !p.useView || p.margin > 0 || bgOpen());
     }
     /** 요소가 화면 밖(위 막대·아래 메뉴 뒤 포함)이면 부드럽게 보이는 곳으로 — 아래가 잘렸으면 위끝이 가려지지 않는 만큼만 올림 */
     function revealEl(node) {
@@ -3091,7 +3503,7 @@
     }
     function drawBgBarRaw(force) {
       const bg = cur.bg;
-      const open = prefs().bgPanel;
+      const open = bgOpen();
       // 사진 도구 펼침: 직접 펼치거나 접기 전까지는 '축척을 아직 안 맞췄으면 펼침'
       const toolsOn = bg ? (toolsOpen == null ? !bg.calibrated || !bg.aligned : toolsOpen) : false;
       const sg = [open, !!bg, bg ? [bg.show, bg.fade, bg.rot, bg.calibrated, bg.aligned, Math.round(bg.cmPerPx * 1e4), bg.natW, bg.natH, bg.src.length] : null, !!wiz, toolsOn];
@@ -3107,7 +3519,7 @@
             el('span', { class: 'small muted fp-bgdesc', title: '진짜 평면도를 캡처해서 깔면, 그 위에서 방·문을 맞춰 도면을 고칠 수 있어요' }, '진짜 평면도를 깔고 그 위에서 도면 고치기'),
             btn('📷 사진 고르기', () => fileIn.click(), { class: 'btn fp-b btn-primary' }),
             helpDetails(),
-            btn('✕', () => { setPref('bgPanel', false); drawBgBar(true); syncToolbar(); try { bBg.focus({ preventScroll: true }); } catch (e) { /* 무시 */ } },
+            btn('✕', () => { bgAsk = false; setPref('bgPanel', false); drawBgBar(true); syncToolbar(); try { bBg.focus({ preventScroll: true }); } catch (e) { /* 무시 */ } },
               { class: 'btn fp-b btn-ghost btn-icon fp-bgclose', 'aria-label': '평면도 사진 줄 닫기', title: '닫기 — 위의 “🖼 평면도 사진” 단추로 다시 열어요' })));
         return;
       }
@@ -3126,12 +3538,13 @@
       const needPos = bg.calibrated && !bg.aligned;
       put(bgBar,
         el('div', { class: 'fp-bgrow' },
-          el('span', { class: 'fp-bglabel' }, '🖼 평면도 사진'),
-          el('span', { class: 'chip ' + (bg.calibrated && !needPos ? 'good' : 'warn') }, !bg.calibrated ? '축척을 맞춰 주세요' : needPos ? '위치를 맞춰 주세요' : '축척 맞춤 ✓'),
+          el('span', { class: 'fp-bglabel' }, el('span', { class: 'fp-wl' }, '🖼 평면도 사진'), el('span', { class: 'fp-ws' }, '🖼 사진')),
+          el('span', { class: 'chip ' + (bg.calibrated && !needPos ? 'good' : 'warn') }, !bg.calibrated ? [el('span', { class: 'fp-wl' }, '축척을 맞춰 주세요'), el('span', { class: 'fp-ws' }, '축척 맞추기 전')]
+            : needPos ? [el('span', { class: 'fp-wl' }, '위치를 맞춰 주세요'), el('span', { class: 'fp-ws' }, '위치 맞추기 전')] : '축척 맞춤 ✓'),
           bg.calibrated ? el('span', { class: 'tiny muted num fp-bgscale' }, '사진 1픽셀 ≈ ' + (Math.round(bg.cmPerPx * 100) / 100) + 'cm') : null,
           needPos ? btn('📍 위치 맞추기', () => startWiz('origin'), { class: 'btn fp-b btn-primary', 'data-act': 'origin', title: '축척은 맞췄어요 — 사진에서 도면 왼쪽 위 모서리를 눌러 위치를 맞춰요 (3/3)' }) : null,
           el('span', { class: 'spacer' }),
-          tg('👁 보이기', bg.show, () => setBg({ show: !bg.show }), '사진 보이기/숨기기'),
+          btn(['👁', el('span', { class: 'fp-wl' }, ' 보이기')], () => setBg({ show: !bg.show }), { 'aria-pressed': String(!!bg.show), 'aria-label': '사진 보이기', title: '사진 보이기/숨기기' }),
           el('button', { type: 'button', class: 'btn fp-b fp-bgmore', 'aria-expanded': String(toolsOn), 'aria-controls': bodyId, 'data-act': 'tools',
             onclick: () => { toolsOpen = !toolsOn; drawBgBar(true); const b2 = bgBar.querySelector('[data-act="tools"]'); if (b2) b2.focus({ preventScroll: true }); } },
           '사진 도구 ', el('span', { 'aria-hidden': 'true' }, toolsOn ? '▴' : '▾'))),
@@ -3286,6 +3699,8 @@
       if (!wiz) return;
       const w = wiz;
       wiz = null;
+      // 맞추기가 끝나면 사진 도구는 접어 둠 (폰에서 도면을 밀어내지 않게 — '사진 도구 ▾'로 다시 펼쳐요)
+      if (!quiet) toolsOpen = false;
       drawWizBar(); syncStageMode();
       // 3단계에서 '건너뛰기'·끌어서 맞춘 뒤 '완료'를 누르면 위치도 맞춘 것으로
       const b = !quiet && bgOf(key);
@@ -3362,7 +3777,7 @@
         updLen();
         if (!coarse) setTimeout(() => { if (wiz && wiz.lenIn && wiz.lenIn.isConnected) wiz.lenIn.focus({ preventScroll: true }); }, 30);
         // 폰에선 이 단계의 띠가 제자리에 있으므로, 띠와 찍은 두 점이 함께 보이게
-        if (mm('(max-width: 600px)')) revealWizLen();
+        if (compact()) revealWizLen();
       } else if (wiz.step === 'origin') {
         put(wizBar, T('📏 축척 맞추기 3/3 · 도면 왼쪽 위 모서리를 누르세요',
           '사진에서 바깥벽 왼쪽 위 모서리를 누르면, 그 점이 도면의 (0,0) — 주황 십자 자리 — 로 옮겨져요. 끌어서 맞춰도 돼요.'),
@@ -3671,7 +4086,42 @@
         return { it, s, off: !o || o.p.x !== s.x || o.p.y !== s.y || o.p.rot !== s.rot };
       }).filter(Boolean);
     }
+    /** 바로 되돌리기용: 이 짐들(invIds)의 배치와 놓인 방 이름을 기억 → undo() 는 그 짐들만 예전대로 (다른 짐·다른 기기 변경은 그대로) */
+    function trackInv(invIds) {
+      const f = roomField(key);
+      const ids = new Set(invIds);
+      const st0 = MV.store.get();
+      const before = layoutsOf(st0)[key].placements.filter((p) => ids.has(p.invId)).map((p) => MV.clone(p));
+      const rooms = invIds.map((id) => { const it = (st0.inventory || []).find((i) => i.id === id); return [id, it ? it[f] : undefined]; });
+      let after = null;
+      return {
+        done() {
+          const st = MV.store.get();
+          after = { pls: layoutsOf(st)[key].placements.filter((p) => ids.has(p.invId)).map((p) => MV.clone(p)), rooms: invIds.map((id) => { const it = (st.inventory || []).find((i) => i.id === id); return [id, it ? it[f] : undefined]; }) };
+        },
+        undo(log) {
+          MV.store.update((st) => {
+            const L = layoutsOf(st)[key];
+            const was = new Map(before.map((p) => [p.id, p]));
+            const made = new Set(after ? after.pls.filter((p) => !was.has(p.id)).map((p) => p.id) : []);
+            L.placements = L.placements.filter((p) => !made.has(p.id));
+            was.forEach((p0, pid) => {
+              const p = L.placements.find((x) => x.id === pid);
+              if (p) ['x', 'y', 'rot', 'n'].forEach((k) => { if (p0[k] === undefined) delete p[k]; else p[k] = p0[k]; });
+              else if ((st.inventory || []).some((i) => i.id === p0.invId)) L.placements.push(MV.clone(p0));
+            });
+            const nowR = new Map(after ? after.rooms : []);
+            rooms.forEach(([id, v]) => {
+              const it = (st.inventory || []).find((i) => i.id === id);
+              if (!it || it[f] !== nowR.get(id)) return;   // 그 사이 직접 고쳤으면 그대로
+              if (v === undefined) delete it[f]; else it[f] = v;
+            });
+          }, { log });
+        },
+      };
+    }
     function backHome(home) {
+      const tr = trackInv(home.map((h) => h.it.id));
       let firstId = null;
       MV.store.update((st) => {
         const P = layoutsOf(st).new.placements;
@@ -3686,8 +4136,10 @@
         });
         sel = firstId;
       }, { log: '📐 세탁기·건조기를 기본 배치 자리로' });
-      toast('세탁기·건조기를 기본 배치 자리로 옮겼어요', { action: window.innerWidth < 1100 ? { label: '보기', onClick: revealSel } : null });
-      if (window.innerWidth >= 1100) revealSel();
+      tr.done();
+      // 폰에서도 바로 도면으로 가서 보여 줘요 (이 단추는 도면에서 멀리 아래에 있어요)
+      revealSel();
+      toast('세탁기·건조기를 기본 배치 자리로 옮겼어요', { action: { label: '되돌리기', onClick: () => tr.undo('↩ 세탁기·건조기 자리 되돌리기') } });
     }
     /** 예전 방식(벽 쪽 한 줄로 단순 배치) — 문·고정물 때문에 laundrySpot 이 자리를 못 찾을 때만 */
     function simplePair(plan, room, washer, dryer) {
@@ -3735,6 +4187,7 @@
       if (spot) { rot = spot.rot; pos = spot.pos.map((p2) => [p2.it, p2.x, p2.y]); }
       else ({ rot, pos } = simplePair(plan, room, washer, dryer));
       let firstId = null;
+      const tr = trackInv(pos.map(([it]) => it.id));
       MV.store.update((st) => {
         const P = layoutsOf(st).new.placements;
         pos.forEach(([it, x, y]) => {
@@ -3749,8 +4202,9 @@
       }, { log: '📐 세탁기·건조기를 ' + room.name + '에 나란히 배치' });
       const msg = !spot ? '자리가 마땅치 않아 ' + room.name + '에 겹쳐 놓았어요 — 배치 점검을 보세요'
         : !spot.occFree ? room.name + '에 놓았지만 다른 짐과 겹쳐요' : room.name + '에 세탁기·건조기를 나란히 놓았어요';
-      toast(msg, { action: window.innerWidth < 1100 ? { label: '보기', onClick: revealSel } : null, ms: spot && spot.occFree ? undefined : 5000 });
-      if (window.innerWidth >= 1100) revealSel();
+      tr.done();
+      revealSel();
+      toast(msg, { action: { label: '되돌리기', onClick: () => tr.undo('↩ 세탁기·건조기 자리 되돌리기') }, ms: spot && spot.occFree ? 5000 : 6000 });
     }
 
     // ---- 도면 정보 ----
@@ -3820,17 +4274,133 @@
     }
 
     // ---- 동작 ----
+    /** 고른 짐이 보이게: 확대한 도면 창 안에서 가운데로, 그다음 화면을 굴려 위 막대 아래 ~ 아래 메뉴(폰은 짐 도구 띠) 위 가운데로 */
+    let revealAt = 0;
     function revealSel() {
+      revealAt = Date.now();
       requestAnimationFrame(() => {
         const g = sel && svgEl && svgEl.querySelector('[data-pid="' + CSS.escape(sel) + '"]');
         if (!g) return;
         const r = g.getBoundingClientRect();
-        const vh = window.innerHeight;
-        if (r.top < 70 || r.bottom > vh - 80) planCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
         const sr = scroll.getBoundingClientRect();
+        let dyIn = 0;
         if (r.left < sr.left || r.right > sr.right || r.top < sr.top || r.bottom > sr.bottom) {
-          scroll.scrollTo({ left: scroll.scrollLeft + (r.left + r.width / 2) - (sr.left + sr.width / 2), top: scroll.scrollTop + (r.top + r.height / 2) - (sr.top + sr.height / 2), behavior: 'smooth' });
+          const t0 = scroll.scrollTop;
+          const want = (r.top + r.height / 2) - (sr.top + sr.height / 2);
+          scroll.scrollTo({ left: scroll.scrollLeft + (r.left + r.width / 2) - (sr.left + sr.width / 2), top: t0 + want, behavior: 'smooth' });
+          dyIn = MV.clamp(t0 + want, 0, Math.max(0, scroll.scrollHeight - scroll.clientHeight)) - t0;
         }
+        const cy = r.top - dyIn + r.height / 2;
+        const top = pxv('--topbar-h', 56) + 8;
+        const sheetH = !selBar.hidden && selBar.classList.contains('is-sheet') ? selBar.getBoundingClientRect().height : 0;
+        const bot = window.innerHeight - pxv('--bottom-h', 0) - sheetH - 8;
+        if (cy - r.height / 2 < top || cy + r.height / 2 > bot) window.scrollBy({ top: cy - (top + bot) / 2, behavior: 'smooth' });
+      });
+    }
+    /* ---- 💾 배치 저장 · 저장한 배치 불러오기 · 기본 배치로 되돌리기 (규칙은 위 MV.calc.planSaves) ---- */
+    let savesUI = null;   // 열린 창 { m, draw }
+    const DEFAULT_DESC = {
+      new: '짐 자리만 기본 배치(10/24 밤 가족 배치)로 돌아가요.',
+      old: '짐 자리만 처음 넣어 둔 기본 배치(냉장고·세탁기·건조기·에어컨 자리)로 돌아가요.',
+    };
+    function openSaves() {
+      if (savesUI && savesUI.m && savesUI.m.root && savesUI.m.root.isConnected) return;
+      const PS = MV.calc.planSaves;
+      const hasDef = !!seedPls(key);
+      const listBox = el('div', { class: 'fp-savelist-wrap' });
+      const defBox = el('div', { class: 'fp-savedef' });
+      const defName = () => fmtAt(MV.nowISO()) + ' 배치';
+      const nameIn = el('input', { class: 'input', type: 'text', maxlength: '40', enterkeyhint: 'done', 'aria-label': '저장할 이름 (비우면 날짜·시간으로)' });
+      const doSave = () => {
+        const nm = nameIn.value.trim() || defName();
+        const s0 = PS.save(key, nm);
+        nameIn.value = '';
+        nameIn.placeholder = '예: ' + defName();
+        draw();
+        if (s0) toast('지금 배치를 「' + s0.name + '」' + joRo(s0.name) + ' 저장했어요 · 짐 ' + s0.count + '개');
+      };
+      nameIn.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); doSave(); } });
+      const close = () => { if (savesUI && savesUI.m) savesUI.m.close(); };
+      const doLoad = (sv) => {
+        if (PS.same(key, sv.id)) { toast('지금 배치가 「' + sv.name + '」' + jo(sv.name, '과', '와') + ' 같아요'); return; }
+        close();
+        ui.confirm('「' + sv.name + '」(' + fmtAt(sv.at) + ' · 짐 ' + sv.count + '개) 배치를 불러올까요? 지금 배치는 잃지 않게 자동으로 저장해 둬요. 방 치수·문 고친 것은 그대로예요.',
+          { okLabel: '📂 불러오기', title: '저장한 배치 불러오기' }).then((ok) => { if (ok) runRestore(sv.id); });
+      };
+      const doReset = () => {
+        if (PS.same(key, 'default')) { toast('지금 배치가 이미 기본 배치와 같아요'); draw(); return; }
+        close();
+        ui.confirm(PLAN_LABEL[key] + ' 짐 자리를 ' + DEFAULT_NAME[key] + joRo(DEFAULT_NAME[key]) + ' 되돌릴까요? 지금 배치는 잃지 않게 자동으로 저장해 둬요. 방 치수·문 고친 것은 그대로예요.',
+          { okLabel: '⟲ 기본 배치로', title: '기본 배치로 되돌리기' }).then((ok) => { if (ok) runRestore('default'); });
+      };
+      const doDel = (sv) => {
+        const gone = PS.remove(key, sv.id);
+        if (!gone) return;
+        draw();
+        toast('「' + sv.name + '」' + jo(sv.name, '을', '를') + ' 지웠어요', { action: { label: '되돌리기', onClick: () => {
+          MV.store.update((st) => {
+            const L = layoutsOf(st)[key];
+            const list = savesOf(L);
+            if (!list.some((x) => x.id === gone.id)) { list.push(gone); L.saves = savesOf({ saves: list }); }
+          });
+        } } });
+      };
+      function draw() {
+        const st = MV.store.get();
+        const L = layoutsOf(st)[key];
+        const nowSig = fitSig(st, key, L.placements);
+        const list = savesOf(L);
+        listBox.textContent = '';
+        put(listBox,
+          el('div', { class: 'fp-saveh' }, el('h3', '저장한 배치'), el('span', { class: 'chip' }, list.length + '/' + SAVE_MAX)),
+          list.length ? el('ul', { class: 'fp-savelist' }, list.map((sv) => {
+            const n = saveCount(sv);
+            const same = fitSig(st, key, sv.placements) === nowSig;
+            const row = { id: sv.id, name: String(sv.name || '이름 없음'), at: sv.at, count: n };
+            return el('li', { class: 'fp-saverow' + (same ? ' is-now' : '') },
+              el('div', { class: 'fp-saveinfo' },
+                el('strong', { class: 'fp-savename', title: row.name }, row.name),
+                el('div', { class: 'tiny muted num' }, fmtAt(sv.at) + ' · 짐 ' + n + '개',
+                  sv.auto ? el('span', { class: 'chip' }, '자동') : null,
+                  same ? el('span', { class: 'chip good' }, '지금 배치') : null)),
+              el('div', { class: 'fp-savebtns' },
+                el('button', { type: 'button', class: 'btn btn-sm fp-b', onclick: () => doLoad(row), 'aria-label': row.name + ' 불러오기' }, '📂 불러오기'),
+                el('button', { type: 'button', class: 'btn btn-sm btn-ghost fp-b', onclick: () => doDel(row), 'aria-label': row.name + ' 지우기' }, '🗑 지우기')));
+          })) : el('p', { class: 'small muted mb-0' }, '아직 저장한 배치가 없어요. 위 단추로 지금 배치를 남겨 보세요.'),
+          list.length >= SAVE_MAX ? el('p', { class: 'tiny muted mb-0' }, '저장은 ' + SAVE_MAX + '개까지예요. 더 저장하면 오래된 자동 저장부터, 그다음 오래된 것부터 빠져요.') : null);
+        defBox.textContent = '';
+        if (!hasDef) return;
+        const isDef = PS.same(key, 'default');
+        put(defBox,
+          el('button', { type: 'button', class: 'btn fp-b', disabled: isDef, onclick: doReset }, isDef ? '✓ 지금 기본 배치 그대로예요' : '⟲ 기본 배치로 되돌리기'),
+          el('p', { class: 'tiny muted mb-0' }, DEFAULT_DESC[key] + ' 방 치수·문 고친 것은 그대로예요. 바꾸기 전 배치는 자동으로 저장돼요.'));
+      }
+      nameIn.placeholder = '예: ' + defName();
+      const body = el('div', { class: 'fp-saves' },
+        el('p', { class: 'small muted mb-0' }, '도면에서 옮긴 자리는 바로 저장돼요. 지금 배치를 이름 붙여 남겨 두면 나중에 그대로 불러올 수 있어요 (함께 쓰는 기기에도 보여요).'),
+        defBox, listBox);
+      const m = ui.modal({ title: '💾 ' + PLAN_LABEL[key] + ' 배치 저장 · 되돌리기', body, actions: [{ label: '닫기', kind: 'ghost' }], onClose: () => { savesUI = null; } });
+      // 이름 칸은 창을 연 뒤에 넣어요 — 폰에서 창이 열리자마자 자판이 올라와 목록을 가리지 않게 (창은 처음 입력 칸에 초점을 줘요)
+      body.insertBefore(el('div', { class: 'fp-savenew' },
+        el('label', { class: 'fp-savelab' }, el('span', { class: 'small strong' }, '이름'), nameIn),
+        el('button', { type: 'button', class: 'btn btn-primary fp-b', onclick: doSave }, '💾 지금 배치 저장')), listBox);
+      savesUI = { m, draw };
+      draw();
+    }
+    /** 저장한 배치·기본 배치로 바꾸고, 바로 되돌릴 수 있는 알림 */
+    function runRestore(what) {
+      const res = MV.calc.planSaves.restore(key, what);
+      if (!res) { toast('불러올 배치를 찾지 못했어요 — 다른 기기에서 지웠을 수 있어요'); return; }
+      if (res.same) { toast('지금 배치가 이미 「' + res.name + '」' + jo(res.name, '과', '와') + ' 같아요'); return; }
+      sel = null;
+      const extra = [res.dropped ? '목록에 없거나 이 집에 안 가져가는 짐 ' + res.dropped + '개는 뺐어요' : '', res.cut ? '개수를 넘는 ' + res.cut + '개는 줄였어요' : ''].filter(Boolean).join(' · ');
+      toast((what === 'default' ? '기본 배치로 되돌렸어요' : '「' + res.name + '」' + jo(res.name, '을', '를') + ' 불러왔어요') + (extra ? ' — ' + extra : '') + (res.auto ? ' · 바꾸기 전 배치는 「' + res.auto + '」' + joRo(res.auto) + ' 남겼어요' : ''),
+        { ms: 8000, action: { label: '되돌리기', onClick: () => { MV.calc.planSaves.undo(key, res); setTimeout(() => toast('바꾸기 전 배치로 돌아왔어요'), 30); } } });
+      // 바뀐 도면이 보이게
+      requestAnimationFrame(() => {
+        const r = scroll.getBoundingClientRect();
+        const top = pxv('--topbar-h', 56) + 8;
+        if (r.top < top - 40 || r.top > window.innerHeight * 0.6) window.scrollBy({ top: r.top - top - (chips.offsetHeight || 0) - 12, behavior: 'smooth' });
       });
     }
     function selectInv(invId) {
@@ -3844,9 +4414,12 @@
       if (!res) return;
       sel = res.pl.id;
       editMode = false;
+      const tr = trackInv([invId]);
       commitPlacement(key, res);
-      const narrow = window.innerWidth < 1100;
-      toast(q(res.it) + jo(spoken(res.it.name), '을', '를') + ' ' + (res.room ? res.room.name : '도면 가운데') + '에 놓았어요', narrow ? { action: { label: '보기', onClick: revealSel } } : undefined);
+      tr.done();
+      // 목록은 도면에서 멀리 아래에 있어서, 놓은 자리를 바로 보여 줘요
+      revealSel();
+      toast(q(res.it) + jo(spoken(res.it.name), '을', '를') + ' ' + (res.room ? res.room.name : '도면 가운데') + '에 놓았어요', { action: { label: '되돌리기', onClick: () => tr.undo('↩ 놓기 취소: ' + res.it.name) } });
     }
     function addItem() {
       ui.invEditor(null, { defaults: { fate: 'move' }, onSave: (saved) => {
@@ -3939,7 +4512,13 @@
       }
       x = r1(x); y = r1(y);
       rotMemo = { pid: o.p.id, rot: nr, x, y, cx, cy };
-      mutatePl(o.p.id, (p) => { p.rot = nr; p.x = x; p.y = y; });
+      const pid = o.p.id, was = { rot: r0, x: num(o.p.x, 0), y: num(o.p.y, 0) }, name = o.it.name, memo0 = m;
+      mutatePl(pid, (p) => { p.rot = nr; p.x = x; p.y = y; });
+      // 바로 되돌리기 (빼기처럼) — 그 사이 다른 기기에서 옮겼으면 그대로 둬요
+      toast(q({ name }) + ' 정면을 ' + FRONT_WORD[nr] + joRo(FRONT_WORD[nr]) + ' 돌렸어요', { ms: 3500, action: { label: '되돌리기', onClick: () => {
+        mutatePl(pid, (p) => { if (rotOf(p) !== nr || Math.abs(num(p.x, 0) - x) > 0.05 || Math.abs(num(p.y, 0) - y) > 0.05) return; p.rot = was.rot; p.x = was.x; p.y = was.y; });
+        rotMemo = memo0;
+      } } });
     }
     function nearestRoom(plan, r) {
       const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
@@ -4610,7 +5189,11 @@
         x = Math.round(x / SNAP) * SNAP; y = Math.round(y / SNAP) * SNAP;
         [x, y] = magnet(x, y, d.w, d.h);
       }
+      const raw = { x, y };
       ({ x, y } = clampInto({ x, y, w: d.w, h: d.h }, cur.plan.bounds));
+      // 도면 끝에 닿아 멈춘 쪽 (-1 위·왼쪽, 1 아래·오른쪽) — 그쪽으로는 자동 스크롤을 멈춰요
+      d.clampX = raw.x < x - 0.5 ? -1 : raw.x > x + 0.5 ? 1 : 0;
+      d.clampY = raw.y < y - 0.5 ? -1 : raw.y > y + 0.5 ? 1 : 0;
       d.x = r1(x); d.y = r1(y);
       d.g.setAttribute('transform', 'translate(' + d.x + ' ' + d.y + ')');
       if (d.ug) d.ug.setAttribute('transform', 'translate(' + d.x + ' ' + d.y + ')');
@@ -4621,21 +5204,40 @@
     ctx.onCleanup(stopAuto);
     const pxv = (name, d) => { const v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name)); return isFinite(v) ? v : d; };
     /** 손가락·마우스(cx, cy)가 도면 창·화면 가장자리 가까이 있으면 한 번 굴림 → { moved: 실제로 굴렀는지, go: 계속 살필지 }.
-        topEdge = 화면 위쪽 한계 (기본: 위 막대 아래 — 사진 맞추기 안내 띠가 떠 있으면 그 아래) */
-    function edgeScroll(cx, cy, topEdge) {
-      const E = 44;
-      const sp = (dist) => Math.round(MV.clamp(2 + dist * 0.25, 2, 16));
+        topEdge = 화면 위쪽 한계 (기본: 위 막대 아래 — 사진 맞추기 안내 띠가 떠 있으면 그 아래).
+        st = 끄는 중인 것(drag·gest): 가장자리 띠 안에서 시작했으면 한 번 띠 밖으로 나갔다 들어와야, 띠 안에 잠깐(손가락 0.35초·마우스 0.15초) 머물러야 굴러요
+             (화면 위쪽 짐을 조금만 옮겨도 화면이 굴러 짐이 집 끝까지 딸려 가지 않게). 짐이 도면 끝에 닿은 쪽(st.clampX·Y)으로는 굴리지 않아요 */
+    function edgeScroll(cx, cy, topEdge, st) {
       const sr = scroll.getBoundingClientRect();
+      const topBar = pxv('--topbar-h', 56), botBar = pxv('--bottom-h', 0);
+      const Ein = Math.max(16, Math.min(44, Math.round(sr.height * 0.12)));
+      const Eout = Math.max(16, Math.min(44, Math.round((window.innerHeight - topBar - botBar) * 0.12)));
+      const touchLike = !!st && st.type !== 'mouse' && st.ptype !== 'mouse';
+      const vmax = touchLike ? 8 : 14;
+      const sp = (dist) => Math.round(MV.clamp(2 + dist * 0.2, 2, vmax));
       let vx = 0, vy = 0, wy = 0;
       if (scroll.scrollWidth > scroll.clientWidth + 1) {
-        if (cx < sr.left + E) vx = -sp(sr.left + E - cx); else if (cx > sr.right - E) vx = sp(cx - sr.right + E);
+        if (cx < sr.left + Ein) vx = -sp(sr.left + Ein - cx); else if (cx > sr.right - Ein) vx = sp(cx - sr.right + Ein);
       }
       if (scroll.scrollHeight > scroll.clientHeight + 1) {
-        if (cy < sr.top + E) vy = -sp(sr.top + E - cy); else if (cy > sr.bottom - E) vy = sp(cy - sr.bottom + E);
+        if (cy < sr.top + Ein) vy = -sp(sr.top + Ein - cy); else if (cy > sr.bottom - Ein) vy = sp(cy - sr.bottom + Ein);
       }
-      const topLim = (topEdge == null ? pxv('--topbar-h', 56) : topEdge) + E, botLim = window.innerHeight - pxv('--bottom-h', 0) - E;
-      if (cy < topLim && sr.top < topLim - E) wy = -sp(topLim - cy);
-      else if (cy > botLim && sr.bottom > botLim + E) wy = sp(cy - botLim);
+      const topLim = (topEdge == null ? topBar : topEdge) + Eout, botLim = window.innerHeight - botBar - Eout;
+      if (cy < topLim && sr.top < topLim - Eout) wy = -sp(topLim - cy);
+      else if (cy > botLim && sr.bottom > botLim + Eout) wy = sp(cy - botLim);
+      if (st) {
+        // 도면 끝에 닿은 짐은 그쪽으로 더 굴리지 않음
+        if (st.clampX && Math.sign(vx) === st.clampX) vx = 0;
+        if (st.clampY && Math.sign(vy) === st.clampY) vy = 0;
+        if (st.clampY && Math.sign(wy) === st.clampY) wy = 0;
+        const inBand = !!(vx || vy || wy);
+        if (st.armed === undefined) st.armed = !inBand;
+        if (!inBand) { st.armed = true; st.bandT = 0; return { moved: false, go: false }; }
+        if (!st.armed) return { moved: false, go: false };
+        const now = Date.now();
+        if (!st.bandT) st.bandT = now;
+        if (now - st.bandT < (touchLike ? 350 : 150)) return { moved: false, go: true };
+      }
       let moved = false, movedY = false;
       if (vx || vy) {
         const l0 = scroll.scrollLeft, t0 = scroll.scrollTop;
@@ -4650,7 +5252,7 @@
     function autoTick() {
       autoRaf = 0;
       if (!drag || !drag.moved || !root.isConnected) return;
-      const r = edgeScroll(drag.cx, drag.cy);
+      const r = edgeScroll(drag.cx, drag.cy, null, drag);
       if (r.moved) dragPos();
       if (r.go) autoRaf = requestAnimationFrame(autoTick);
     }
@@ -4663,7 +5265,7 @@
       if (!gest || !gest.moved || !root.isConnected) return;
       const top = pxv('--topbar-h', 56);
       const wb = !wizBar.hidden && getComputedStyle(wizBar).position === 'sticky' ? wizBar.getBoundingClientRect().bottom : 0;
-      const r = edgeScroll(gest.cx, gest.cy, Math.max(top, wb));
+      const r = edgeScroll(gest.cx, gest.cy, Math.max(top, wb), gest);
       if (r.moved) applyGest();
       if (r.go) gestRaf = requestAnimationFrame(gestTick);
     }
@@ -4679,15 +5281,44 @@
       if (d.ug) d.ug.setAttribute('transform', 'translate(' + r1(d.x0) + ' ' + r1(d.y0) + ')');
       lastUp = Date.now();
     }
+    /** 누른 자리의 짐: 손가락 칸이 겹치면 — 몸체 안이면 그 짐(작은 것), 아니면 고른 짐, 아니면 가운데가 가장 가까운 짐 */
+    function pickItem(e, g0) {
+      let gs = [];
+      try {
+        document.elementsFromPoint(e.clientX, e.clientY).forEach((n) => {
+          const g = n.closest && n.closest('.fp-item');
+          if (g && svgEl.contains(g) && gs.indexOf(g) < 0) gs.push(g);
+        });
+      } catch (err) { gs = []; }
+      if (gs.length < 2) return g0;
+      const P = toPlan(e.clientX, e.clientY);
+      const cand = gs.map((g) => ({ g, o: cur.items.find((x) => x.p.id === g.getAttribute('data-pid')) })).filter((c) => c.o);
+      const inside = cand.filter((c) => hasPt(c.o.r, P.x, P.y));
+      if (inside.length) {
+        const s0 = inside.find((c) => c.o.p.id === sel);
+        if (s0) return s0.g;
+        return inside.sort((a, c) => a.o.r.w * a.o.r.h - c.o.r.w * c.o.r.h)[0].g;
+      }
+      const s1 = cand.find((c) => c.o.p.id === sel);
+      if (s1) return s1.g;
+      const dist = (r) => Math.hypot(r.x + r.w / 2 - P.x, r.y + r.h / 2 - P.y);
+      return (cand.sort((a, c) => dist(a.o.r) - dist(c.o.r))[0] || { g: g0 }).g;
+    }
+    // 손가락(펜): 아직 안 고른 짐은 톡 눌러 고르기만 — 그 위를 쓸면 화면이 움직여요 (짐이 모르게 옮겨지지 않게). 고른 짐만 끌어요
+    let tapPick = null;
+    const touchy = (e) => e.pointerType === 'touch' || e.pointerType === 'pen';
     stage.addEventListener('pointerdown', (e) => {
       if (editMode || wiz || gest || !cur || !svgEl || drag || pinch) return;
       if (e.pointerType === 'mouse' && e.button !== 0) return;
-      const g = e.target.closest && e.target.closest('.fp-item');
-      if (!g || !svgEl.contains(g)) return;
+      const g0 = e.target.closest && e.target.closest('.fp-item');
+      if (!g0 || !svgEl.contains(g0)) return;
+      const g = pickItem(e, g0);
       const o = cur.items.find((x) => x.p.id === g.getAttribute('data-pid'));
       if (!o) return;
+      if (touchy(e) && sel !== o.p.id) { tapPick = { pid: o.p.id, id: e.pointerId, sx: e.clientX, sy: e.clientY, t: Date.now() }; return; }
+      tapPick = null;
       e.preventDefault();
-      drag = { pid: o.p.id, id: e.pointerId, sx: e.clientX, sy: e.clientY, cx: e.clientX, cy: e.clientY, x0: o.r.x, y0: o.r.y, x: o.r.x, y: o.r.y, w: o.r.w, h: o.r.h, g, moved: false, type: e.pointerType,
+      drag = { pid: o.p.id, invId: o.it.id, name: o.it.name, id: e.pointerId, sx: e.clientX, sy: e.clientY, cx: e.clientX, cy: e.clientY, x0: o.r.x, y0: o.r.y, x: o.r.x, y: o.r.y, w: o.r.w, h: o.r.h, g, moved: false, type: e.pointerType,
         sl0: scroll.scrollLeft, st0: scroll.scrollTop, wx0: window.scrollX, wy0: window.scrollY,
         ug: svgEl.querySelector('.fp-use[data-upid="' + CSS.escape(o.p.id) + '"]') };
       try { stage.setPointerCapture(e.pointerId); } catch (err) { /* 무시 */ }
@@ -4718,15 +5349,45 @@
       if (svgEl) svgEl.classList.remove('is-dragging');
       lastUp = Date.now();
       sel = d.pid;
-      if (d.moved && (d.x !== d.x0 || d.y !== d.y0)) commitPos(d.pid, d.x, d.y);
-      else refresh();
+      if (d.moved && (d.x !== d.x0 || d.y !== d.y0)) {
+        // 옮긴 방 이름을 되돌릴 수 있게 기억해 둠 (commitPos 가 놓인 방으로 바꿈)
+        const it0 = MV.inv.get(d.invId);
+        const room0 = it0 ? it0[roomField(key)] : undefined;
+        commitPos(d.pid, d.x, d.y);
+        const it1 = MV.inv.get(d.invId);
+        const room1 = it1 ? it1[roomField(key)] : undefined;
+        const x1 = d.x, y1 = d.y;
+        toast(q({ name: d.name }) + jo(spoken(d.name), '을', '를') + ' 옮겼어요', { ms: 4000, action: { label: '되돌리기', onClick: () => {
+          mutatePl(d.pid, (p, st) => {
+            if (Math.abs(num(p.x, 0) - x1) > 0.05 || Math.abs(num(p.y, 0) - y1) > 0.05) return;   // 그 사이 또 옮겼으면 그대로
+            p.x = r1(d.x0); p.y = r1(d.y0);
+            const it = (st.inventory || []).find((i) => i.id === p.invId);
+            if (it && it[roomField(key)] === room1 && room0 !== undefined) it[roomField(key)] = room0;
+          });
+        } } });
+      } else refresh();
     };
     stage.addEventListener('pointerup', endDrag);
     stage.addEventListener('pointercancel', endDrag);
-    // 손가락으로 짐·축척 점을 끌 때 화면이 대신 움직이지 않게 (SVG 안 요소의 touch-action 은 브라우저마다 안 먹을 수 있어 직접 막음)
+    // 톡(10px 안에서 떼기) = 고르기. 쓸어서 화면이 움직이면 브라우저가 pointercancel 을 보내 아무것도 안 해요
+    stage.addEventListener('pointerup', (e) => {
+      const t = tapPick;
+      if (!t || e.pointerId !== t.id) return;
+      tapPick = null;
+      if (Math.hypot(e.clientX - t.sx, e.clientY - t.sy) > 10 || Date.now() - t.t > 900 || !cur || !cur.items.some((x) => x.p.id === t.pid)) return;
+      lastUp = Date.now();
+      sel = t.pid;
+      if (fxSel) fxSel = null;
+      refresh();
+      try { const g = svgEl && svgEl.querySelector('[data-pid="' + CSS.escape(t.pid) + '"]'); if (g) g.focus({ preventScroll: true }); } catch (err) { /* 무시 */ }
+    });
+    stage.addEventListener('pointercancel', (e) => { if (tapPick && e.pointerId === tapPick.id) tapPick = null; });
+    // 손가락으로 고른 짐·축척 점을 끌 때 화면이 대신 움직이지 않게 (SVG 안 요소의 touch-action 은 브라우저마다 안 먹을 수 있어 직접 막음).
+    // 안 고른 짐 위에서 시작한 손가락은 막지 않아요 — 화면을 쓸어 내릴 수 있게
     stage.addEventListener('touchstart', (e) => {
       if (e.touches.length !== 1 || !e.target.closest) return;
-      if (!editMode && !wiz && e.target.closest('.fp-item')) e.preventDefault();
+      const gi = !editMode && !wiz && e.target.closest('.fp-item');
+      if (gi) { if (sel && cur && svgEl && pickItem(e.touches[0], gi).getAttribute('data-pid') === sel) e.preventDefault(); }
       else if (wiz && wiz.step === 'pts' && e.target.closest('.fp-wizpt')) e.preventDefault();
     }, { passive: false });
 
@@ -4882,9 +5543,20 @@
       const fxh = e.target.closest && e.target.closest('.fp-fxhit');
       if (fxh) { showFx(fxh.getAttribute('data-fx')); return; }
       if (e.target.closest && e.target.closest('.fp-item')) return;
+      // 터치: 빈 곳을 두 번 톡 → 누른 자리를 기준으로 2배 ↔ 맞춤
+      if (coarse) {
+        const now = Date.now();
+        if (lastTap && now - lastTap.t < 350 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 32) {
+          lastTap = null;
+          setZoom(curZoom() > 1.05 ? 1 : 2, { x: e.clientX, y: e.clientY });
+          return;
+        }
+        lastTap = { t: now, x: e.clientX, y: e.clientY };
+      }
       if (fxSel) hideFx();
       if (sel) { sel = null; refresh(); }
     });
+    let lastTap = null;
     scroll.addEventListener('wheel', (e) => {
       if (!e.ctrlKey) return;
       e.preventDefault();
@@ -5090,7 +5762,7 @@
           el('a', { class: 'btn btn-sm btn-ghost fp-b', href: '#/plan/' + key }, '편집 →')),
         el('div', { class: 'fp-cmp-svg' }))));
       box.appendChild(el('section', { class: 'card' },
-        el('div', { class: 'fp-card-head' }, el('h2', '같은 축척으로 나란히'), el('span', { class: 'tiny muted' }, '아래 1m 막대 길이가 두 도면에서 같아요')),
+        el('div', { class: 'fp-card-head' }, el('h2', el('span', { class: 'fp-cmp-side' }, '같은 축척으로 나란히'), el('span', { class: 'fp-cmp-stack' }, '같은 축척으로 위아래')), el('span', { class: 'tiny muted' }, '아래 1m 막대 길이가 두 도면에서 같아요')),
         plansGrid));
 
       // (2) 면적 비교
@@ -5147,15 +5819,7 @@
           buyPart && MV.views.checklist ? el('a', { class: 'btn btn-sm btn-ghost fp-b', href: '#/checklist/' + encodeURIComponent(buyPart.id) }, (buyPart.emoji || '🛒') + ' ' + buyPart.name) : null));
       box.appendChild(el('div', { class: 'fp-cmp-grid' }, areaCard, closetCard));
 
-      // (4) 차이 요약
-      const ins = Array.isArray(MV.planCompare) ? MV.planCompare.filter((x) => x && (x.title || x.detail)) : [];
-      const LV = { info: 'kid', warn: 'warn', bad: 'bad', good: 'good' };
-      box.appendChild(el('section', { class: 'card mt-12' },
-        el('div', { class: 'fp-card-head' }, el('h2', '🔎 두 집 차이 요약')),
-        ins.length ? ins.map((c) => el('div', { class: 'callout ' + (LV[c.level] || '') }, c.title ? el('strong', c.title) : null, c.detail ? el('div', { class: 'small' }, MV.linkify(String(c.detail))) : null))
-          : el('p', { class: 'small muted mb-0' }, '도면 리서치가 반영되면 두 집의 차이(수납·동선·채광 등)가 여기에 정리돼요.')));
-
-      // (5) 새 집에 아직 자리 없는 짐
+      // (4) 새 집에 아직 자리 없는 짐 — 할 일이 있는 카드라 긴 '차이 요약'보다 먼저
       const miss = MV.inv.list((it) => fateOf(it) === 'move' && (cntOld[it.id] || 0) > 0 && !(cntNew[it.id] || 0));
       const notAnywhere = MV.inv.list((it) => fateOf(it) === 'move' && it.floor !== false && !(cntOld[it.id] || 0) && !(cntNew[it.id] || 0));   // 바닥에 안 놓는 짐(간이박스·리빙박스)은 빼요
       box.appendChild(el('section', { class: 'card mt-12' },
@@ -5173,6 +5837,15 @@
               } }, '+ 새 집에 놓기'),
               el('button', { type: 'button', class: 'btn btn-sm btn-ghost fp-b', onclick: () => ui.invEditor(it.id), 'aria-label': it.name + ' 수정 (버리기·판매로 바꾸기)' }, '✎')))),
         notAnywhere.length ? el('p', { class: 'tiny muted mt-8 mb-0' }, '“가져감” 짐 중 ' + notAnywhere.length + '개는 아직 어느 도면에도 안 놓였어요: ' + notAnywhere.slice(0, 6).map((it) => it.name).join(', ') + (notAnywhere.length > 6 ? ' …' : '')) : null));
+
+      // (5) 차이 요약 — 처음 3개만 펼치고 나머지는 '더 보기'
+      const ins = Array.isArray(MV.planCompare) ? MV.planCompare.filter((x) => x && (x.title || x.detail)) : [];
+      const LV = { info: 'kid', warn: 'warn', bad: 'bad', good: 'good' };
+      const insEl = (c) => el('div', { class: 'callout ' + (LV[c.level] || '') }, c.title ? el('strong', c.title) : null, c.detail ? el('div', { class: 'small' }, MV.linkify(String(c.detail))) : null);
+      box.appendChild(el('section', { class: 'card mt-12' },
+        el('div', { class: 'fp-card-head' }, el('h2', '🔎 두 집 차이 요약'), ins.length ? el('span', { class: 'chip' }, ins.length + '개') : null),
+        ins.length ? [ins.slice(0, 3).map(insEl), ins.length > 3 ? el('details', { class: 'fp-details fp-insmore' }, el('summary', el('strong', '더 보기 ' + (ins.length - 3) + '개')), el('div', { class: 'mt-8' }, ins.slice(3).map(insEl))) : null]
+          : el('p', { class: 'small muted mb-0' }, '도면 리서치가 반영되면 두 집의 차이(수납·동선·채광 등)가 여기에 정리돼요.')));
 
       drawMinis();
     }
@@ -5211,9 +5884,11 @@
       try { history.replaceState(null, '', '#/plan/new'); } catch (e) { /* 무시 */ }
     }
     const spacePart = MV.parts && MV.parts.list ? MV.parts.list().find((p) => p.id === 'space' || /공간설계/.test(p.name || '')) : null;
-    root.appendChild(el('div', { class: 'view-head fp-vh' },
+    const spaceLink = spacePart && MV.views.checklist ? { href: '#/checklist/' + encodeURIComponent(spacePart.id), label: (spacePart.emoji || '📐') + ' ' + spacePart.name + ' 체크리스트' } : null;
+    // 폰의 도면 탭(새 집·지금 집)에선 설명 글과 체크리스트 단추를 숨겨 도면을 위로 (체크리스트는 도구 줄 ⋯ 더보기 안에)
+    root.appendChild(el('div', { class: 'view-head fp-vh' + (tab === 'compare' ? '' : ' has-tools') },
       el('div', el('h1', '📐 공간설계'), el('div', { class: 'sub' }, '두 집 도면에 우리 짐을 놓아 보고, 버릴 것·살 것을 정해요')),
-      spacePart && MV.views.checklist ? el('div', { class: 'actions' }, el('a', { class: 'btn btn-sm btn-ghost fp-b', href: '#/checklist/' + encodeURIComponent(spacePart.id) }, (spacePart.emoji || '📐') + ' ' + spacePart.name + ' 체크리스트')) : null));
+      spaceLink ? el('div', { class: 'actions' }, el('a', { class: 'btn btn-sm btn-ghost fp-b', href: spaceLink.href }, spaceLink.label)) : null));
     const headRow = el('div', { class: 'fp-headrow' }, el('div', { class: 'tabs fp-tabs', role: 'tablist', 'aria-label': '도면 선택' },
       TABS.map(([id, label]) => el('button', {
         type: 'button', role: 'tab', 'aria-selected': String(id === tab), class: id === tab ? 'active' : '',
@@ -5223,7 +5898,7 @@
     if (!MV.plans || typeof MV.plans !== 'object') { root.appendChild(emptyCard('도면 데이터가 아직 없어요.')); return; }
     if (tab === 'compare') { renderCompare(root, ctx); return; }
     if (!MV.plans[tab]) { root.appendChild(emptyCard(PLAN_LABEL[tab] + ' 도면 데이터가 아직 없어요.')); return; }
-    renderEditor(root, tab, ctx, headRow);
+    renderEditor(root, tab, ctx, headRow, spaceLink);
   }
 
   /* ---------------- 다른 화면용 요약 ---------------- */
