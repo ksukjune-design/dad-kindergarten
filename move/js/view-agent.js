@@ -9,7 +9,12 @@
             같은 브라우저의 다른 탭과는 저장할 때·storage 이벤트 때 메시지 id 로 합침 (지운 id 는 removed 로 기억)
             매 요청 = [지시 턴(오늘·사실·앱 데이터 요약 JSON·규칙)] + 최근 대화 12턴 (120KB 이하)
             지난 대화는 질문마다 [질문 → 답] 으로 묶어 보냄. 중지·오류·창 닫힘으로 글도 변경도 없이 끝난 질문 뒤에는
-            '(사용자가 중지함/처리 못 함 — 실행하지 말 것)' 답 자리를 넣어, 다음 질문과 한 턴으로 합쳐져 실행되지 않게 함
+            '(가족이 중지함/처리 못 함 — 실행하지 말 것)' 답 자리를 넣어, 다음 질문과 한 턴으로 합쳐져 실행되지 않게 함
+            지시 턴의 '오늘 마감·기한 지남(미완료)' 줄은 요청할 때마다 앱 기록에서 계산 (지시문에 날짜를 박아 두지 않음)
+   답하는 중 보내기·Enter 는 대기열(R.queued, 한 개 — 더 쓰면 이어 붙임)에 넣고 '⏳ 답이 끝나면 보낼게요 ✕'를 보여 줌.
+            답이 끝나거나 중지하면 자동으로 보냄 (오류로 끊기면 보내지 않고 입력칸으로 되돌림). 중지는 따로 ■ 단추·Esc.
+            스트리밍은 120ms마다 묶어 답 본문(.ag-md)만 바꿈. 위로 올려 읽는 중이면 '↓ 새 답' 단추.
+            다른 화면에 갔다 오면 읽던 답 자리로 (R.lastPos — 맨 아래였으면 맨 아래)
             끊긴 답을 '다시 보내기'하면 끊긴 글·이미 바꾼 목록을 같이 보내 같은 변경을 되풀이하지 않게 함
             (다시 보내기·도구 없이 묻기는 대화의 마지막 답에만). tools_unavailable 을 받으면 이 창에서는 도구 없이 물음
    다른 탭   답하는 창은 10초마다 답에 살아 있음(hb)을 저장, 창을 닫으면(pagehide) '끊김'으로 저장.
@@ -27,7 +32,8 @@
             삭제 도구는 없습니다. 자금흐름 상태가 아직 없으면 자금흐름 화면이 기본값을 만들게 합니다.
             할 일은 사람에게 나눠 배정하지 않음: 도구에 담당(owner) 인자가 없고, 와도 무시. 결과·요약에도 owner 를 넣지 않고
             지시 6-1 로 '사람별로 나누지 말 것'을 알림 (옷·돈의 주인 같은 사실은 그대로)
-   🤖 버튼  #/agent 가 아닌 모든 화면 오른쪽 아래 (모달이 열리면 숨김, 화면 아래 입력줄이 있으면 그 위로)
+   🤖 버튼  #/agent 가 아닌 모든 화면 오른쪽 아래 (모달이 열리면 숨김, 화면 아래 입력줄이 있으면 그 위로).
+            폰(≤860px, 아래 탭바에 '비서'가 있음)에서는 숨기고, 답하는 중이면 탭바 '비서'에 초록 점(body.ag-busy-on)
             페이지가 스크롤되는 화면에는 맨 아래 76px 빈 자리(body.ag-fab-pad)를 둬서 마지막 버튼이 가려지지 않게
             화면 안의 목록이 따로 스크롤되면(태블릿·데스크톱 체크리스트) 버튼 밑 그 목록 끝에도 빈 자리(.ag-fab-padin)
    금액     도구의 금액 글은 직접 읽음: '5만 5천원'·'3백만원'·'1억 2천만원' OK, 범위('3-4만원')·모르는 단위('12k')·
@@ -44,7 +50,7 @@
             이사업체 계약(10/8 아정당 총 190만원·부가세 없음·현금이체, 계약금 10만원 냄, 잔금 180만원 11/3 점검 뒤),
             옷장은 이사 뒤 간이, 붙박이장 비우기('나' 옷 → 간이옷장, '나' 잡화 → 잡화정리, 이동식 행거는 필요할 때만), 커튼·소품 그대로, 입주청소 직접, 예비비 없음, HUG 비교(#/guide/hug),
             사전 이삿짐 정리 파트 이름은 앱 데이터에서 읽음
-   오류     sample 오류 코드마다 한국어 안내, 자동 재시도 없음 (사용자가 '다시 보내기').
+   오류     sample 오류 코드마다 한국어 안내, 자동 재시도 없음 (가족이 '다시 보내기').
    CSS 접두사: ag-
    ============================================================ */
 (function () {
@@ -78,9 +84,11 @@
     capability_disabled: ['이 화면에서는 AI 비서를 쓸 수 없어요', '이 화면에서는 클로드 연결이 꺼져 있어요. 받은 공유 링크로 클로드 공유 버전을 직접 열어 보세요.'],
     capability_removed: ['이 앱 버전에서는 AI 비서를 쓸 수 없어요', '클로드 앱을 최신으로 업데이트한 뒤 다시 열어 보세요.'],
   };
+  /* 추천 질문 — 🔥 오늘 할 일이 맨 앞. ⏰ 기한 지난 일은 기한 지난 할 일이 있을 때만 (show) */
   const SUGGESTIONS = [
+    { id: 'today', icon: '🔥', label: '오늘 할 일', prompt: () => '오늘(' + D.fmt(D.today()) + ') 꼭 할 일과 3일 안에 마감인 일을 중요한 순서로 알려 줘. 기한이 지난 일이 있으면 맨 앞에 같이 알려 줘.' },
     { id: 'week', icon: '🗓', label: '이번 주 할 일 정리', prompt: () => '이번 주 할 일을 날짜 순서로 정리해 줘. 기한이 지난 일도 같이 알려 줘.' },
-    { id: 'late', icon: '⏰', label: '지연된 일과 해결 방법', prompt: () => '기한이 지난 일을 모두 찾아서, 하나씩 오늘 바로 할 수 있는 해결 방법을 알려 줘.' },
+    { id: 'late', icon: '⏰', label: () => '기한 지난 일 ' + overdueCount() + '개 해결', show: () => overdueCount() > 0, prompt: () => '기한이 지난 일을 모두 찾아서, 하나씩 오늘 바로 할 수 있는 해결 방법을 알려 줘.' },
     { id: 'budget', icon: '💰', label: '예산·비용 점검', prompt: () => '이사 예산과 ' + D.fmt(D.moveDate()) + ' 뒤 남는 돈을 점검해 줘. 부족하면 얼마나 부족하고 어떻게 메울 수 있는지 알려 줘.' },
     { id: 'plan', icon: '📈', label: '일정(워크플랜) 점검', prompt: () => '이사일까지 주별 워크플랜을 점검해 줘. 밀린 주·일이 몰린 주와 일정을 조정해야 할 일을 알려 줘.' },
     { id: 'day', icon: '📅', label: () => moveMD() + ' 당일 순서', prompt: () => D.fmt(D.moveDate()) + ' 이사 당일 순서를 시간대별로 알려 줘. 돈 보내는 순서와 짐 옮기는 순서도 같이.' },
@@ -104,6 +112,12 @@
       retry ? el('button', { type: 'button', class: 'btn', onclick: retry }, '다시 시도') : null);
   }
   const moveMD = () => { const d = D.parse(D.moveDate()); return d ? (d.getMonth() + 1) + '/' + d.getDate() : '11/3'; };
+  /** 기한 지난(미완료) 할 일 수 — 추천 질문 '⏰ 기한 지난 일'을 보여 줄지 */
+  function overdueCount() {
+    try { return (MV.store.get().items || []).filter((it) => it && !it.done && MV.items.status(it) === 'overdue').length; } catch (e) { return 0; }
+  }
+  const suggestions = () => SUGGESTIONS.filter((s) => { try { return !s.show || s.show(); } catch (e) { return true; } });
+  const sugLabel = (s) => (typeof s.label === 'function' ? s.label() : s.label);
   const has = (o, k) => !!o && Object.prototype.hasOwnProperty.call(o, k) && o[k] !== undefined;
   const str = (v, max) => String(v == null ? '' : v).trim().slice(0, max || 500);
   const clip = (s, n) => { s = String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
@@ -259,6 +273,9 @@
     prefs: loadPrefs(),
     view: null,          // 지금 그려진 화면 참조
     composerFocused: false,
+    focusAfter: false,   // 추천 칩·카드로 물었음 (데스크톱) → 답이 끝나면 입력칸으로 포커스
+    queued: '',          // 답하는 중에 보낸 질문 (답이 끝나면 보냄 — 이 창에서만, 창을 닫으면 입력칸 글로 남김)
+    lastPos: null,       // 화면을 떠날 때 읽던 자리 { stick } | { stick:false, id, off } (돌아오면 그 답으로)
   };
 
   /* ---- 대화 저장: 같은 브라우저의 다른 탭과 합쳐서 저장 (서로 덮어쓰지 않게) ---- */
@@ -374,6 +391,8 @@
   setInterval(checkOrphans, 15000);
   /* 답하는 중에 창을 닫거나 새로고침하면 그 답을 '끊김'으로 저장 (다른 창이 계속 '답하는 중'으로 보지 않게) */
   window.addEventListener('pagehide', () => {
+    // 답이 끝나면 보내려던 질문은 입력칸 글로 남김 (다시 열면 입력칸에 있어요)
+    if (R.queued) lsSet(DRAFT_KEY, R.queued + (R.draft ? '\n' + R.draft : ''));
     const c = R.active;
     if (!c) return;
     const bot = findMsg(c.msgId);
@@ -384,6 +403,8 @@
     delete bot.hb;
     saveChat();
   });
+  // 뒤로·앞으로 캐시에서 그대로 돌아왔으면 (위 pagehide 가 남긴) 대기 질문 글을 입력칸 글로 되돌림
+  window.addEventListener('pageshow', (e) => { if (e.persisted) lsSet(DRAFT_KEY, R.draft ? R.draft : null); });
   window.addEventListener('storage', (e) => {
     if (e.key !== CHAT_KEY) return;
     const r = mergeChat(readStored(), false);
@@ -436,15 +457,34 @@
     if (syncAvailability()) MV.store.emit('caps', MV.sync && MV.sync.cap);
   });
   MV.store.on('route', () => { updateFab(); if (fab && !fab.hidden) { requestAnimationFrame(placeFab); setTimeout(placeFab, 400); } });
+  // 탭바가 다시 만들어지면(비서 탭이 생기거나 사라짐) 숨은 글 다시 달기
+  MV.store.on('caps', () => setTimeout(updateFab, 0));
 
   /* ======================= 떠 있는 🤖 버튼 ======================= */
   let fab = null;
   let fabObserver = null;
+  /* 폰(≤860px)은 아래 탭바에 '비서'가 있어서 🤖 버튼을 숨겨요 (바쁨은 탭바 '비서'의 초록 점으로). 데스크톱·태블릿 가로는 그대로 */
+  const NAV_MQ = (() => { try { return window.matchMedia('(max-width: 860px)'); } catch (e) { return null; } })();
+  const navHasAgent = () => !!(NAV_MQ && NAV_MQ.matches && MV.views.agent && MV.views.agent.nav);
+  // 창 너비가 860px 를 넘나들면 🤖 버튼 다시 판단
+  try { if (NAV_MQ) { const f = () => updateFab(); if (NAV_MQ.addEventListener) NAV_MQ.addEventListener('change', f); else if (NAV_MQ.addListener) NAV_MQ.addListener(f); } } catch (e) { /* 무시 */ }
   /** 이 화면에 🤖 버튼이 있어야 하는지 (모달 때문에 잠깐 숨긴 것은 빼고 — 아래 여백은 그대로 둬서 화면이 튀지 않게) */
-  const fabRoute = () => available() && !!MV.route && MV.route.name !== 'agent';
+  const fabRoute = () => available() && !!MV.route && MV.route.name !== 'agent' && !navHasAgent();
+  /** 탭바 '비서'의 바쁨 점 — body class 라 탭바를 다시 만들어도 남아요. 화면 낭독기용 글은 링크 안 숨은 글 */
+  function markNavBusy(busy) {
+    const b = document.body;
+    if (!b) return;
+    if (busy) MV.css('ag', STYLE);
+    if (b.classList.contains('ag-busy-on') !== busy) b.classList.toggle('ag-busy-on', busy);
+    const a = document.querySelector('#nav a[data-view="agent"], #nav a[href="#/agent"]');
+    const sr = a && a.querySelector(':scope > .ag-nav-sr');
+    if (busy && a && !sr) a.appendChild(el('span', { class: 'ag-nav-sr' }, ' (답하는 중)'));
+    else if (!busy && sr) sr.remove();
+  }
   function updateFab() {
     if (!document.body) return;
-    const show = available() && MV.route && MV.route.name !== 'agent' && !document.querySelector('.modal-back');
+    markNavBusy(!!R.active);
+    const show = fabRoute() && !document.querySelector('.modal-back');
     if (!show && !fab) return;
     if (!fab) {
       fab = el('button', {
@@ -835,6 +875,37 @@
     }
     return out.join(', ');
   }
+  /** 기한 칩과 같은 말: 오늘 · 내일 · D-n · n일 지남 */
+  function dueWord(due) {
+    if (!D.valid(due)) return '기한 없음';
+    const n = D.diff(D.today(), due);
+    return n === 0 ? '오늘' : n === 1 ? '내일' : n < 0 ? (-n) + '일 지남' : 'D-' + n;
+  }
+  /** 지시 턴의 '오늘 마감·기한 지남(미완료)' — 요청할 때마다 앱 기록에서 계산 (지시문에 날짜를 박아 두지 않게) */
+  function dueLines() {
+    try {
+      const open = (MV.store.get().items || []).filter((it) => it && !it.done);
+      const pick = (s) => open.filter((it) => MV.items.status(it) === s).sort(byDue);
+      const MAX = 12;
+      const names = (list, withDue) => list.slice(0, MAX).map((it) => '"' + clip(it.title, 70) + '"' + (withDue ? '(' + fmtDue(it.due) + ' · ' + dueWord(it.due) + ')' : '') + (it.priority === 'high' ? ' [중요]' : '')).join(', ') +
+        (list.length > MAX ? ' 외 ' + (list.length - MAX) + '개' : '');
+      const today = pick('today');
+      const late = pick('overdue');
+      return ['[오늘 마감(미완료)] ' + (today.length ? names(today, false) : '없음')]
+        .concat(late.length ? ['[기한 지남(미완료)] ' + names(late, true)] : []);
+    } catch (e) { return []; }
+  }
+  /** [가족 결정] 가운데 할 일 하나에 딸린 안내 — 그 할 일이 안 끝났을 때만, 날짜는 할 일 기한에서 (끝나면 빼요) */
+  function taskDecisionLines() {
+    const out = [];
+    try {
+      const it = MV.items.get('money-06');
+      if (it && !it.done) {
+        out.push('- 아직 안 끝난 할 일 "' + clip(it.title, 70) + '"(기한 ' + fmtDue(it.due) + ' · ' + dueWord(it.due) + '): 지금 집 중개사를 통해 A의 ' + moveMD() + ' 송금 시점(10:30 전 권장)·1일 이체한도 확인 — 같은 통화에서 B 이사 시각·B 대출 조건도 같이 물어요.');
+      }
+    } catch (e) { /* 무시 */ }
+    return out;
+  }
   function instruction(withTools) {
     const today = D.today();
     const move = D.moveDate();
@@ -844,18 +915,18 @@
       '1. 한국어 존댓말로 짧고 실용적으로 답하세요. 서론 없이 바로, 목록과 **굵은 글씨**로 핵심을 보여 주세요.',
       withTools
         ? '2. 세부 내용은 추측하지 말고 도구로 읽으세요. 바꿔 달라는 요청이면 도구로 바로 바꾸고, 답에 무엇을 어떻게 바꿨는지(항목 이름, 이전 값 → 새 값) 정확히 적으세요. 무엇을 바꿀지 애매하면 바꾸기 전에 짧게 되물으세요. 삭제 도구는 없으니 지우는 일은 화면에서 직접 하도록 안내하세요.'
-        : '2. 이번 대화에서는 앱 데이터를 직접 읽거나 바꿀 수 없어요. 위 요약으로 답하고, 바꿔야 할 내용은 사용자가 직접 고치도록 어느 화면에서 무엇을 바꾸면 되는지 링크와 함께 알려 주세요. 바꿨다고 말하면 안 돼요.',
+        : '2. 이번 대화에서는 앱 데이터를 직접 읽거나 바꿀 수 없어요. 위 요약으로 답하고, 바꿔야 할 내용은 가족이 직접 고치도록 어느 화면에서 무엇을 바꾸면 되는지 링크와 함께 알려 주세요. 바꿨다고 말하면 안 돼요.',
       '3. 금액·법률·세금·은행 규정을 지어내지 마세요. 데이터에 없으면 "확인 필요"라고 쓰고 누구에게 물을지(은행·중개사·세무사·주민센터·관리사무소·이사업체 등) 알려 주세요.',
       '4. 사람 이름·전화번호·계좌번호·주민등록번호·동·호수 같은 개인 식별 정보는 쓰지 마세요. 사람은 A·B·C·중개사로 부르세요.',
       '5. 날짜는 M/D(요일) 형식(예: ' + D.fmt(move) + '), 금액은 "32만원", "2억 9,500만원"처럼 쓰세요. "다음 주 월요일" 같은 말은 [날짜 참고]로 실제 날짜(YYYY-MM-DD)를 계산하세요.',
       '6. 할 일을 추가·수정할 때 "!중요"는 priority high("!보통" mid, "!여유" low)예요. 파트를 말하지 않으면 가장 알맞은 파트를 고르세요.',
-      '6-1. 할 일을 사람에게 나눠 배정하지 마세요. 할 일은 모두 "우리 집 할 일"이에요 — "아내가 할 일", "남편 담당", "각자 맡을 일"처럼 사람별로 나누거나 정리하지 말고, 날짜·파트·일의 종류(💰 돈·서류, 📦 짐 등)로만 묶으세요. 같은 시간에 두 곳에서 일이 있으면 "그날 편하게 나눠 맡으세요" 정도로만 말하세요. 사용자가 "@아내" 같은 표시를 붙여도 담당으로 다루지 말고 제목에서 빼세요. (옷·돈의 주인을 말하는 사실, 예: 아내 옷은 캐비닛장으로 — 은 그대로 써도 돼요.)',
+      '6-1. 할 일을 사람에게 나눠 배정하지 마세요. 할 일은 모두 "우리 집 할 일"이에요 — "아내가 할 일", "남편 담당", "각자 맡을 일"처럼 사람별로 나누거나 정리하지 말고, 날짜·파트·일의 종류(💰 돈·서류, 📦 짐 등)로만 묶으세요. 같은 시간에 두 곳에서 일이 있으면 "그날 편하게 나눠 맡으세요" 정도로만 말하세요. 가족이 "@아내" 같은 표시를 붙여도 담당으로 다루지 말고 제목에서 빼세요. (옷·돈의 주인을 말하는 사실, 예: 아내 옷은 캐비닛장으로 — 은 그대로 써도 돼요.)',
       '7. 앱 화면 링크를 마크다운으로 붙일 수 있어요: [할 일](#/checklist/<partId>/<itemId>), [지금 할 일](#/checklist/~focus), [예산](#/money/budget), [' + D.fmt(move) + ' 돈 흐름](#/money/flow), [업체 견적](#/stuff/quotes), [이사 견적](#/stuff/estimate), [짐 목록](#/stuff/inventory), [규격 확인](#/stuff/inventory/spec), [대시보드](#/dashboard), [가이드](#/guide/<partId>), [HUG 보증 비교](#/guide/hug). finance.warnings 끝의 (화면: #/money/…)는 그 경고의 링크예요.',
-      '8. 예산·부족을 물으면(예: "' + moveMD() + '에 현금 모자라?") 예산 화면(#/money/budget)과 같은 순서로 답하세요: ① 꼭 드는 이사 비용 기준 ' + D.fmt(move) + ' 전후 현금 여유/부족(머리 숫자 — finance.cashVsEssential, numbers.netEssential) ② 새로 사는 살림까지 ③ 선택·나중에까지 전부. "부족"을 한 숫자로 뭉뚱그리지 마세요. 월세는 후불 확정(첫 월세 12/3)이라 11/3 돈 흐름에도 예산에도 없어요(사용자가 자금흐름에서 11/3 월세를 다시 켰을 때만 finance.rentNote 를 말하세요), 이사 전에 먼저 나갈 돈(finance.beforeMove)도 알려 주세요. 중개보수·잔금·대출 상환·월세는 예산이 아니라 돈 흐름에 이미 들어 있어요.',
+      '8. 예산·부족을 물으면(예: "' + moveMD() + '에 현금 모자라?") 예산 화면(#/money/budget)과 같은 순서로 답하세요: ① 꼭 드는 이사 비용 기준 ' + D.fmt(move) + ' 전후 현금 여유/부족(머리 숫자 — finance.cashVsEssential, numbers.netEssential) ② 새로 사는 살림까지 ③ 선택·나중에까지 전부. "부족"을 한 숫자로 뭉뚱그리지 마세요. 월세는 후불 확정(첫 월세 12/3)이라 11/3 돈 흐름에도 예산에도 없어요(가족이 자금흐름에서 11/3 월세를 다시 켰을 때만 finance.rentNote 를 말하세요), 이사 전에 먼저 나갈 돈(finance.beforeMove)도 알려 주세요. 중개보수·잔금·대출 상환·월세는 예산이 아니라 돈 흐름에 이미 들어 있어요.',
       '9. 지난 답에 "(이 답에서 앱에 이미 반영한 변경: …)"이 붙어 있으면 그 변경은 이미 저장됐어요 — 같은 변경을 다시 하지 마세요.',
-      '10. 대화의 마지막 사용자 메시지에만 답하세요. 지난 질문 뒤에 "(사용자가 이 요청을 중지했어요…)", "(…처리하지 못했어요…)", "(…끊겼어요…)" 같은 표시가 있으면 그 요청은 끝난 것이니 실행하거나 이어서 하지 마세요 — 사용자가 마지막 메시지에서 다시 해 달라고 할 때만 하세요.',
+      '10. 대화의 마지막 가족 메시지에만 답하세요. 지난 질문 뒤에 "(가족이 이 요청을 중지했어요…)", "(…처리하지 못했어요…)", "(…끊겼어요…)" 같은 표시가 있으면 그 요청은 끝난 것이니 실행하거나 이어서 하지 마세요 — 가족이 마지막 메시지에서 다시 해 달라고 할 때만 하세요.',
       '11. [가족 결정]을 따르세요. 그와 다른 옛 안내(에어컨을 제조사 서비스로 이사 전에 설치·이사 전 새 집 출입 동의, 이사업체 방문견적 3곳 받고 고르기, 냉장고·건조기를 LG 서비스로 옮기기, 이사 전 옷장 주문·벽 고정 동의, 간이옷장 하나 더 사기, \'나\' 잡화를 간이옷장에 넣기, 입주청소 업체, 예비비, 새 커튼·소품 구매)는 권하지 마세요. 앱 데이터(짐 목록 inventory.bigAppliances·예산)가 결정과 다르면 다르다고 알려 주고 고칠지 물어보세요. 짐의 lg=true 는 "제조사 서비스(LG 베스트케어·삼성전자서비스)로 옮김", brand 는 제조사예요.',
-      '12. 규격 확인: 짐 목록의 많은 가구 크기는 추정(assumedSize)이라, 사용자가 10/7에 명판·라벨 모델명을 하나씩 알려 줘요. 짐의 model 은 그 모델명이에요. 모델명을 받으면 그 짐의 model 에 넣고(추정 표시는 그대로), 그 모델의 가로·깊이·높이를 확실히 알 때만 w·d·h 를 넣으세요(그러면 추정이 꺼져요). 크기를 모르면 지어내지 말고 [규격 확인](#/stuff/inventory/spec) 화면의 검색 링크로 찾아보거나 줄자로 재 달라고 하세요. 진행 상황은 overview 의 inventory.specCheck 에 있어요.',
+      '12. 규격 확인: 짐 목록의 많은 가구 크기는 추정(assumedSize)이라, 가족이 10/7에 명판·라벨 모델명을 하나씩 알려 줘요. 짐의 model 은 그 모델명이에요. 모델명을 받으면 그 짐의 model 에 넣고(추정 표시는 그대로), 그 모델의 가로·깊이·높이를 확실히 알 때만 w·d·h 를 넣으세요(그러면 추정이 꺼져요). 크기를 모르면 지어내지 말고 [규격 확인](#/stuff/inventory/spec) 화면의 검색 링크로 찾아보거나 줄자로 재 달라고 하세요. 진행 상황은 overview 의 inventory.specCheck 에 있어요.',
     ];
     const est = modelEstimate();
     const mk = makerCostOf(est);
@@ -868,6 +939,7 @@
       '',
       '[오늘] ' + today + ' ' + D.fmt(today) + ' · 이사일 ' + move + ' ' + D.fmt(move) + ' · ' + D.dday(move).label,
       '[날짜 참고] ' + weekRefs(),
+    ].concat(dueLines(), [
       '',
       '[확정된 사실]',
       '- ' + D.fmt(move) + ' 이사: 등촌우성 2층(전용 66.9㎡, 붙박이장 있음) → 서광등촌마을 14층(전용 59.67㎡, 붙박이장 없음).' +
@@ -890,7 +962,7 @@
       '- 옷 자리 (10/24 바뀜, 예전 안내보다 우선): 여름옷은 아내·아이·나 모두 리빙박스에 담아요. 아내 가을·겨울옷은 모두 캐비닛장 3종(가져감)으로 옮기고(아내는 버리는 옷 없음), 나·아이 가을·겨울옷은 입을 것만 모아 지금 집 붙박이장에 사람별·종류별로 나눠 두었다가 11/3 이삿짐센터가 행거박스·박스로 옮겨요. 나·아이의 버리는 옷은 내보내요. 붙박이장은 집에 딸린 것이라 두고 가요(11/3 짐 뺀 뒤 닦고 빈 사진).',
       '- 장난감 정리는 10/25 가족이 실제로 모두 마쳤어요(🧸 장난감정리 파트 할 일 모두 완료) — 장난감 정리·판매·기부를 다시 할 일로 권하지 않아요.',
       '- 옷정리·잡화정리(신발 포함)도 10/25 가족이 모두 마쳤어요(두 파트 할 일 모두 완료) — 다시 할 일로 권하지 않아요. 새로 남은 정리는 화장대 정리 · 아이 방 물품 정리(잡동사니 정리 파트) · 세탁실 뒤편 정리(다용도실 정리 파트) 3개와 가죽옷 수리 맡기기(옷정리 파트)예요.',
-      '- 10/26 꼭 할 일: 지금 집 중개사를 통해 A의 11/3 송금 시점(10:30 전 권장)·1일 이체한도 확인 — 같은 통화에서 B 이사 시각·B 대출 조건도 같이 물어요.',
+    ], taskDecisionLines(), [
       '- 새 집 방 (10/24 밤 가족 배치 + 작은방1·작은방2 가구 맞바꿈 — 가족이 공유 앱에서 직접 옮긴 배치에 가족 요청으로 두 작은방 가구를 맞바꾼 것이 새 집 기본 배치 v17이에요, 10/7 방 지정·v15 초안·v16보다 우선): 안방 = 라지킹 매트리스(205×205, 프레임 없음) + 캐비닛장 3종(마켓비 피도르 2단 행어형 2개 + 3단 수납형 1개, 각 76×52×200 — 아내 옷) + 니토리 체스트랙. 거실 = 어린이 책장 3단 3개(한샘 샘) + 책장 5단 1개(왼쪽 벽) + 이케아 트롤리 3단·소파(170×83)·에어컨 스탠드(오른쪽 벽). 주방 = 냉장고(조리대(싱크대) 끝, 싱크대 옆) + 식탁(135×80) + 의자 4개(ㄷ자) + 쓰레기통. 세탁 발코니 = 건조기·전자레인지 수납장(버려도 된다고 했어요, 전자레인지는 그 위)·통돌이 — 냉장고는 이제 세탁 발코니에 두지 않아요. 작은방 짐은 작은방1·2 어느 쪽이든 괜찮다고 했고 가족 요청으로 두 방 가구를 맞바꿔서 작은방1(현관 쪽) = 낮은 좌식 화장대·이케아 알렉스 서랍·데스커 책상(아내·아이 공용)·이동식 간이 행거(지금 쓰는 간이옷장), 작은방2(욕실 쪽·아이 방) = 장난감장·새로 사는 어린이 책상 의자 세트·트롤리 2단이에요. 위 발코니(작은방1 앞, 가족 말 \'우측 상단 발코니\') = 리빙박스 10개, 빨래바구니는 욕실 문 바로 위 복도. 예전 안내(캐비닛장은 작은방2, 책장 4개는 작은방1, 식탁은 거실·소파와 맞바꿈, 안방엔 옷장 없음, 냉장고는 주방 왼쪽 벽, v15 초안의 냉장고 세탁 발코니·전자레인지 수납장 조리대 끝 칸·에어컨 거실 왼쪽 아래 구석·간이 행거 작은방2 왼쪽 벽 아래, v16의 작은방2 화장대·데스커 책상 / 작은방1 장난감장·어린이 책상)는 이제 쓰지 마세요.',
       '- 새 집 도면 (10/24 가족 실측 — 방마다 안쪽 치수): 작은방2(욕실 쪽·아이 방, 가족 도면의 작은방#1) 218×270, 작은방1(현관 쪽, 가족 도면의 작은방#2) 213×273, 주방 통로 150 + 조리대 210(인덕션 58×58, 조리대 끝 아래 70×75 칸), 안방 340×300, 거실 330×330(위는 복도·현관과 트임), 현관 폭 100(신발장 폭 100), 세탁 발코니(주방 뒤) 395×125(오른쪽 아래 70×50 튀어나온 곳, 그 위 70×73 칸), 위 발코니(작은방1 앞) 217×125, 전면 발코니 600×125 + 끝 다용도실 70×120. 욕실 크기, 복도·현관 깊이, 현관문·주방→세탁 발코니 문 위치, 에어컨 배관구, 실외기의 정확한 자리(가족 말로는 거실 쪽 전면 발코니), 세탁 발코니 수전·배수구·콘센트는 아직 추정·모름이라고 말하세요. 가족 도면 번호와 앱 이름(작은방1·2)이 반대라는 점도 헷갈리지 않게 같이 말하세요. 도면 화면의 \'🧊 3D로 보기\'에는 \'🚪 문 닫힘 / 🚪 문 열림\' 두 모습이 있어요 — 열림은 가구·가전 문·서랍·통돌이 뚜껑·전자레인지 문을 연 모습이고, 앞이 막혀 끝까지 못 여는 것은 열 수 있는 만큼만 조금 열고 주황 테두리로 보여요(짐을 누르면 \'이 자리에서는 ○cm만 돼요\'). 식탁 의자는 닫힘 = 식탁 밑에 넣은 모습, 열림 = 빼 둔 모습이고, 방문도 닫힘/열림에 따라 닫히고 열려요. 가구를 옮기고 돌리는 건 2D 도면에서, 3D는 보기만 해요.',
       '- 새 집 배치 규칙·기본 배치 v17 (10/24 밤 가족 배치 그대로 + 작은방1·작은방2 가구 맞바꿈): 실측값이라 10cm씩 띄우지 않아요(가족 말 — 도면 화면 \'오차 여유\' 기본 끔). 제조사·쓰임에 필요한 틈은 권장값이에요(냉장고 뒤 약 5cm, 세탁기·건조기 뒤 10cm, 에어컨 옆 10cm) — 가족 자리는 냉장고·통돌이 뒤와 에어컨 옆을 벽에 붙였으니 설치 때 기사와 확인해요. 쓰임 공간(앞)은 실측표 둘째 칸(문·서랍을 연 앞뒤 전체 길이)에서 몸체 깊이를 뺀 값이에요(캐비닛장 39, 화장대 30, 체스트랙 38, 장난감장 43, 알렉스 56, 간이 행거 68, 냉장고 50, 건조기 55, 전자레인지 수납장 34, 어린이 책상 세트 55(의자를 빼면)). 식탁 의자는 가족 말로 \'식탁에서 최대 50cm(의자 폭만큼)\'라 의자가 놓인 50cm가 곧 빼는 자리예요 — 표는 [크리티컬 포인트](#/guide/space/critical), 배치·남은 문제는 [배치 초안](#/guide/space/layout-draft). v17은 미세 조정 없이 가족 자리 그대로예요: 건조기는 왼쪽 벽에서 20cm, 냉장고는 뒤 벽에 붙이고 조리대와 10cm, 통돌이는 70×73 칸 오른쪽 벽에 붙이고, 에어컨은 아래 벽에 붙였어요(소파·트롤리 3단은 v16 그대로), 간이 행거는 창에서 10cm. 세탁 발코니(395×125): 왼쪽부터 건조기(70×90×100, 옆으로 돌려 왼쪽 끝, 정면은 주방 문 쪽, 앞 전자레인지 수납장까지 75 — 문 열림 55) · 전자레인지 수납장(창 쪽 벽, 정면은 주방 문 쪽, 위에 전자레인지) · 통돌이(64×70×105, 오른쪽 70×73 칸, 정면 왼쪽, 오른쪽 벽에 붙임 — 뒤 호스 자리(권장 10cm)는 배송·설치 때 기사와 확인하고 필요하면 10cm쯤 앞으로). 냉장고는 이제 세탁 발코니가 아니라 주방이에요(v15 초안처럼 발코니로 옮기자고 하지 마세요). 주방: 냉장고(91×95×180)는 조리대(싱크대) 끝 70×75 칸에 조리대와 10cm 띄워 같은 방향(정면 = 식탁 쪽)으로, 뒤 벽에 붙여 두고(LG 권장 뒤 약 5cm — 설치 때 띄우면 그만큼 식탁 쪽으로 나와요), 식탁 모서리 ↔ 냉장고 통로 약 57cm가 주방·세탁 발코니로 드나드는 유일한 길이에요. 냉장고는 복도 쪽으로 약 38cm 나와요(복도는 약 1.3m 남음). 식탁은 긴 변을 왼쪽 벽에, 의자 ㄷ자(위 1·통로 쪽 2·아래 1) — 통로 쪽 의자 ↔ 조리대 20cm(의자를 넣으면 70cm). 아래 의자는 가족 배치대로 왼쪽 벽 쪽이라 빼 두면 작은방2 문 앞을 막고, 식사 뒤 식탁 밑에 넣으면 문 앞에 약 17cm만 걸쳐요. 쓰레기통은 주방 오른쪽 위 구석. 식탁을 거실로 옮기는 안은 이제 권하지 마세요. 거실: 왼쪽(안방 쪽) 벽에 위에서부터 어린이 책장 3개 + 맨 아래 책장 5단(정면 오른쪽), 오른쪽 벽(정면 왼쪽)에 위에서부터 트롤리 3단·소파·에어컨 스탠드(오른쪽 아래 구석, 아래 벽에 붙임 — 옆 10cm 여유가 없어 설치 기사와 확인, 소파와 20cm, 바람은 분합문을 따라 왼쪽) — 스탠드가 배관구(추정, 거실 왼쪽 아래)에서 약 2.6m라 배관 연장 비용·배관 구멍 위치를 설치 기사에게 확인해요. 안방: 왼쪽 벽 한 줄(정면 오른쪽)에 위에서부터 체스트랙 · 캐비닛장 ① 2개 · 캐비닛장 ②(아래 벽에 붙임 — 벽걸이 배관구(추정)는 그 뒤), 매트리스는 오른쪽·아래 벽에 붙여 머리는 창 쪽, 캐비닛장 앞 통로 약 83cm. 작은방1·작은방2 가구 맞바꿈(가족 요청 — 두 방은 문이 반대쪽이라 좌우를 뒤집어 옮겼고 벽에서 떨어진 거리는 그대로): 작은방1은 오른쪽(바깥) 벽 위에서부터 화장대·알렉스·데스커 책상(정면 왼쪽), 이동식 간이 행거(85×47×147.6, 앞 68)는 왼쪽 위 창 쪽 끝에 정면 오른쪽으로, 창에서 10cm(겨울 결로) — 키가 147.6cm라 창 왼쪽 끝 약 24cm를 가려요. 작은방2(아이 방)는 오른쪽(주방) 벽 위에서부터 장난감장·어린이 책상 세트(가로 80 × 깊이 60 — 가족이 고친 크기, 정면 왼쪽), 왼쪽 아래 구석에 트롤리 2단(정면 위) — 장난감장(높이 110)이 창 오른쪽 끝 약 33cm를 가려요. 위 발코니 리빙박스 10개는 왼쪽·오른쪽 벽 가운데에 5개씩 쌓아요(높이 약 150cm, 7개까지 쌓을 수 있다고 가족이 말함 — 도면에서 ⬆ 쌓기·⬇ 내리기), 빨래바구니는 욕실 문 바로 위. 도면 점검은 ⛔ 0 · ⚠️ 7이에요: ① 냉장고가 주방 경계를 넘어 복도로 나옴(가족 선택) ② 식탁 모서리 5cm가 작은방2 문 앞(왼쪽 벽 막힘 없는 길이 130 < 식탁 135) ③ 아래 식탁 의자가 작은방2 문 앞(빼 둘 때 — 식탁 밑에 넣으면 괜찮음) ④ 통돌이 뒤 호스 자리 10cm 없음(벽에 붙임) ⑤ 에어컨 스탠드 옆 10cm 없음(아래 벽에 붙임) ⑥ 매트리스 발치가 안방 문 열림 범위와 겹침(문짝은 매트리스와 5cm 떨어져 닫힘) ⑦ 데스커 책상 의자 빼는 자리가 작은방1 문 열림 범위와 15cm(문을 활짝 열 때 의자를 조금 당겨요) · 💡 에어컨이 배관구에서 약 2.6m. 이사 날 순서: 건조기·전자레인지 수납장을 식탁·냉장고보다 먼저 세탁 발코니에 넣어요(식탁·냉장고가 들어오면 주방 통로가 약 57cm — 건조기 폭 70). 통돌이 배송 날(11/4~11/6)은 식탁·의자를 잠깐 옆으로 비켜요(세탁기 폭 64). 가족에게 확인할 것: 에어컨 배관 구멍이 거실 오른쪽 아래에도 있는지(없으면 새 구멍은 새 집 집주인 C 동의)와 그 구석 콘센트 · 조리대 끝 70×75 칸의 복도 쪽이 막힘 없이 트였는지와 냉장고 콘센트 · 주방 → 세탁 발코니 문이 미닫이인지, 어느 쪽으로 열리는지(주방 쪽이면 식탁 모서리·위 의자에, 발코니 쪽이면 통돌이 앞에 닿을 수 있어요)와 폭(건조기 70) · 거실 왼쪽 벽 실측 320(그림은 330)이라 책장 4개(320)가 꼭 맞는지 · 팔걸이 의자를 식탁 밑에 다 넣었을 때 몇 cm 나오는지 · 작은방1 창이 위 발코니로 나가는 바닥까지 문인지(행거·리빙박스 길) · 통돌이 뒤 호스 자리·에어컨 스탠드 옆 틈(배송·설치 기사) · 그 밖에 세탁 발코니 수전·배수구·콘센트, 실외기 받침·배수, 위 발코니로 드나드는 문과 겨울 결로(리빙박스 아래 깔판). 이미 쓰던 기록에서는 v16 기본 자리에 그대로 있는 가구만 v17 자리로 옮겼어요(다르게 옮긴 가구는 그대로).',
@@ -899,7 +971,7 @@
       '- 커튼·소품은 지금 것을 그대로 가져가요(새로 안 사요, 0원). 사전방문 때 창 크기만 재서 지금 커튼이 맞는지 확인하고, 안 맞으면 이사 뒤 조정해요.',
       '- 입주청소는 업체 없이 가족이 직접 해요(0원) — 청소용품을 미리 챙기고, ' + D.fmt(move) + ' 열쇠 받은 직후나 다음 날 짐 풀기 전에 해요. 예비비 줄은 없어요.',
       '- HUG 전세보증금반환보증 보증료: 2년 약 68.5만원(추정, 예산 "선택·나중에", 11월 중 가입 때 냄). 가입할 때와 안 할 때 비교는 [HUG 보증 비교](#/guide/hug)로 안내하세요.',
-    ].concat(sortLine ? [sortLine] : [], [
+    ], sortLine ? [sortLine] : [], [
       '',
       '[지금 앱 데이터 요약 (JSON, 방금 계산)]',
       data,
@@ -1933,15 +2005,15 @@
   /** 끊긴 답 뒤에 붙이는 표시 — 모델이 끊긴 요청을 다음 질문 때 이어서 하지 않게 (cont: 지금 그 답을 이어서 하라는 경우) */
   function cutNote(m, cont) {
     if (cont) return '(이 답은 여기서 끊겼어요)';
-    if (m.status === 'stopped' && m.code === 'cancelled') return '(사용자가 여기서 답을 중지했어요 — 남은 일은 하지 않았어요. 사용자가 다시 요청하기 전에는 이 요청을 이어서 하지 마세요.)';
-    if (m.status === 'stopped') return '(답이 여기서 끊겼어요(창을 닫았거나 새로고침) — 남은 일은 하지 않았어요. 사용자가 다시 요청하기 전에는 이 요청을 이어서 하지 마세요.)';
-    return '(이 답은 오류로 여기서 끊겼어요 — 남은 일은 하지 않았어요. 사용자가 다시 요청하기 전에는 이 요청을 이어서 하지 마세요.)';
+    if (m.status === 'stopped' && m.code === 'cancelled') return '(가족이 여기서 답을 중지했어요 — 남은 일은 하지 않았어요. 가족이 다시 요청하기 전에는 이 요청을 이어서 하지 마세요.)';
+    if (m.status === 'stopped') return '(답이 여기서 끊겼어요(창을 닫았거나 새로고침) — 남은 일은 하지 않았어요. 가족이 다시 요청하기 전에는 이 요청을 이어서 하지 마세요.)';
+    return '(이 답은 오류로 여기서 끊겼어요 — 남은 일은 하지 않았어요. 가족이 다시 요청하기 전에는 이 요청을 이어서 하지 마세요.)';
   }
   function turnText(m, cont) {
     let t = String(m.text || '').trim();
     if (m.role === 'assistant' && (m.status === 'error' || m.status === 'stopped')) t += (t ? '\n\n' : '') + cutNote(m, cont);
     if (m.role === 'assistant' && m.changes && m.changes.length) {
-      t += '\n\n(이 답에서 앱에 이미 반영한 변경: ' + m.changes.map((c) => c.t).join(' / ') + (m.undo === 'used' ? ' — 이후 사용자가 이 변경을 모두 되돌림' : '') + ')';
+      t += '\n\n(이 답에서 앱에 이미 반영한 변경: ' + m.changes.map((c) => c.t).join(' / ') + (m.undo === 'used' ? ' — 이후 가족이 이 변경을 모두 되돌림' : '') + ')';
     }
     if (t.length > TURN_CHARS) t = t.slice(0, TURN_CHARS) + '…(이하 생략)';
     return t;
@@ -1950,11 +2022,11 @@
   function missingNote(replies) {
     if (replies.some((m) => m.status === 'pending')) return '(이 질문은 다른 창에서 답하는 중이었어요 — 여기서는 결과를 몰라요. 이 요청은 실행하지 말고, 필요하면 도구로 지금 상태만 확인하세요.)';
     const stopped = replies.find((m) => m.status === 'stopped');
-    if (stopped && stopped.code === 'cancelled') return '(사용자가 이 요청을 중지했어요 — 실행하지 않았고 앱 데이터도 바꾸지 않았어요. 사용자가 다시 요청하기 전에는 실행하지 마세요.)';
-    if (stopped) return '(이 요청은 답하는 중에 끊겨(창을 닫았거나 새로고침) 처리하지 않았고 앱 데이터도 바꾸지 않았어요. 사용자가 다시 요청하기 전에는 실행하지 마세요.)';
+    if (stopped && stopped.code === 'cancelled') return '(가족이 이 요청을 중지했어요 — 실행하지 않았고 앱 데이터도 바꾸지 않았어요. 가족이 다시 요청하기 전에는 실행하지 마세요.)';
+    if (stopped) return '(이 요청은 답하는 중에 끊겨(창을 닫았거나 새로고침) 처리하지 않았고 앱 데이터도 바꾸지 않았어요. 가족이 다시 요청하기 전에는 실행하지 마세요.)';
     const err = replies.find((m) => m.status === 'error');
-    if (err) return '(이 요청은 오류로 처리하지 못했고 앱 데이터도 바꾸지 않았어요. 사용자가 다시 요청하기 전에는 실행하지 마세요.)';
-    return '(이 요청에는 답하지 않았어요 — 사용자가 다시 요청하기 전에는 실행하지 마세요.)';
+    if (err) return '(이 요청은 오류로 처리하지 못했고 앱 데이터도 바꾸지 않았어요. 가족이 다시 요청하기 전에는 실행하지 마세요.)';
+    return '(이 요청에는 답하지 않았어요 — 가족이 다시 요청하기 전에는 실행하지 마세요.)';
   }
   /** 같은 역할이 이어지면 한 턴으로 (끊긴 답 + 다시 보낸 답) — 사용자 턴은 질문마다 답 자리가 있어 이어지지 않음 */
   function mergeTurns(turns) {
@@ -2036,7 +2108,7 @@
     // 다른 창이 이 답을 '답하는 중'으로 알 수 있게 살아 있음 표시를 저장 (끊기면 그 창이 '끊김'으로 바꿈)
     call.beat = setInterval(() => { if (R.active !== call) return; bot.hb = Date.now(); saveChat(); }, BEAT_MS);
     saveChat();
-    if (opts.retryOf) paintAll(true); else appendMsgs([userMsg, bot]);
+    if (opts.retryOf) paintAll(true); else appendMsgs([userMsg, bot], !!opts.auto);
     updateComposer();
     updateFab();
     let finished = false;
@@ -2057,8 +2129,10 @@
         onText: (u) => {
           if (R.active !== call || !u || typeof u.text !== 'string') return;
           bot.text = u.text;
+          const first = !call.gotText;
           call.gotText = true;
-          paintMsg(bot.id);
+          // 첫 글은 말풍선을 새로 만들고, 그다음부터는 120ms마다 본문만 (조각마다 전체를 다시 그리면 폰이 버벅여요)
+          if (first) paintMsg(bot.id); else paintSoon(bot.id);
         },
       };
       if (tools && tools.length) options.tools = tools;
@@ -2128,6 +2202,7 @@
 
   function finalize(call, bot, finished) {
     if (R.active === call) R.active = null;
+    if (streamId === bot.id) cancelPaintSoon();
     if (call.beat) { clearInterval(call.beat); call.beat = null; }
     delete bot.hb;
     call.status = null;
@@ -2158,6 +2233,7 @@
     call.pre = null;
     saveChat();
     if (R.blocked) {
+      sendQueued(false);   // 써 둔 질문은 입력칸 글로 남김
       syncAvailability();
       MV.store.emit('caps', MV.sync && MV.sync.cap);
       if (R.view && R.view.root.isConnected && R.view.mode !== 'blocked') { MV.rerender(true); return; }
@@ -2166,7 +2242,26 @@
     refreshMsgs([bot.id].concat(prevUndo, R.chat.msgs.filter((m) => m.actions && m.actions.length).map((m) => m.id)));
     updateComposer();
     updateFab();
-    if (R.view && document.activeElement === document.body && R.composerFocused) focusComposer();
+    // 입력칸에서 보냈거나(데스크톱) 추천 칩·카드로 물었으면 답이 끝난 뒤 입력칸으로 (눌렀던 칩은 답하는 동안 꺼져 포커스가 body 로 떨어져요)
+    if (R.view && (document.activeElement === document.body || !document.activeElement) && (R.composerFocused || R.focusAfter)) focusComposer();
+    R.focusAfter = false;
+    sendQueued(finished || bot.code === 'cancelled');
+  }
+  /** 답하는 중에 써 둔 질문: 답이 끝났거나 멈췄으면 보내고, 오류로 끊겼으면 보내지 않고 입력칸으로 되돌림 */
+  function sendQueued(ok) {
+    if (!R.queued || R.active) return;
+    if (!ok || R.blocked || !sampleFn()) {
+      cancelQueued(false);
+      MV.ui.toast(R.blocked ? '비서를 쓸 수 없게 돼서 써 둔 질문은 입력칸에 그대로 뒀어요.' : '답이 끊겨서 써 둔 질문은 보내지 않았어요 — 입력칸에 그대로 있어요.', { ms: 5000 });
+      return;
+    }
+    const q = R.queued;
+    R.queued = '';
+    paintQueue();
+    setTimeout(() => {
+      if (R.active || R.blocked) { R.queued = R.queued ? q + '\n' + R.queued : q; updateComposer(); return; }
+      send(q, { auto: true });   // 저절로 보내는 것이라 위로 올려 읽던 자리는 그대로 ('↓ 새 답'으로 알림)
+    }, 0);
   }
 
   function retry(botId, noTools) {
@@ -2279,6 +2374,7 @@
     };
     const keepAtAsk = liveKeep();   // 확인 창이 떠 있는 동안 답이 끝나도 약속대로 남김
     const run = () => {
+      cancelQueued(false);   // 써 둔 질문은 보내지 않고 입력칸으로 (지운 뒤 저절로 보내지지 않게)
       stop();
       saveChat();   // 다른 탭에서 온 메시지까지 합친 뒤 지움
       const keep = new Set(liveKeep().concat(keepAtAsk, elsewhere()));
@@ -2381,17 +2477,26 @@
     if (s.endsWith('|')) s = s.slice(0, -1);
     return s.split('|').map((c) => c.trim());
   }
+  /* 4칸 이상 표는 폰(≤640px)에서 줄마다 작은 카드로 (칸 이름은 data-label — CSS .ag-wide) */
   function table(rows) {
     const head = cells(rows[0]);
+    const wide = head.length >= 4;
+    const ths = head.map((h) => { const th = el('th'); inline(th, h, 0); return th; });
+    const labels = ths.map((th) => th.textContent.trim());
     const tbl = el('table', { class: 'tbl' },
-      el('thead', el('tr', head.map((h) => { const th = el('th'); inline(th, h, 0); return th; }))),
-      el('tbody', rows.slice(1).map((r) => el('tr', cells(r).slice(0, Math.max(head.length, 1)).map((c) => {
+      el('thead', el('tr', ths)),
+      el('tbody', rows.slice(1).map((r) => el('tr', cells(r).slice(0, Math.max(head.length, 1)).map((c, k) => {
         const td = el('td');
         if (/^[-+−]?[\d,.]+\s*(원|만원|억|%|명|톤|개|건)?$/.test(c)) td.className = 'num';
-        inline(td, c, 0);
+        if (!wide) { inline(td, c, 0); return td; }
+        // 폰 카드에서 칸 이름(::before)과 값이 두 덩어리로만 나뉘게 값을 span 하나로 감쌈 (굵은 글·링크가 따로 칸이 되지 않게)
+        if (labels[k]) td.setAttribute('data-label', labels[k]);
+        const val = el('span', { class: 'ag-td' });
+        inline(val, c, 0);
+        td.appendChild(val);
         return td;
       })))));
-    return el('div', { class: 'table-wrap ag-table' }, tbl);
+    return el('div', { class: 'table-wrap ag-table' + (wide ? ' ag-wide' : '') }, tbl);
   }
   function list(lines, i, parent) {
     const first = LIST_RE.exec(lines[i]);
@@ -2503,6 +2608,60 @@
     if (logScrolls(v)) v.log.scrollTop = v.log.scrollHeight;
     else window.scrollTo(0, document.documentElement.scrollHeight);
     v.stick = true;
+    if (v.jump && !v.jump.hidden) v.jump.hidden = true;
+  }
+  /** 맨 아래에 붙어 있는 동안 몇 프레임 더 맨 아래로 — 화면 밖 메시지는 높이를 짐작해 두었다가(content-visibility)
+      화면에 들어온 뒤 한두 프레임 지나 실제 높이로 바뀌어서, 한 번만 내리면 끝까지 못 가요 */
+  function settleBottom(v, n) {
+    requestAnimationFrame(() => {
+      if (!v.stick || !v.log || !v.log.isConnected) return;
+      const gap = logScrolls(v) ? v.log.scrollHeight - v.log.scrollTop - v.log.clientHeight : document.documentElement.scrollHeight - window.scrollY - window.innerHeight;
+      if (gap > 1) toBottom(v);
+      if ((n || 0) < 6) settleBottom(v, (n || 0) + 1);
+    });
+  }
+  const cssId = (id) => (window.CSS && window.CSS.escape ? window.CSS.escape(id) : id);
+  /** 지금 읽던 자리: 맨 아래면 { stick:true }, 아니면 화면 맨 위에 걸친 메시지 id 와 그 메시지 윗변의 거리 */
+  function readingPos(v) {
+    if (!v || !v.log || !v.log.isConnected) return null;
+    if (atBottom(v)) return { stick: true };
+    const top = logScrolls(v) ? v.log.getBoundingClientRect().top : 0;
+    const list = v.log.querySelectorAll('.ag-msg');
+    for (let i = 0; i < list.length; i++) {
+      const r = list[i].getBoundingClientRect();
+      if (r.bottom > top + 4) return { stick: false, id: list[i].getAttribute('data-id'), off: Math.round(r.top - top) };
+    }
+    return { stick: true };
+  }
+  /** readingPos 로 기억한 메시지를 같은 자리로 (없으면 false). 추정 높이(content-visibility)가 실제로 바뀐 뒤 한 프레임 뒤에 한 번 더 */
+  function restorePos(v, pos) {
+    if (!v || !pos || !pos.id) return false;
+    const n = v.log.querySelector('.ag-msg[data-id="' + cssId(pos.id) + '"]');
+    if (!n) return false;
+    const apply = () => {
+      if (!n.isConnected) return 0;
+      const d = logScrolls(v) ? n.getBoundingClientRect().top - v.log.getBoundingClientRect().top - pos.off : n.getBoundingClientRect().top - pos.off;
+      if (Math.abs(d) >= 1) { if (logScrolls(v)) v.log.scrollTop += d; else window.scrollBy(0, d); }
+      v.stick = atBottom(v);
+      if (!v.stick) showJump(v, false);
+      return Math.abs(d);
+    };
+    apply();
+    // 짐작한 높이가 실제로 바뀌는 몇 프레임 동안 다시 맞춤 (자리가 맞으면 멈춤)
+    let k = 0;
+    const again = () => requestAnimationFrame(() => { const moved = apply(); if (++k < 5 && (moved >= 1 || k === 1)) again(); });
+    again();
+    return true;
+  }
+  /** '↓ 새 답' 단추 (대화 맨 끝에 붙어 아래쪽에 떠 있음). fresh: 아래에 새 글이 생김 → '↓ 새 답', 아니면 '↓ 맨 아래로' */
+  function showJump(v, fresh) {
+    if (!v || !v.jump || !v.log) return;
+    if (fresh || v.jump.hidden) {
+      v.jump.textContent = fresh ? '↓ 새 답' : '↓ 맨 아래로';
+      v.jump.setAttribute('aria-label', fresh ? '새 답 보기 (맨 아래로)' : '맨 아래 대화로');
+    }
+    if (v.jump.parentNode !== v.log || v.log.lastChild !== v.jump) v.log.appendChild(v.jump);
+    v.jump.hidden = false;
   }
   function focusComposer() {
     const v = R.view;
@@ -2514,10 +2673,12 @@
     const live = R.active && R.active.msgId === m.id;
     const ch = m.changes || [];
     if (!ch.length) return null;
-    const box = el('div', { class: 'ag-changes', role: 'group', 'aria-label': '이 답에서 바꾼 것' },
-      el('div', { class: 'ag-changes-h' }, el('span', '🛠 변경 ' + ch.length + '건'),
-        m.undo === 'used' ? el('span', { class: 'chip' }, '되돌림') : null,
+    const undone = m.undo === 'used';
+    // 되돌린 변경: 줄을 긋고 '지금은 바뀌기 전 상태'라고 써서, 나중에 다시 봐도 이 변경이 살아 있다고 읽히지 않게
+    const box = el('div', { class: 'ag-changes' + (undone ? ' ag-undone' : ''), role: 'group', 'aria-label': undone ? '이 답에서 바꿨다가 되돌린 것' : '이 답에서 바꾼 것' },
+      el('div', { class: 'ag-changes-h' }, el('span', (undone ? '↺ 되돌린 변경 ' : '🛠 변경 ') + ch.length + '건'),
         live ? el('span', { class: 'chip think' }, '진행 중') : null),
+      undone ? el('p', { class: 'ag-undone-note' }, '되돌렸어요 — 지금은 바뀌기 전 상태예요.') : null,
       el('ul', ch.map((c) => el('li', c.href ? el('a', { href: c.href, class: 'ag-in' }, c.t) : c.t))));
     if (live) return box;
     if (m.undo === 'avail') {
@@ -2581,20 +2742,36 @@
     }
     return node;
   }
+  /* 환영 화면. 폰(≤640px)은 CSS 로: 🤖 빼기, 소개 1줄, 예시를 위로, 추천 카드는 4개 + '더 보기' */
+  const FEW_SUGG = 4;
   function welcome() {
-    const box = el('div', { class: 'ag-welcome' },
+    const list = suggestions();
+    const few = list.length > FEW_SUGG;
+    const grid = el('div', { class: 'ag-grid' + (few ? ' ag-few' : '') }, list.map((s) => el('button', {
+      type: 'button', class: 'ag-sugg', disabled: !!R.active, onclick: () => { R.focusAfter = !isTouch(); submit(s.prompt()); },
+    }, el('span', { class: 'ag-sugg-i', 'aria-hidden': 'true' }, s.icon), el('span', sugLabel(s)))));
+    const more = few ? el('button', {
+      type: 'button', class: 'ag-more-sugg', onclick: (e) => {
+        grid.classList.remove('ag-few');
+        const b = e.currentTarget;
+        const next = grid.children[FEW_SUGG];
+        b.remove();
+        if (next) try { next.focus({ preventScroll: true }); } catch (x) { /* 무시 */ }
+      },
+    }, '추천 질문 ' + (list.length - FEW_SUGG) + '개 더 보기') : null;
+    return el('div', { class: 'ag-welcome' },
       el('div', { class: 'ag-hello', 'aria-hidden': 'true' }, '🤖'),
       el('h2', '무엇을 도와드릴까요?'),
-      el('p', { class: 'small muted' }, '체크리스트·워크플랜·예산·견적·짐 목록을 보고 답하고, 말하면 바로 체크하고 고쳐요. 바꾼 것은 기록에 🤖로 남고 한 번에 되돌릴 수 있어요.'),
-      el('div', { class: 'ag-grid' }, SUGGESTIONS.map((s) => el('button', {
-        type: 'button', class: 'ag-sugg', disabled: !!R.active, onclick: () => submit(s.prompt()),
-      }, el('span', { class: 'ag-sugg-i', 'aria-hidden': 'true' }, s.icon), el('span', typeof s.label === 'function' ? s.label() : s.label)))),
+      el('p', { class: 'small muted ag-intro' },
+        el('span', { class: 'ag-intro-long' }, '체크리스트·워크플랜·예산·견적·짐 목록을 보고 답하고, 말하면 바로 체크하고 고쳐요. 바꾼 것은 기록에 🤖로 남고 한 번에 되돌릴 수 있어요.'),
+        el('span', { class: 'ag-intro-short' }, '앱 기록을 보고 답하고, 말하면 바로 고쳐요.')),
+      grid,
+      more,
       el('div', { class: 'ag-ex' },
-        el('p', { class: 'tiny muted mb-0' }, '이렇게 말해도 돼요 (눌러서 입력창에 넣기)'),
+        el('p', { class: 'tiny muted mb-0' }, '이렇게 말해도 돼요 (눌러서 입력칸에 넣기)'),
         el('div', { class: 'ag-ex-list' }, EXAMPLES.map((t) => el('button', {
-          type: 'button', class: 'ag-ex-btn', onclick: () => fillComposer(t),
-        }, '“' + t + '”')))));
-    return box;
+          type: 'button', class: 'ag-ex-btn', title: t, onclick: () => fillComposer(t),
+        }, el('span', { class: 'ag-ex-t' }, '“' + t + '”'))))));
   }
   function paintAll(forceScroll) {
     const v = R.view;
@@ -2602,21 +2779,62 @@
     const msgs = R.chat.msgs;
     const stick = atBottom(v);
     const top = v.log.scrollTop;
+    const jumpOn = !!v.jump && !v.jump.hidden;
+    // 맨 아래가 아니면 읽던 메시지를 기억했다가 다시 그린 뒤 그 자리로 (새 말풍선은 높이를 짐작해 두므로 scrollTop 만으로는 어긋나요)
+    const pos = !forceScroll && !stick && msgs.length ? readingPos(v) : null;
     v.log.replaceChildren(...(msgs.length ? msgs.map(buildMsg) : [welcome()]));
     v.log.classList.toggle('ag-log-empty', !msgs.length);
-    if (v.chips) { v.chips.hidden = !msgs.length; if (v.moreHint) requestAnimationFrame(v.moreHint); }
-    if (!msgs.length) v.log.scrollTop = 0;
-    else if (forceScroll || stick) toBottom(v);
-    else v.log.scrollTop = top;
+    if (v.chips) {
+      paintChips(v, true);
+      v.chips.hidden = !msgs.length;
+      if (v.moreHint) requestAnimationFrame(v.moreHint);
+    }
+    if (!msgs.length) { v.log.scrollTop = 0; if (v.jump) v.jump.hidden = true; }
+    else if (forceScroll || stick) {
+      toBottom(v);
+      settleBottom(v);
+    } else {
+      v.log.scrollTop = top;
+      if (pos && pos.id) restorePos(v, pos);
+      if (jumpOn) showJump(v, false);
+    }
   }
-  function appendMsgs(list) {
+  /** 추천 칩: 기한 지난 일이 생기거나 없어지면 '⏰' 칩과 개수도 따라가게 (글이 바뀌었을 때만 다시 만듦).
+      대화를 다시 그릴 때뿐 아니라 답이 끝날 때(updateComposer)·다른 창이나 기기에서 기록이 바뀔 때(change)도 불러요.
+      환영 화면 카드도 같은 글이라 함께 (sameWelcome: 방금 새로 그렸으면 건너뜀, 안에서 누르던 중이어도 건너뜀) */
+  function paintChips(v, sameWelcome) {
+    if (!v || !v.chips) return;
+    const key = suggestions().map(sugLabel).join('|');
+    if (v.chipsKey === key) return;
+    const first = !v.chipsKey;
+    v.chipsKey = key;
+    v.chips.replaceChildren(...chipButtons());
+    if (v.moreHint) requestAnimationFrame(v.moreHint);
+    const w = !sameWelcome && !first && v.log && v.log.querySelector('.ag-welcome');
+    if (w && !w.contains(document.activeElement)) w.replaceWith(welcome());
+  }
+  let chipsTimer = 0;
+  MV.store.on('change', () => {
+    if (chipsTimer || !R.view || !R.view.chips) return;
+    chipsTimer = setTimeout(() => { chipsTimer = 0; const v = R.view; if (v && v.log && v.log.isConnected) paintChips(v); }, 200);
+  });
+  function chipButtons() {
+    return suggestions().map((s) => el('button', {
+      type: 'button', class: 'ag-chip', disabled: !!R.active, onclick: () => { R.focusAfter = !isTouch(); submit(s.prompt()); },
+    }, s.icon + ' ' + sugLabel(s)));
+  }
+  /** keepPos: 가족이 직접 보낸 게 아니면(대기 질문을 저절로 보냄) 위로 올려 읽던 자리는 두고 '↓ 새 답'만 띄움 */
+  function appendMsgs(list, keepPos) {
     const v = R.view;
     if (!v || !v.log || !v.log.isConnected) return;
     if (v.log.querySelector('.ag-welcome') || (v.chips && v.chips.hidden)) { paintAll(true); return; }
+    const stay = keepPos && !atBottom(v);
     const keep = new Set(R.chat.msgs.map((m) => m.id));
     MV.$$('.ag-msg', v.log).forEach((n) => { if (!keep.has(n.getAttribute('data-id'))) n.remove(); });
     list.forEach((m) => { if (m && findMsg(m.id)) v.log.appendChild(buildMsg(m)); });
+    if (stay) { v.stick = false; showJump(v, true); return; }
     toBottom(v);
+    settleBottom(v);
   }
   function refreshMsgs(ids) {
     const seen = new Set();
@@ -2629,10 +2847,51 @@
     const old = v.log.querySelector('[data-id="' + (window.CSS && window.CSS.escape ? window.CSS.escape(id) : id) + '"]');
     if (!m) { if (old) old.remove(); return; }
     if (!old) { paintAll(); return; }
+    if (streamId === id) cancelPaintSoon();
     const stick = atBottom(v);
     const node = buildMsg(m);
     old.replaceWith(node);
-    if (stick) toBottom(v);
+    if (stick) { toBottom(v); settleBottom(v); } else if (m.role === 'assistant' && isLatest(m)) showJump(v, true);
+  }
+  /* 스트리밍: 조각마다 다시 그리지 않고 120ms마다 한 번, 답 본문(.ag-md)만 바꿔요.
+     조각마다 레이아웃을 읽지 않게 맨 아래 여부는 스크롤 때 기억해 둔 v.stick 을 씀 */
+  const STREAM_MS = 120;
+  let streamTimer = null;
+  let streamRaf = 0;
+  let streamAt = 0;
+  let streamGap = STREAM_MS;   // 답이 길어 한 번 그리는 데 오래 걸리면 그만큼 덜 자주 (그리는 시간의 3배, 최대 1초)
+  let streamId = null;
+  function paintSoon(id) {
+    if (streamId !== id) streamGap = STREAM_MS;
+    streamId = id;
+    if (streamTimer || streamRaf) return;
+    const wait = Math.max(0, streamGap - (Date.now() - streamAt));
+    streamTimer = setTimeout(() => {
+      streamTimer = null;
+      streamRaf = requestAnimationFrame(() => {
+        streamRaf = 0;
+        const t0 = performance.now();
+        paintBody(streamId);
+        streamAt = Date.now();
+        streamGap = Math.max(STREAM_MS, Math.min(1000, Math.round((performance.now() - t0) * 3)));
+      });
+    }, wait);
+  }
+  function cancelPaintSoon() {
+    if (streamTimer) { clearTimeout(streamTimer); streamTimer = null; }
+    if (streamRaf) { cancelAnimationFrame(streamRaf); streamRaf = 0; }
+  }
+  function paintBody(id) {
+    const v = R.view;
+    if (!v || !v.log || !v.log.isConnected) return;
+    const m = findMsg(id);
+    const node = m && v.log.querySelector('.ag-msg[data-id="' + cssId(id) + '"]');
+    const body = node && node.querySelector('.ag-bubble > .ag-md');
+    if (!body || !String(m.text || '').trim()) { if (m) paintMsg(id); return; }
+    body.replaceChildren(md(m.text));
+    // 화면 크기가 막 바뀐 동안(400ms)은 기억한 v.stick 이 늦을 수 있어 실제로 맨 아래일 때만 따라 내림 (그 사이 위로 올린 자리를 덮지 않게)
+    if (v.stick && (Date.now() - v.resizedAt > 400 || atBottom(v))) toBottom(v);
+    else if (!v.stick) showJump(v, true);
   }
   function paintStatus(call) {
     const v = R.view;
@@ -2646,24 +2905,73 @@
     v.ro.hidden = !(R.toolsOff || (R.limits !== undefined && !(R.limits && R.limits.tools)));
     if (v.tier) v.tier.hidden = !(R.tierNote && R.prefs.quick);
   }
+  /* 입력줄: '보내기'는 늘 보내기 (답하는 중이면 대기열에 넣었다가 답이 끝나면 보냄). 멈추기는 답하는 중에만 보이는 ■ 단추 */
   function updateComposer() {
     const v = R.view;
     if (!v || !v.send) return;
     const busy = !!R.active;
-    v.send.classList.toggle('btn-primary', !busy);
-    v.send.classList.toggle('ag-stop', busy);
-    v.send.textContent = busy ? '■ 중지' : '보내기';
-    v.send.setAttribute('aria-label', busy ? '답 멈추기' : '보내기');
-    v.send.disabled = !busy && !v.ta.value.trim();
-    v.ta.placeholder = busy ? '답을 기다리는 중 — 다음 질문을 써 둘 수 있어요' : '무엇이든 물어보세요';
+    v.send.disabled = !v.ta.value.trim();
+    v.send.title = busy ? '답이 끝나면 보내요' : '';
+    if (v.stopBtn) v.stopBtn.hidden = !busy;
+    v.ta.placeholder = busy ? '다음 질문을 써 두세요' : '무엇이든 물어보세요';
+    paintChips(v);   // 비서가 기한 지난 일을 체크했거나 되돌렸으면 '⏰ … n개' 도 같이
     if (v.chips) MV.$$('button', v.chips).forEach((b) => { b.disabled = busy; });
     MV.$$('.ag-sugg', v.log).forEach((b) => { b.disabled = busy; });
     if (v.clear) v.clear.disabled = !R.chat.msgs.length;
     v.root.classList.toggle('ag-busy', busy);
+    paintQueue();
   }
+  /** 대기 중인 질문 줄 ('⏳ 답이 끝나면 보낼게요' + ✕ 취소) */
+  function paintQueue() {
+    const v = R.view;
+    if (!v || !v.queue) return;
+    const q = R.queued;
+    if (!q) { if (!v.queue.hidden) { v.queue.hidden = true; v.queue.replaceChildren(); } return; }
+    v.queue.replaceChildren(
+      el('span', { class: 'ag-queue-t' }, '⏳ 답이 끝나면 보낼게요 — “' + clip(q, 80) + '”'),
+      el('button', { type: 'button', class: 'btn btn-sm btn-ghost btn-icon ag-queue-x', 'aria-label': '보낼 질문 취소', title: '보내지 않고 입력칸으로 돌려놔요', onclick: () => cancelQueued(true) }, '✕'));
+    v.queue.hidden = false;
+  }
+  /** 답하는 중에 보내기·Enter: 입력칸 글을 대기열에 (이미 있으면 줄을 바꿔 이어 붙임) */
+  function queueText() {
+    const v = R.view;
+    if (!v || !v.ta || R.blocked) return false;
+    const t = v.ta.value.trim();
+    if (!t) return false;
+    R.queued = (R.queued ? R.queued + '\n' + t : t).slice(0, MAX_TEXT);
+    v.ta.value = '';
+    R.draft = ''; saveDraft(); saveDraft.flush();
+    autosize(v.ta);
+    updateComposer();
+    return true;
+  }
+  /** 대기 질문을 보내지 않고 입력칸으로 되돌림 (입력칸에 글이 있으면 그 앞에) */
+  function cancelQueued(focus) {
+    const q = R.queued;
+    if (!q) return;
+    R.queued = '';
+    const v = R.view;
+    if (v && v.ta && v.ta.isConnected) {
+      const cur = v.ta.value.trim();
+      v.ta.value = (cur ? q + '\n' + cur : q).slice(0, MAX_TEXT);
+      R.draft = v.ta.value; saveDraft();
+      autosize(v.ta);
+    } else {
+      R.draft = (R.draft && R.draft.trim() ? q + '\n' + R.draft : q).slice(0, MAX_TEXT); saveDraft();
+    }
+    updateComposer();
+    if (focus) focusComposer();
+  }
+  /* 입력칸 높이: 글이 길어도 최대 168px, 키보드가 열려 화면이 낮으면 화면 높이의 25%까지 */
   function autosize(ta) {
+    const cap = Math.max(42, Math.min(168, Math.round((window.innerHeight || 800) * 0.25)));
     ta.style.height = 'auto';
-    ta.style.height = Math.min(ta.scrollHeight + 2, 168) + 'px';
+    const h = Math.min(ta.scrollHeight + 2, cap);
+    ta.style.height = h + 'px';
+    ta.style.maxHeight = cap + 'px';
+    // 가로 폰(페이지째 스크롤)에서 '↓ 새 답' 단추를 입력줄 위에 띄우는 데 씀 (CSS --ag-ta-h)
+    const box = ta.closest('.ag');
+    if (box) box.style.setProperty('--ag-ta-h', h + 'px');
   }
   function fillComposer(t) {
     const v = R.view;
@@ -2692,7 +3000,7 @@
   function offCard(root, mode) {
     const url = MV.config && MV.config.sharedUrl ? String(MV.config.sharedUrl) : '';
     const can = [
-      ['🗓', '“이번 주 할 일 정리해줘”, “지연된 일 뭐 있어?” — 체크리스트·워크플랜을 보고 정리해요'],
+      ['🗓', '“이번 주 할 일 정리해줘”, “기한 지난 일 뭐 있어?” — 체크리스트·워크플랜을 보고 정리해요'],
       ['💰', '“에어컨 설치 기사 견적 45만원 받았어, 예산에 반영해줘” — 예산을 고치고 남는 돈을 다시 계산해요'],
       ['🚚', '“이사업체 계약에서 아직 확인할 게 뭐야?” — 계약 금액·잔금 일정과 남은 확인 일을 정리해요'],
       ['✅', '“우리은행 질권 확인 끝났어, 체크하고 메모 남겨줘” — 체크·메모·할 일 추가'],
@@ -2725,7 +3033,9 @@
   /* ---- 화면: 대화 ---- */
   function chatView(root, mode, ctx) {
     const blocked = mode === 'blocked';
-    const v = { root: null, mode, log: null, ta: null, send: null, chips: null, clear: null, ro: null, tier: null, stick: true };
+    const v = { root: null, mode, log: null, ta: null, send: null, stopBtn: null, queue: null, jump: null, chips: null, chipsKey: '', clear: null, ro: null, tier: null, stick: true, anchor: null,
+      // 처음 400ms는 크기가 막 바뀐 때처럼 봐요: 셸이 화면을 그린 뒤 맨 위로 올리는 스크롤(가로 폰은 페이지째)을 손으로 올린 것으로 읽지 않게
+      resizedAt: Date.now() };
     const quickBtn = el('button', {
       type: 'button', class: 'btn btn-sm btn-ghost ag-quick' + (R.prefs.quick ? ' ag-on' : ''), 'aria-pressed': R.prefs.quick ? 'true' : 'false',
       title: '빠른 모델로 답해요 — 간단한 체크·추가에 좋아요 (복잡한 점검은 끄는 게 좋아요)',
@@ -2752,9 +3062,8 @@
       const copy = BLOCK_COPY[R.blocked] || BLOCK_COPY.capability_disabled;
       wrap.appendChild(el('section', { class: 'card tint-warn ag-blockcard', role: 'status' }, el('h3', '🤖 ' + copy[0]), el('p', { class: 'small mb-0' }, copy[1])));
     } else {
-      v.chips = el('div', { class: 'ag-chips', role: 'toolbar', 'aria-label': '추천 질문' }, SUGGESTIONS.map((s) => el('button', {
-        type: 'button', class: 'ag-chip', onclick: () => submit(s.prompt()),
-      }, s.icon + ' ' + (typeof s.label === 'function' ? s.label() : s.label))));
+      // 추천 칩은 paintAll 이 채움 (기한 지난 일이 있을 때만 '⏰' 칩)
+      v.chips = el('div', { class: 'ag-chips', role: 'toolbar', 'aria-label': '추천 질문' });
       const chips = v.chips;
       const moreHint = () => {
         const max = chips.scrollWidth - chips.clientWidth;
@@ -2775,49 +3084,108 @@
         enterkeyhint: 'send', autocomplete: 'off',
       });
       v.ta.value = R.draft || '';
-      v.send = el('button', {
-        type: 'button', class: 'btn btn-primary ag-send',
-        onclick: () => { if (R.active) stop(); else submit(); },
-      }, '보내기');
+      // '보내기'는 답하는 중에도 보내기 (대기열에 넣었다가 답이 끝나면 보냄) — 누르던 자리가 '중지'로 바뀌지 않게
+      const sendOrQueue = () => { if (R.active) queueText(); else submit(); };
+      v.send = el('button', { type: 'button', class: 'btn btn-primary ag-send', onclick: sendOrQueue }, '보내기');
+      // ■ 는 멈추면 숨으니 포커스는 입력칸으로 (데스크톱 — finalize 가 R.focusAfter 를 보고 돌려놔요)
+      v.stopBtn = el('button', { type: 'button', class: 'btn ag-stopbtn', hidden: true, 'aria-label': '답 멈추기', title: '답 멈추기 (Esc)', onclick: () => { R.focusAfter = !isTouch(); stop(); } }, el('span', { 'aria-hidden': 'true' }, '■'));
+      v.queue = el('div', { class: 'ag-queue', role: 'status', hidden: true });
+      /* 한글 조합 중 Enter: 조합이 끝난 바로 뒤(compositionend)에 보냄. 이어서 일반 Enter 가 오는 브라우저(크롬)는
+         그 Enter 가 먼저 보내고, 뒤늦은 예약은 입력칸이 비어 있어 아무것도 안 해요. 조합이 끝난 뒤 오는 229(사파리)는 그대로 둠 */
+      let composing = false;
+      let enterInIme = 0;
+      v.ta.addEventListener('compositionstart', () => { composing = true; });
+      v.ta.addEventListener('compositionend', () => {
+        composing = false;
+        if (enterInIme && Date.now() - enterInIme < 400) {
+          enterInIme = 0;
+          setTimeout(() => { if (v.ta.isConnected && v.ta.value.trim()) sendOrQueue(); }, 0);
+        }
+        enterInIme = 0;
+      });
       v.ta.addEventListener('keydown', (e) => {
         if (e.key === 'Escape' && R.active && !e.isComposing) { e.preventDefault(); stop(); return; }
         if (e.key !== 'Enter' || e.shiftKey || e.altKey || e.ctrlKey || e.metaKey) return;
-        if (e.isComposing || e.keyCode === 229) return;   // 한글 조합 중 Enter 는 글자 확정용
+        if (e.isComposing || e.keyCode === 229) { if (composing || e.isComposing) enterInIme = Date.now(); return; }   // 한글 조합 중 Enter 는 글자 확정용
         e.preventDefault();
-        if (!R.active) submit();
+        enterInIme = 0;
+        sendOrQueue();
       });
       v.ta.addEventListener('input', () => {
         R.draft = v.ta.value;
         saveDraft();
         autosize(v.ta);
-        if (!R.active) v.send.disabled = !v.ta.value.trim();
+        v.send.disabled = !v.ta.value.trim();
       });
       v.ta.addEventListener('focus', () => { R.composerFocused = true; });
       v.ta.addEventListener('blur', () => { setTimeout(() => { if (v.ta.isConnected) R.composerFocused = document.activeElement === v.ta; }, 0); });
-      const composer = el('div', { class: 'ag-composer' }, v.ta, v.send);
+      const composer = el('div', { class: 'ag-composer' }, v.ta, v.stopBtn, v.send);
       wrap.appendChild(v.chips);
+      wrap.appendChild(v.queue);
       wrap.appendChild(composer);
-      wrap.appendChild(el('div', { class: 'ag-hint' }, '엔터로 보내기 · 시프트+엔터로 줄바꿈 · 이스케이프로 중지 · 답은 확인하고 쓰세요'));
+      wrap.appendChild(el('div', { class: 'ag-hint' }, '엔터로 보내기 · 시프트+엔터로 줄바꿈 · 답하는 중에 보내면 끝난 뒤 보내요 · 이스케이프로 답 멈추기'));
     }
+    // '↓ 새 답' — 위로 올려 읽는 동안 아래에 새 글이 생기면 (대화 맨 끝에 붙어 아래쪽에 떠 있음)
+    v.jump = el('button', { type: 'button', class: 'btn btn-sm ag-jump', hidden: true, onclick: () => { toBottom(v); settleBottom(v); } }, '↓ 새 답');
     root.appendChild(wrap);
     R.view = v;
-    /* 최신 메시지에 붙어 있었는지 기억 → 폰을 돌려 대화가 페이지째 스크롤되는 모양으로 바뀌어도 최신 메시지에 머묾 */
-    let resizedAt = 0;
-    const track = () => { if (Date.now() - resizedAt > 400 && v.log.isConnected) v.stick = atBottom(v); };
+    /* 최신 메시지에 붙어 있었는지 기억 → 폰을 돌려 대화가 페이지째 스크롤되는 모양으로 바뀌어도 최신 메시지에 머묾.
+       맨 아래가 아니면 읽던 메시지(v.anchor)도 기억 → 키보드가 열리고 닫혀 화면 높이가 바뀌어도 그 자리로 */
+    let anchorTimer = 0;
+    let lastTop = 0;
+    let lastOwn = true;
+    const saveAnchor = () => { if (!v.stick && v.log.isConnected && Date.now() - v.resizedAt > 400) v.anchor = readingPos(v); };
+    // 맨 아래 여부는 스크롤 때 바로 (다음 스트리밍 그리기가 손으로 올린 자리를 덮지 않게)
+    const track = () => {
+      if (!v.log.isConnected) return;
+      const own = logScrolls(v);
+      const top = own ? v.log.scrollTop : window.scrollY;
+      const up = own === lastOwn && top < lastTop - 2;   // 폰을 돌려 스크롤하는 곳이 바뀐 때는 비교하지 않음
+      lastTop = top;
+      lastOwn = own;
+      const since = Date.now() - v.resizedAt;
+      if (since <= 400) {
+        // 화면 크기가 막 바뀐 동안의 스크롤은 크기 변화 탓일 수 있어 믿지 않아요. 다만 위로 올라갔는데 맨 아래가 아니면
+        // (크기 변화로 줄어든 스크롤은 맨 아래에 붙은 채라서) 손으로 올린 것 → 따라 내리기를 멈춤
+        if (up && v.stick && !atBottom(v)) {
+          v.stick = false;
+          clearTimeout(anchorTimer);
+          anchorTimer = setTimeout(saveAnchor, Math.max(160, 420 - since));
+        }
+        return;
+      }
+      v.stick = atBottom(v);
+      clearTimeout(anchorTimer);
+      if (v.stick) { if (v.jump && !v.jump.hidden) v.jump.hidden = true; v.anchor = null; return; }
+      // 읽던 메시지는 스크롤이 멈추고 높이가 자리 잡은 뒤에 기억 (짐작한 높이로 재면 엉뚱한 메시지를 잡아요)
+      anchorTimer = setTimeout(saveAnchor, 160);
+    };
     v.log.addEventListener('scroll', track, { passive: true });
     window.addEventListener('scroll', track, { passive: true });
     const onResize = () => {
-      resizedAt = Date.now();
-      if (!v.stick || !R.chat.msgs.length) return;
-      requestAnimationFrame(() => { if (v.log.isConnected) toBottom(v); });
+      v.resizedAt = Date.now();
+      if (v.ta && v.ta.isConnected) autosize(v.ta);
+      if (!R.chat.msgs.length) return;
+      if (!v.stick) {
+        const pos = v.anchor;
+        if (pos && pos.id) requestAnimationFrame(() => { if (v.log.isConnected && !v.stick) restorePos(v, pos); });
+        return;
+      }
+      requestAnimationFrame(() => { if (v.log.isConnected) { toBottom(v); settleBottom(v); } });
       setTimeout(() => { if (v.log.isConnected && v.stick) toBottom(v); }, 250);
     };
     window.addEventListener('resize', onResize, { passive: true });
-    ctx.onCleanup(() => { window.removeEventListener('scroll', track); window.removeEventListener('resize', onResize); });
+    ctx.onCleanup(() => { window.removeEventListener('scroll', track); window.removeEventListener('resize', onResize); clearTimeout(anchorTimer); });
     // 다른 화면에서 (change 이벤트 없이) 바뀐 것이 있을 수 있으니 되돌리기·끊긴 답 상태를 먼저 다시 확인
     checkUndo();
     checkOrphans();
+    // 답 안 링크로 다른 화면에 갔다 오면(또는 날짜가 바뀌어 다시 그리면) 읽던 답 자리로, 맨 아래였으면 맨 아래로
+    const pos = R.lastPos;
+    R.lastPos = null;
     paintAll(true);
+    if (pos && !pos.stick && R.chat.msgs.length) {
+      if (restorePos(v, pos)) v.anchor = pos;
+    }
     if (!blocked) {
       updateComposer();
       autosize(v.ta);
@@ -2846,6 +3214,11 @@
       ctx.onCleanup(() => clearTimeout(waitTimer));
     }
     ctx.onCleanup(() => {
+      // 떠나기 전(아직 화면에 붙어 있을 때) 읽던 자리를 기억 → 돌아오면 그 답으로 (chatView)
+      const cur = R.view;
+      if (cur && cur.root && cur.root.isConnected && root.contains(cur.root) && cur.log && R.chat.msgs.length) {
+        try { R.lastPos = readingPos(cur); } catch (e) { R.lastPos = null; }
+      }
       if (R.view && R.view.root && !R.view.root.isConnected) R.view = null;
       else if (R.view && R.view.root && root.contains(R.view.root)) R.view = null;
     });
@@ -2876,13 +3249,17 @@
 .ag-log { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
   display: flex; flex-direction: column; gap: 14px; padding: 16px; background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius); }
 .ag-log:focus-visible { outline-offset: -3px; }
-.ag-msg { display: flex; flex-direction: column; gap: 4px; max-width: min(780px, 92%); min-width: 0; }
+/* 화면 밖 메시지는 그리지 않고 높이만 짐작(content-visibility) — 긴 대화를 열 때 폰이 멈추지 않게.
+   크기를 가둔(size containment) 항목은 세로 flex 안에서 0까지 줄어들 수 있어 flex: none 이 꼭 필요해요.
+   위로 올려 읽을 때 짐작한 높이가 실제로 바뀌어도 화면이 튀지 않게 스크롤 고정(overflow-anchor)이 되는 브라우저에서만 (사파리는 그대로) */
+.ag-msg { flex: none; display: flex; flex-direction: column; gap: 4px; max-width: min(780px, 92%); min-width: 0; }
+@supports (overflow-anchor: auto) { .ag-msg { content-visibility: auto; contain-intrinsic-size: auto 200px; } }
 .ag-user { align-self: flex-end; align-items: flex-end; }
 .ag-bot { align-self: flex-start; align-items: stretch; }
 .ag-bubble { padding: 10px 14px; border-radius: 18px; line-height: 1.62; font-size: .95rem; min-width: 0; overflow-wrap: anywhere; }
 .ag-user .ag-bubble { background: var(--brand-bg); color: var(--ink); border: 1px solid color-mix(in srgb, var(--brand) 22%, var(--line)); border-bottom-right-radius: 6px; white-space: pre-wrap; }
 .ag-bot .ag-bubble { background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-bottom-left-radius: 6px; }
-.ag-meta { display: flex; gap: 4px; flex-wrap: wrap; padding: 0 8px; font-size: .72rem; color: var(--ag-mute); }
+.ag-meta { display: flex; gap: 4px; flex-wrap: wrap; padding: 0 8px; font-size: var(--fs-min, .75rem); color: var(--ag-mute); }
 .ag-md > :first-child { margin-top: 0; }
 .ag-md > :last-child { margin-bottom: 0; }
 .ag-md p { margin: 0 0 .6em; }
@@ -2907,6 +3284,19 @@
 .ag-table table.tbl { font-size: .84rem; width: auto; min-width: 100%; }
 .ag-table table.tbl th, .ag-table table.tbl td { padding: 6px 9px; overflow-wrap: normal; word-break: keep-all; }
 .ag-table table.tbl td:first-child { min-width: 4.5em; }
+/* 폰: 4칸 이상 표는 줄마다 작은 카드 (칸 이름 · 값) — 옆으로 숨은 칸이 없게 */
+@media (max-width: 640px) {
+  .ag-table.ag-wide { overflow-x: visible; }
+  .ag-table.ag-wide table.tbl, .ag-table.ag-wide tbody { display: block; width: 100%; min-width: 0; }
+  .ag-table.ag-wide thead { display: none; }
+  .ag-table.ag-wide tr { display: block; padding: 6px 0; border-bottom: 1px solid var(--line); }
+  .ag-table.ag-wide tr:last-child { border-bottom: 0; }
+  .ag-table.ag-wide td { display: flex; gap: 8px; padding: 2px 10px; border: 0; text-align: left; min-width: 0; overflow-wrap: anywhere; word-break: normal; }
+  .ag-table.ag-wide td.num { text-align: left; }
+  .ag-table.ag-wide td::before { content: attr(data-label); flex: none; width: 5em; color: var(--ag-mute); font-weight: 700; overflow-wrap: anywhere; }
+  .ag-table.ag-wide td > .ag-td { flex: 1 1 auto; min-width: 0; }
+  .ag-table.ag-wide td:first-child { min-width: 0; font-weight: 700; }
+}
 .ag-thinking { display: inline-flex; align-items: center; gap: 8px; color: var(--ag-mute); font-size: .92rem; }
 .ag-dots { display: inline-flex; gap: 3px; }
 .ag-dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--ink-3); animation: ag-blink 1.2s infinite ease-in-out both; }
@@ -2928,6 +3318,11 @@
 .ag-changes .ag-undo { margin-top: 8px; min-height: 36px; }
 .ag-undo-note { display: flex; align-items: center; gap: 4px 10px; flex-wrap: wrap; margin-top: 6px; }
 .ag-undo-note .ag-undo { margin-top: 0; }
+/* 되돌린 변경: 회색 상자 + 취소선 (지금은 바뀌기 전 상태) */
+.ag-changes.ag-undone { background: var(--bg-3); border-color: var(--line); }
+.ag-changes.ag-undone .ag-changes-h { color: var(--ink-2); }
+.ag-changes.ag-undone li, .ag-changes.ag-undone a.ag-in { text-decoration: line-through; color: var(--ag-mute); border-bottom: 0; }
+.ag-changes.ag-undone .ag-undone-note { margin: 4px 0 0; font-weight: 700; color: var(--ink); }
 .ag-welcome { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px; padding: 8px 4px; margin: auto 0; }
 .ag-welcome h2 { margin: 0; }
 .ag-welcome > p { max-width: 560px; margin: 0; }
@@ -2941,6 +3336,9 @@
 .ag-ex-list { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
 .ag-ex-btn { min-height: 36px; padding: 4px 12px; border: 1px dashed var(--line-2); border-radius: 999px; background: transparent; color: var(--ink-2); font: inherit; font-size: .82rem; cursor: pointer; text-align: left; }
 .ag-ex-btn:hover { border-color: var(--brand); color: var(--brand); }
+.ag-intro-short, .ag-more-sugg { display: none; }
+.ag-more-sugg { min-height: 36px; padding: 4px 14px; border: 0; border-radius: 999px; background: transparent; color: var(--brand-ink); font: inherit; font-size: .84rem; font-weight: 700; cursor: pointer; }
+.ag-more-sugg:hover { background: var(--brand-bg); }
 .ag-chips { flex: none; display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding: 1px; -webkit-overflow-scrolling: touch; }
 .ag-chips::-webkit-scrollbar { display: none; }
 .ag-chips.ag-more-r { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent); }
@@ -2954,8 +3352,19 @@ body:has(.ag-composer) .toast-wrap { bottom: calc(var(--bottom-h) + 104px + env(
 .ag-input { flex: 1 1 auto; min-width: 0; min-height: 42px; max-height: 168px; padding: 9px 0; border: 0; outline: none; resize: none; background: transparent; color: var(--ink); font: inherit; font-size: 1rem; line-height: 1.5; }
 .ag-input::placeholder { color: var(--ag-mute); }
 .ag-send { flex: none; min-height: 42px; min-width: 76px; border-radius: 13px; }
-.ag-send.ag-stop { background: var(--bad); border-color: var(--bad); color: var(--on-bad); }
-.ag-hint { flex: none; margin-top: -6px; text-align: right; font-size: .72rem; color: var(--ag-mute); }
+.ag-stopbtn { flex: none; width: 42px; min-width: 42px; min-height: 42px; padding: 0; border-radius: 13px; background: var(--bad-bg); border-color: color-mix(in srgb, var(--bad) 35%, var(--line)); color: var(--bad); font-size: .95rem; line-height: 1; }
+.ag-stopbtn:hover { background: var(--bad); color: var(--on-bad); }
+.ag-stopbtn[hidden] { display: none; }
+.ag-queue { flex: none; display: flex; align-items: center; gap: 6px; padding: 2px 4px 2px 12px; border-radius: 12px; background: var(--think-bg); color: var(--ink); font-size: .84rem; }
+.ag-queue[hidden] { display: none; }
+.ag-queue-t { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ag-queue-x { flex: none; }
+.ag-jump { position: sticky; bottom: 8px; align-self: center; flex: none; z-index: 2; box-shadow: var(--shadow); background: var(--bg); border-color: var(--line-2); font-weight: 700; }
+.ag-jump[hidden] { display: none; }
+/* 탭바 '비서' 바쁨 점 (폰은 아이콘 오른쪽 위, 데스크톱 옆 메뉴는 글 오른쪽) */
+.ag-nav-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+body.ag-busy-on #nav a[data-view="agent"]::after, body.ag-busy-on #nav a[href="#/agent"]::after { content: ''; flex: none; width: 9px; height: 9px; margin-left: auto; border-radius: 50%; background: var(--good); animation: ag-pulse 1.4s infinite ease-in-out; }
+.ag-hint { flex: none; margin-top: -6px; text-align: right; font-size: var(--fs-min, .75rem); color: var(--ag-mute); }
 .ag-blockcard { flex: none; margin: 0; }
 .ag-blockcard h3 { margin-bottom: 4px; }
 .ag-off { max-width: 760px; margin: 0 auto; }
@@ -2973,11 +3382,25 @@ body.ag-fab-pad #view::after { content: ''; display: block; height: 76px; }
 .ag-fab.ag-busy .ag-fab-dot { display: block; animation: ag-pulse 1.4s infinite ease-in-out; }
 @keyframes ag-pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(.7); opacity: .6; } }
 @media (hover: none) { .ag-hint { display: none; } }
+/* 손가락 화면: 답 안 링크는 누르는 영역을 위아래로 넓히고(줄 모양은 그대로), 칩·도구 단추는 40px.
+   링크 위쪽 여백은 줄 사이 틈(약 6px)보다 작게 — 아랫줄 링크가 윗줄 링크 글자를 덮지 않게(나중 줄이 위에 그려짐).
+   아래쪽 여백은 넉넉히(아랫줄 링크가 덮어도 그 링크 자리라 괜찮음). 목록 줄 사이도 조금 벌려 링크마다 누르는 높이를 확보 */
+@media (pointer: coarse) {
+  .ag-md a.ag-in, .ag-changes a.ag-in { padding: 5px 2px 11px; margin: 0 -2px; border-bottom: 0; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; text-decoration-color: color-mix(in srgb, var(--brand) 45%, transparent); }
+  .ag-changes.ag-undone a.ag-in { text-decoration: line-through; }
+  .ag-chip, .ag-tools .btn, .ag-acts .btn, .ag-changes .ag-undo, .ag-more-sugg, .ag-jump, .ag-ex-btn { min-height: 40px; }
+  .ag-md li + li { margin-top: .55em; }
+  .ag-changes li + li { margin-top: 8px; }
+  .ag-stopbtn { width: 44px; min-width: 44px; min-height: 44px; }
+  .ag-send { min-height: 44px; }
+  .ag-queue-x { min-width: 40px; min-height: 40px; }
+}
 @media (max-width: 860px) {
   .view[data-view="agent"] { padding-bottom: calc(var(--bottom-h) + 8px + env(safe-area-inset-bottom)); }
   .ag { --ag-h: calc(100vh - var(--topbar-h) - 22px - var(--bottom-h) - env(safe-area-inset-bottom)); }
   @supports (height: 100dvh) { .ag { --ag-h: calc(100dvh - var(--topbar-h) - 22px - var(--bottom-h) - env(safe-area-inset-bottom)); } }
   .ag-fab { right: 16px; bottom: calc(var(--bottom-h) + 16px + env(safe-area-inset-bottom)); width: 52px; height: 52px; font-size: 1.45rem; }
+  body.ag-busy-on #nav a[data-view="agent"]::after, body.ag-busy-on #nav a[href="#/agent"]::after { position: absolute; top: 5px; right: calc(50% - 20px); margin: 0; border: 2px solid var(--bg-2); width: 11px; height: 11px; }
 }
 @media (max-width: 640px) {
   .ag { gap: 8px; min-height: 420px; }
@@ -2991,19 +3414,41 @@ body.ag-fab-pad #view::after { content: ''; display: block; height: 76px; }
   .ag-sugg { padding: 8px 10px; gap: 6px; font-size: .86rem; min-height: 52px; }
   .ag-composer { padding-left: 12px; }
   .ag-send { min-width: 64px; padding: 0 12px; }
+  /* 환영 화면: 🤖 빼고 소개 1줄, 예시(바로 고치는 말)를 위로, 추천 카드는 4개 + '더 보기' */
+  .ag-welcome { gap: 6px; padding: 2px 0; }
+  .ag-hello, .ag-intro-long { display: none; }
+  .ag-intro-short { display: inline; }
+  .ag-welcome h2 { font-size: 1.12rem; }
+  .ag-ex { order: 1; margin-top: 2px; gap: 4px; }
+  .ag-grid { order: 2; margin-top: 4px; }
+  .ag-more-sugg { order: 3; display: block; }
+  .ag-grid.ag-few > .ag-sugg:nth-child(n+${FEW_SUGG + 1}) { display: none; }
+  .ag-ex-list { flex-direction: column; align-items: stretch; align-self: stretch; min-width: 0; gap: 6px; }
+  .ag-ex-btn { display: block; width: 100%; min-width: 0; text-align: left; }
+  .ag-ex-t { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 }
-@media (max-height: 560px) and (max-width: 1100px) {
+/* 가로로 든 폰(키가 낮음)만 대화가 페이지째 스크롤 — 세로 폰에서 키보드가 열려 낮아진 화면은 대화 칸 안에서 스크롤 그대로 */
+@media (max-height: 560px) and (max-width: 1100px) and (orientation: landscape) {
   .ag { height: auto; min-height: 0; }
   .ag-log { flex: none; overflow: visible; min-height: 180px; }
   .ag-sub, .ag-hint { display: none; }
+  /* 페이지째 스크롤이라 '↓ 새 답'이 화면 맨 아래(탭바·입력줄 뒤)에 붙지 않게 입력줄 위로 (--ag-ta-h: 입력칸 높이, autosize) */
+  .ag-jump { bottom: calc(var(--bottom-h) + max(var(--ag-ta-h, 44px), 44px) + 32px + env(safe-area-inset-bottom)); }
+}
+/* 세로 폰인데 키가 낮음(키보드가 열려 화면이 줄어드는 앱 안 브라우저 등): 최소 높이를 풀어 대화 칸이 화면 안에 들어오게 하고
+   추천 칩은 숨김 — 마지막 답과 칩이 입력줄·탭바 뒤에 깔리지 않게 */
+@media (max-width: 640px) and (max-height: 560px) and (orientation: portrait) {
+  .ag { min-height: 0; }
+  .ag-chips { display: none; }
 }
 @media (max-width: 380px) { .ag-quick { padding: 0 6px; } .ag-sugg { font-size: .82rem; padding: 6px 8px; } }
-@media print { .ag-fab, .ag-composer, .ag-chips, .ag-hint { display: none !important; } .ag { height: auto; } .ag-log { overflow: visible; border: 0; } }
+@media print { .ag-fab, .ag-composer, .ag-chips, .ag-hint, .ag-queue, .ag-jump { display: none !important; } .ag { height: auto; } .ag-log { overflow: visible; border: 0; } .ag-msg { content-visibility: visible; } }
 `;
 
   /* ======================= 등록 ======================= */
   MV.view('agent', {
     title: 'AI 비서', short: '비서', icon: '🤖', order: 15, nav: false,
+    ownScroll: true,   // 읽던 자리는 이 화면이 스스로 (R.lastPos — 셸의 스크롤 기억은 쓰지 않음)
     render,
   });
   if (sampleFn()) syncAvailability();

@@ -10,7 +10,7 @@
   --bg-3:      #eeeae1;
   --ink:       #21201d;
   --ink-2:     #57534e;
-  --ink-3:     #78726a;
+  --ink-3:     #6b655d;   /* 보조 글자: --bg 위 5.2:1 (예전 #78726a 4.3:1) */
   --line:      #e2ddd3;
   --line-2:    #cfc8ba;
 
@@ -32,6 +32,16 @@
   --on-kid:    #ffffff;
   --on-good:   #ffffff;
   --on-bad:    #ffffff;
+
+  /* 글자용 색 (공통 계약): 밝은 테마에서만 진하게 — 연한 바탕(-bg)·흰 바탕 위 글자에 써요.
+     채움색·막대·도면은 그대로 --good/--brand/--warn. 어두운 테마는 --good/--brand/--warn 과 같은 값 */
+  --good-ink:  #166534;   /* --good-bg 위 6.3:1 (--good 4.4:1) */
+  --brand-ink: #9a3412;   /* --brand-bg 위 6.6:1 (--brand 4.7:1) */
+  --warn-ink:  #854d0e;   /* --warn-bg 위 6.3:1 (--warn 4.5:1) */
+
+  /* 크기 (공통 계약): --tap 누르는 곳 최소 높이(터치 기기 44px) · --fs-min 가장 작은 글자 12px */
+  --tap:       36px;
+  --fs-min:    .75rem;
 
   /* 도면 전용 */
   --plan-wall:   #3f3a34;
@@ -55,6 +65,7 @@
   --nav-w: 200px;
   --bottom-h: 0px;
 }
+@media (pointer: coarse) { :root { --tap: 44px; } }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -68,6 +79,7 @@
     --bad:#fca5a5;  --bad-bg:#3a1a1a;
     --think:#c4b5fd; --think-bg:#2a2145;
     --on-brand:#2a1200; --on-kid:#04252b; --on-good:#04220f; --on-bad:#3a0a0a;
+    --good-ink:#6ee7a8; --brand-ink:#fb923c; --warn-ink:#fcd34d;
     --plan-wall:#d9d3ca; --plan-floor:#22212a; --plan-wet:#17303a; --plan-balc:#2a2830; --plan-grid:rgba(240,237,232,.06);
     --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
     --shadow-lg:0 2px 4px rgba(0,0,0,.5), 0 24px 48px -20px rgba(0,0,0,.8);
@@ -85,6 +97,7 @@
   --bad:#fca5a5;  --bad-bg:#3a1a1a;
   --think:#c4b5fd; --think-bg:#2a2145;
   --on-brand:#2a1200; --on-kid:#04252b; --on-good:#04220f; --on-bad:#3a0a0a;
+  --good-ink:#6ee7a8; --brand-ink:#fb923c; --warn-ink:#fcd34d;
   --plan-wall:#d9d3ca; --plan-floor:#22212a; --plan-wet:#17303a; --plan-balc:#2a2830; --plan-grid:rgba(240,237,232,.06);
   --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
   --shadow-lg:0 2px 4px rgba(0,0,0,.5), 0 24px 48px -20px rgba(0,0,0,.8);
@@ -114,6 +127,15 @@ code, kbd { font-family: var(--mono); font-size: .9em; background: var(--bg-3); 
 ::selection { background: var(--brand); color: var(--on-brand); }
 [hidden] { display: none !important; }
 :focus-visible { outline: 3px solid color-mix(in srgb, var(--brand) 55%, transparent); outline-offset: 2px; border-radius: 6px; }
+/* Tab 으로 옮긴 포커스가 폰 하단 탭바 밑에 숨지 않게 (위쪽은 화면마다 scroll-margin 으로 맞춰 둬서 건드리지 않아요) */
+html { scroll-padding-bottom: calc(var(--bottom-h) + env(safe-area-inset-bottom, 0px) + 8px); }
+/* 본문으로 건너뛰기 — 키보드로 처음 Tab 을 누를 때만 보여요 */
+.skip-link {
+  position: fixed; left: 8px; top: -80px; z-index: 200;
+  padding: 10px 16px; border-radius: var(--radius-sm);
+  background: var(--ink); color: var(--bg); font-weight: 700; text-decoration: none;
+}
+.skip-link:focus { top: calc(env(safe-area-inset-top, 0px) + 8px); }
 
 /* ---------- 앱 셸 ---------- */
 .app {
@@ -206,7 +228,7 @@ code, kbd { font-family: var(--mono); font-size: .9em; background: var(--bg-3); 
   .nav a {
     flex: 1 1 0; min-width: 0;
     flex-direction: column; gap: 0; padding: 6px 2px;
-    font-size: .68rem; text-align: center; position: relative;
+    font-size: var(--fs-min); text-align: center; position: relative;
   }
   .nav a .ico { font-size: 1.25rem; width: auto; }
   .nav a .lbl { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
@@ -284,6 +306,12 @@ hr.sep { border: 0; border-top: 1px solid var(--line); margin: 16px 0; }
   .btn-sm { min-height: 36px; }
   .btn-sm.btn-icon { width: 36px; }
   .db-facts a.chip, a.chip.es-mchip { min-height: 40px; padding: 0 12px; }
+  /* 공통 부품 터치 크기 (44px) — 화면별 단추는 각 화면이 var(--tap) 으로 */
+  .topbar .btn-icon { width: 44px; min-height: 44px; }
+  .topbar .brand { min-height: 44px; min-width: 44px; }
+  .modal .input, .modal .select, .modal-foot .btn { min-height: 44px; }
+  .modal-head .btn-icon { width: 44px; min-height: 44px; }
+  .mv-menu .btn { min-height: 44px; }
 }
 
 .chip {
@@ -295,7 +323,7 @@ hr.sep { border: 0; border-top: 1px solid var(--line); margin: 16px 0; }
 }
 .chip.brand { background: var(--brand-bg); color: var(--brand); }
 .chip.kid { background: var(--kid-bg); color: var(--kid); }
-.chip.good { background: var(--good-bg); color: var(--good); }
+.chip.good { background: var(--good-bg); color: var(--good-ink); }
 .chip.warn { background: var(--warn-bg); color: var(--warn); }
 .chip.bad { background: var(--bad-bg); color: var(--bad); }
 .chip.think { background: var(--think-bg); color: var(--think); }
@@ -384,6 +412,7 @@ table.tbl tfoot td { font-weight: 800; border-top: 2px solid var(--line-2); }
   overflow: hidden;
 }
 .modal.wide { width: min(860px, 100%); }
+.modal[tabindex="-1"]:focus { outline: none; }   /* focus:'none' — 창 상자 자체에 포커스 */
 .modal-head { display: flex; align-items: center; gap: 8px; padding: 14px 16px 10px; border-bottom: 1px solid var(--line); }
 .modal-head h2 { margin: 0; font-size: 1.1rem; }
 .modal-head .btn { margin-left: auto; }
@@ -412,12 +441,41 @@ body:has(.modal-back) .toast-wrap { bottom: auto; top: calc(env(safe-area-inset-
   animation: mv-up .16s ease-out;
 }
 .toast button { background: transparent; border: 0; color: var(--brand-2); font: inherit; font-weight: 800; cursor: pointer; padding: 0; white-space: nowrap; flex: none; }
-@media (pointer: coarse) { .toast button { min-height: 36px; padding: 0 6px; margin: -6px -6px -6px 0; } }
+@media (pointer: coarse) { .toast button { min-height: 40px; padding: 0 8px; margin: -8px -8px -8px 0; } }
+/* 폰: 토스트를 오른쪽에 붙여 왼쪽 체크 상자 열(약 70px)을 비워요 — 연달아 체크해도 되돌리기 토스트가 다음 상자를 가리지 않게.
+   두 줄이 되면 알약 대신 둥근 상자로 */
+@media (max-width: 860px) {
+  .toast-wrap { left: auto; right: 12px; transform: none; align-items: flex-end; max-width: calc(100vw - 84px); }
+  #toast-wrap > .toast { max-width: 100%; border-radius: 18px; }
+}
+/* ⋯ 데이터·설정 창 */
+.mv-seg { display: flex; gap: 4px; padding: 4px; background: var(--bg-3); border-radius: 12px; }
+.mv-seg-b {
+  flex: 1 1 auto; min-width: 0; min-height: var(--tap); padding: 4px 10px;
+  border: 0; border-radius: 9px; background: transparent; color: var(--ink-2);
+  font: inherit; font-weight: 700; font-size: .88rem; line-height: 1.25; cursor: pointer;
+}
+.mv-seg-b:hover { color: var(--ink); }
+.mv-seg-b[aria-pressed="true"] { background: var(--bg-2); color: var(--ink); box-shadow: var(--shadow), inset 0 0 0 1.5px var(--line-2); }
+.mv-more { margin-top: 4px; }
+.mv-more > summary { display: inline-flex; align-items: center; gap: 6px; min-height: var(--tap); cursor: pointer; list-style: none; font-size: .85rem; font-weight: 700; color: var(--ink-2); }
+.mv-more > summary::-webkit-details-marker { display: none; }
+.mv-more > summary::before { content: '▸'; display: inline-block; transition: transform .15s; }
+.mv-more[open] > summary::before { transform: rotate(90deg); }
+/* 브라우저 저장이 막혔을 때 상단바 칩 (app.js renderStoreWarn) — 그동안 '이 기기만' 칩은 숨겨요(사실과 달라서) */
+.store-warn { flex: 0 0 auto; padding: 0 9px; color: var(--bad); border: 1.5px solid var(--bad); border-radius: 999px; font-size: .8rem; font-weight: 800; white-space: nowrap; }
+.topbar.is-nostore #sync-chip[data-status="local"] { display: none; }
+/* 좁은 화면에서 함께 쓰기 경고 칩(이 기기만·로그인·보기만)까지 같이 뜨면 상단바가 넘쳐 ⋯ 이 화면 밖으로 밀려요
+   → 더 급한 '저장 안 됨'만 보여요 (누르면 여는 ⋯ 메뉴에 함께 쓰기 상태도 나와요) */
+@media (max-width: 640px) { .topbar.is-nostore #sync-chip.sync-chip-warn { display: none; } }
+@media (max-width: 420px) { .topbar.is-nostore .brand-text strong { display: none; } }
+@media (pointer: coarse) { .store-warn { min-height: 40px; } }
+
 @keyframes mv-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes mv-up { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
 @media print {
-  .topbar, .nav, .toast-wrap, .no-print { display: none !important; }
+  .topbar, .nav, .toast-wrap, .skip-link, .no-print { display: none !important; }
   .app { display: block; }
   .view { padding: 0; }
   .card { box-shadow: none; break-inside: avoid; }

@@ -30,6 +30,7 @@
                    v 가 없는 기록은 읽을 때(quotesOf)도 같은 규칙으로 보여 주고, 짐·견적 화면을 열거나 고칠 때 저장해요 (ensureEst)
            calib:  { factor, at, median, n, base, sig }, // 방문견적 중앙값 보정 (factor 1 = 보정 없음, sig = 보정에 쓴 견적 서명)
            lgChecks: { schedule, landlord, brand } }
+   기기 편의(이 기기 브라우저에만, 공유·백업 아님): localStorage 'mv:es:inv' = 짐 목록 필터·정렬·검색·'더보기' 펼침 (못 쓰면 기본값)
    계산  MV.calc.moveEstimate(state) → { tons, crew, volume, low, typical, high,
            lines:[{key,label,low,typical,high,detail}], notes:[],
            lgCost: 제조사 서비스(LG + 삼성) 전체 {low,typical,high,count,rows,discount,transport,label,makers,
@@ -1012,7 +1013,8 @@
     const pe = raw.partsEx || {};
     const missing = [];
     if (!q.ladder && pe.ladder > 0) missing.push(['사다리차', pe.ladder]);
-    if (!q.aircon && pe.aircon > 0) missing.push(['에어컨 이전', pe.aircon]);
+    // 계약한 견적: 에어컨은 분리·운반까지이고 설치는 따로 부른 기사(자금 화면 ‘에어컨 설치’ 줄) — 같은 돈을 두 번 세지 않게 더하지 않아요
+    if (!q.aircon && pe.aircon > 0 && !q.contracted) missing.push(['에어컨 이전', pe.aircon]);
     if (!q.waste && pe.waste > 0) missing.push(['폐기물', pe.waste]);
     if (!q.arrange && pe.arrange > 0) missing.push(['정리 인력', pe.arrange]);
     missing.forEach(([label, v]) => adds.push({ label, v: v * (incl ? vm : 1) }));
@@ -1035,7 +1037,7 @@
 .es-head .sub b { color: var(--ink-2); }
 .es-tabs { margin: 0 0 14px; }
 .es-tabs button { display: inline-flex; align-items: center; gap: 6px; min-height: 38px; }
-.es-tn { min-width: 20px; height: 18px; padding: 0 6px; border-radius: 999px; background: var(--bg-2); color: var(--ink-3); font-size: .7rem; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; font-variant-numeric: tabular-nums; }
+.es-tn { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--bg-2); color: var(--ink-3); font-size: .76rem; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; font-variant-numeric: tabular-nums; }
 .es-tabs button.active .es-tn { background: var(--brand-bg); color: var(--brand); }
 .es-ts { display: none; }
 @media (max-width: 600px) {
@@ -1051,7 +1053,7 @@
 .es-why .es-h3 { border-top: 0; padding-top: 0; }
 .es-muted { color: var(--ink-3); }
 .es-srcs { display: inline-flex; flex-wrap: wrap; gap: 4px 8px; margin-left: 4px; }
-.es-srcs a { font-size: .74rem; white-space: nowrap; }
+.es-srcs a { font-size: var(--fs-min, .75rem); white-space: nowrap; }
 .es-disclaimer { display: flex; gap: 10px; align-items: flex-start; }
 .es-disclaimer .es-dico { font-size: 1.2rem; line-height: 1.3; }
 
@@ -1072,8 +1074,21 @@
 .es-fchip.es-warnchip b { color: var(--warn); }
 .es-fchip.es-warnchip.is-on { background: var(--warn); color: var(--bg-2); }
 .es-fchip.es-warnchip.is-on b { color: var(--bg-2); }
-.es-stat { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 12px; border-radius: 999px; background: var(--kid-bg); color: var(--kid); font-size: .84rem; font-weight: 750; }
+.es-stat { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 2px; color: var(--ink-2); font-size: .86rem; font-weight: 650; }
+.es-stat b { color: var(--ink); font-weight: 800; }
 .es-stat b { font-variant-numeric: tabular-nums; }
+.es-stat.es-statline { display: block; flex: 0 1 auto; min-width: 0; min-height: 0; padding: 5px 2px; line-height: 1.6; }
+.es-statsep { color: var(--ink-3); }
+/* 글 속 링크: 줄 높이는 그대로 두고 누르는 자리만 위아래로 넓혀요 (인라인 padding 은 줄 높이를 바꾸지 않아요) */
+.es-statlink { white-space: nowrap; padding: 12px 0; color: var(--brand-ink, var(--brand)); font-weight: 750; text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+.es-statlink b { color: inherit; }
+@media (max-width: 600px) {
+  .es-chiprow.es-fchips { flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; margin: -3px -16px; padding: 3px 0 3px 16px;
+    -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 14px, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(90deg, transparent 0, #000 14px, #000 calc(100% - 28px), transparent); }
+  .es-chiprow.es-fchips::-webkit-scrollbar { display: none; }
+  .es-chiprow.es-fchips::after { content: ''; flex: 0 0 22px; }
+  .es-chiprow.es-fchips .es-fchip { flex: none; }
+}
 .es-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .es-toolbar .es-search { flex: 1 1 220px; min-width: 0; }
 .es-toolbar .select { width: auto; flex: 0 1 auto; min-width: 0; max-width: 100%; }
@@ -1115,8 +1130,7 @@
 .es-tbl th, .es-tbl td { padding-left: 8px; padding-right: 8px; }
 .es-link { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 10px; text-decoration: none; }
 .es-link:hover { background: var(--bg-3); }
-.es-tbl tr.is-faded td { opacity: .62; }
-.es-tbl tr.is-faded td:nth-child(3) { opacity: 1; }
+.es-tbl tr.is-faded td { background: var(--bg); }
 
 /* 짐 목록: 카드 */
 .es-cards { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -1140,7 +1154,7 @@
 .es-paste-ta { min-height: 132px; font-size: .92rem; }
 .es-pv { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
 .es-pv-head, .es-pv-row { display: grid; gap: 6px; align-items: center; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1.1fr) minmax(0, .9fr) 58px 62px 62px 62px 38px; }
-.es-pv-head { font-size: .72rem; font-weight: 800; color: var(--ink-3); padding: 0 2px; }
+.es-pv-head { font-size: var(--fs-min, .75rem); font-weight: 800; color: var(--ink-3); padding: 0 2px; }
 .es-pv-row { padding: 8px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); }
 .es-pv-row .input, .es-pv-row .select { min-height: 36px; padding: 4px 8px; font-size: .86rem; }
 .es-pv-sub { grid-column: 1 / -1; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: .76rem; color: var(--ink-3); }
@@ -1154,15 +1168,16 @@
   .es-pv-row .es-pv-cat { grid-column: 1 / span 2; }
   .es-pv-row .es-pv-fate { grid-column: 3 / span 2; }
 }
-.es-pv-lab { display: none; font-size: .68rem; color: var(--ink-3); font-weight: 700; }
+.es-pv-lab { display: none; font-size: var(--fs-min, .75rem); color: var(--ink-3); font-weight: 700; }
 @media (max-width: 720px) { .es-pv-lab { display: block; } .es-pv-num { display: flex; flex-direction: column; gap: 2px; } }
 /* 업체에 보낼 짐 목록: 화면에서만 줄을 접어 보여 줘요 (폰에서 긴 줄이 잘리지 않게). 복사하는 글(value)은 그대로 */
-.es-export-ta { min-height: 300px; font-family: var(--mono); font-size: .8rem; line-height: 1.5; white-space: pre-wrap; word-break: keep-all; overflow-wrap: anywhere; overflow-x: hidden; }
+.es-export-ta { min-height: 300px; font-family: inherit; font-size: .88rem; line-height: 1.6; white-space: pre-wrap; word-break: keep-all; overflow-wrap: anywhere; overflow-x: hidden; }
 
 /* 견적: 히어로 */
 .es-hero { background: linear-gradient(135deg, var(--brand-bg) 0%, var(--bg-2) 70%); border-color: color-mix(in srgb, var(--brand) 22%, var(--line)); padding: 18px 20px; }
 .es-hero-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 14px 28px; align-items: start; }
-@media (max-width: 900px) { .es-hero-grid { grid-template-columns: 1fr; } .es-hero { padding: 16px; } }
+/* minmax(0, 1fr): 칸 안의 긴 줄(칩·막대)이 칸을 넓혀 360px 폰에서 화면이 옆으로 밀리지 않게 */
+@media (max-width: 900px) { .es-hero-grid { grid-template-columns: minmax(0, 1fr); } .es-hero { padding: 16px; } }
 .es-eyebrow { font-size: .8rem; font-weight: 800; color: var(--brand); }
 .es-big { font-size: clamp(2.1rem, 8vw, 3.2rem); font-weight: 900; letter-spacing: -.04em; line-height: 1.05; font-variant-numeric: tabular-nums; margin: 4px 0 2px; }
 .es-big small { font-size: .38em; font-weight: 800; color: var(--ink-2); letter-spacing: 0; margin-left: 4px; }
@@ -1170,9 +1185,9 @@
 .es-bar { position: relative; height: 10px; border-radius: 999px; margin: 14px 0 4px; background: linear-gradient(90deg, var(--good-bg), var(--warn-bg), var(--bad-bg)); border: 1px solid var(--line); }
 .es-bar .es-bar-mid { position: absolute; top: 50%; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%; background: var(--brand); border: 2px solid var(--bg-2); box-shadow: var(--shadow); }
 .es-bar .es-bar-q { position: absolute; top: -5px; width: 3px; height: 18px; margin-left: -1.5px; border-radius: 2px; background: var(--think); }
-.es-bar-ends { display: flex; justify-content: space-between; font-size: .72rem; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.es-bar-ends { display: flex; justify-content: space-between; font-size: var(--fs-min, .75rem); color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .es-facts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-.es-facts .chip { font-size: .8rem; line-height: 1.9; }
+.es-facts .chip { font-size: .8rem; line-height: 1.9; white-space: normal; max-width: 100%; overflow-wrap: anywhere; }
 .es-hero-side { display: flex; flex-direction: column; gap: 10px; }
 .es-hero-side .callout { margin: 0; font-size: .86rem; }
 .es-lgsum { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 10px 12px; border-radius: 12px; background: var(--kid-bg); color: var(--kid); font-size: .88rem; font-weight: 700; }
@@ -1236,15 +1251,16 @@
 
 /* 견적: 금액 표 */
 .es-lines td.es-l-label { min-width: 0; }
-.es-lines .es-l-detail { display: block; font-size: .74rem; color: var(--ink-3); font-weight: 500; line-height: 1.4; margin-top: 1px; }
+.es-lines .es-l-detail { display: block; font-size: var(--fs-min, .75rem); color: var(--ink-3); font-weight: 500; line-height: 1.4; margin-top: 1px; }
 .es-lines tr.is-zero td { color: var(--ink-3); }
-.es-lines tr.es-l-sec td { background: var(--bg); font-size: .74rem; font-weight: 800; color: var(--ink-3); padding-top: 6px; padding-bottom: 6px; }
+.es-lines tr.es-l-sec td { background: var(--bg); font-size: var(--fs-min, .75rem); font-weight: 800; color: var(--ink-3); padding-top: 6px; padding-bottom: 6px; }
 .es-lines tfoot td { font-size: 1rem; }
 .es-lines td.num.es-l-typ { font-weight: 800; color: var(--ink); }
-.es-l-rng { display: none; font-size: .7rem; color: var(--ink-3); font-weight: 600; }
+.es-l-rng { display: none; font-size: .76rem; color: var(--ink-3); font-weight: 600; }
+/* 좁은 폰: 범위가 금액 칸을 넓혀 표가 옆으로 밀리지 않게 '~' 뒤에서 줄을 바꿀 수 있어요 (rngSpan 의 <wbr>) */
 @media (max-width: 560px) {
   .es-lines th.es-l-lohi, .es-lines td.es-l-lohi { display: none; }
-  .es-l-rng { display: block; }
+  .es-l-rng { display: block; white-space: normal; }
   .es-lines th, .es-lines td { padding: 8px 6px; }
 }
 .es-why ol { margin: 0; padding-left: 1.3em; }
@@ -1263,7 +1279,7 @@
 .es-coef-grp { border: 1px solid var(--line); border-radius: 12px; margin-top: 8px; background: var(--bg-2); }
 .es-coef-grp > summary { list-style: none; cursor: pointer; padding: 10px 12px; font-weight: 800; display: flex; align-items: center; gap: 8px; min-height: 44px; }
 .es-coef-grp > summary::-webkit-details-marker { display: none; }
-.es-coef-grp > summary .es-gn { margin-left: auto; font-size: .74rem; color: var(--ink-3); font-weight: 700; }
+.es-coef-grp > summary .es-gn { margin-left: auto; font-size: var(--fs-min, .75rem); color: var(--ink-3); font-weight: 700; }
 .es-coef-grp[open] > summary { border-bottom: 1px solid var(--line); }
 .es-coef-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 14px; padding: 10px 12px; border-top: 1px dashed var(--line); align-items: start; }
 .es-coef-row:first-of-type { border-top: 0; }
@@ -1300,7 +1316,7 @@
 .es-qcard-head { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
 .es-qcard-head .es-qname { flex: 1; font-weight: 800; font-size: 1rem; }
 .es-qchecks { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 10px; }
-.es-qchecks .es-qcl { width: 100%; font-size: .74rem; font-weight: 800; color: var(--ink-3); margin-top: 4px; }
+.es-qchecks .es-qcl { width: 100%; font-size: var(--fs-min, .75rem); font-weight: 800; color: var(--ink-3); margin-top: 4px; }
 .es-qbadges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; align-items: center; }
 .es-qbadges .chip { font-size: .8rem; line-height: 1.9; }
 .es-qwarns { margin: 8px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
@@ -1317,7 +1333,7 @@
 .es-qtbl td { vertical-align: top; }
 .es-qtbl td .chip { margin-top: 2px; }
 .es-qtbl td .es-qbadges { gap: 4px; }
-.es-qtbl td:last-child .chip { font-size: .72rem; padding: 0 7px; }
+.es-qtbl td:last-child .chip { font-size: var(--fs-min, .75rem); padding: 0 7px; }
 .es-qcmp-cards { display: none; flex-direction: column; gap: 8px; }
 @media (max-width: 760px) { .es-qcmp-tbl { display: none; } .es-qcmp-cards { display: flex; } }
 .es-qcmp-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); }
@@ -1342,7 +1358,7 @@
 .es-scen-c .es-scen-t { font-weight: 800; font-size: .9rem; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .es-scen-c .es-scen-big { font-size: 1.45rem; font-weight: 900; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
 .es-scen-c .es-scen-l { display: flex; justify-content: space-between; gap: 8px; font-size: .8rem; color: var(--ink-2); font-variant-numeric: tabular-nums; }
-.es-scen-c .es-scen-r { font-size: .74rem; color: var(--ink-3); }
+.es-scen-c .es-scen-r { font-size: var(--fs-min, .75rem); color: var(--ink-3); }
 .es-lgitems { display: flex; flex-direction: column; gap: 10px; }
 .es-lgi { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; gap: 4px 10px; padding: 12px; border: 1px solid var(--line); border-radius: 14px; background: var(--bg-2); align-items: start; }
 .es-lgi.is-lg { border-color: color-mix(in srgb, var(--kid) 45%, var(--line)); background: color-mix(in srgb, var(--kid-bg) 45%, var(--bg-2)); }
@@ -1353,7 +1369,7 @@
 .es-lgi-cost { border-radius: 10px; padding: 8px 10px; background: var(--bg); border: 1px solid var(--line); font-size: .82rem; }
 .es-lgi-cost.is-on { border-color: var(--brand); background: var(--bg-2); }
 .es-lgi-cost b { display: block; font-size: 1.02rem; font-variant-numeric: tabular-nums; }
-.es-lgi-cost small { display: block; color: var(--ink-3); font-size: .74rem; line-height: 1.4; }
+.es-lgi-cost small { display: block; color: var(--ink-3); font-size: var(--fs-min, .75rem); line-height: 1.4; }
 .es-lgi-does { grid-column: 2 / -1; font-size: .78rem; color: var(--ink-2); margin-top: 4px; }
 .es-lgi-does.es-lgi-bad { color: var(--bad); font-weight: 650; }
 .es-reco .es-reco-fix { margin: 6px 0 12px; }
@@ -1378,7 +1394,7 @@
 .es-caveats li + li { margin-top: 5px; }
 .es-err { font-size: .85rem; }
 /* 부가세 표시 · LG 불가 경고 · 에어컨 대당 비교 */
-.es-vat { display: inline-flex; align-items: center; padding: 0 7px; border-radius: 999px; background: var(--bg-3); color: var(--ink-2); font-size: .72rem; font-weight: 750; line-height: 1.7; white-space: nowrap; vertical-align: middle; letter-spacing: 0; }
+.es-vat { display: inline-flex; align-items: center; padding: 0 7px; border-radius: 999px; background: var(--bg-3); color: var(--ink-2); font-size: var(--fs-min, .75rem); font-weight: 750; line-height: 1.7; white-space: nowrap; vertical-align: middle; letter-spacing: 0; }
 .es-exline { font-size: .82rem; color: var(--ink-3); margin-top: 2px; line-height: 1.45; }
 .es-lgfix { border: 0; font: inherit; font-size: .76rem; font-weight: 750; cursor: pointer; min-height: 36px; padding: 2px 10px; white-space: normal; text-align: left; line-height: 1.3; max-width: 100%; }
 .es-lgfix:hover { text-decoration: underline; text-underline-offset: 2px; }
@@ -1400,7 +1416,8 @@
 .toast.es-toast > span { min-width: 0; }
 .toast.es-toast > button { white-space: nowrap; flex: none; min-height: 32px; }
 /* 제조사 · 옮기는 곳 칩 */
-.es-statbtn { border: 0; font: inherit; font-size: .84rem; font-weight: 750; cursor: pointer; }
+.es-statbtn { border: 0; background: none; font: inherit; font-size: .86rem; font-weight: 750; cursor: pointer; color: var(--brand-ink, var(--brand)); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+.es-statbtn b { color: inherit; }
 .es-statbtn:hover { text-decoration: underline; text-underline-offset: 3px; }
 .chip.es-who { white-space: nowrap; font-weight: 750; }
 .chip.es-brand { background: var(--bg-3); color: var(--ink-2); border: 1px solid var(--line); font-weight: 750; }
@@ -1428,11 +1445,137 @@
 .es-plan-sr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 12px; align-items: baseline; padding: 7px 0; border-top: 1px dashed var(--line); font-size: .88rem; }
 .es-plan-sr:first-child { border-top: 0; }
 .es-plan-sr b { font-variant-numeric: tabular-nums; text-align: right; }
-.es-plan-sr small { grid-column: 2; text-align: right; color: var(--ink-3); font-size: .74rem; font-variant-numeric: tabular-nums; }
+.es-plan-sr small { grid-column: 2; text-align: right; color: var(--ink-3); font-size: var(--fs-min, .75rem); font-variant-numeric: tabular-nums; }
 .es-plan-sr.es-plan-tot { border-top: 1px solid var(--line-2); font-weight: 800; }
 .es-plan-sr.es-plan-tot b { font-size: 1.12rem; }
 .es-ssbox { margin-top: 10px; padding: 10px 12px; border-radius: 12px; background: var(--bg-2); border: 1px solid var(--line); }
 .es-ssbox .es-check { margin: 4px 0 6px; }
+`);
+
+  /* 규격 확인 줄·목록 CSS — 짐 목록 위 '규격 확인' 줄도 쓰니 모듈을 읽을 때 한 번 (예전: 규격 확인 화면을 열어야 들어가 처음엔 줄이 104px로 늘어졌어요) */
+  MV.css('es-spec', `
+.es-spbar { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; padding: 10px 14px; margin-bottom: 12px; }
+.es-spbar-t { display: flex; align-items: center; gap: 6px 8px; flex-wrap: wrap; min-width: 0; font-size: .92rem; }
+.es-spbar-bar { width: 90px; flex: 0 0 auto; }
+.es-spbar-btn { flex: 0 0 auto; }
+.es-sp-head .es-sp-top { display: flex; align-items: center; gap: 6px 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.es-sp-h { margin: 0; }
+.es-sp-prog { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 10px; margin: 4px 0 10px; }
+.es-sp-head p { margin-top: 8px; }
+.es-sp-help { border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+.es-sp-help > summary { cursor: pointer; font-weight: 800; min-height: 40px; display: flex; align-items: center; list-style: none; }
+.es-sp-help > summary::-webkit-details-marker { display: none; }
+.es-sp-help > summary::after { content: '▾'; margin-left: 6px; color: var(--ink-3); }
+.es-sp-help[open] > summary::after { content: '▴'; }
+.es-sp-dl { display: grid; grid-template-columns: minmax(110px, 200px) 1fr; gap: 6px 12px; margin: 8px 0; font-size: .9rem; }
+.es-sp-dl dt { font-weight: 800; }
+.es-sp-dl dd { margin: 0; color: var(--ink-2); }
+.es-sp-copy { display: flex; flex-direction: column; gap: 8px; }
+.es-sp-copybtn { align-self: flex-start; max-width: 100%; white-space: normal; text-align: left; }
+.es-sp-more > summary { cursor: pointer; font-size: .85rem; color: var(--ink-2); font-weight: 700; min-height: 32px; display: inline-flex; align-items: center; }
+.es-sp-ta { min-height: 180px; font-size: .85rem; margin-top: 6px; }
+.es-sp-room { padding-top: 10px; }
+.es-sp-rh { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 0 0 6px; font-size: 1.02rem; }
+.es-sp-rn { font-size: .8rem; color: var(--ink-3); font-weight: 700; }
+.es-sp-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 10px 0; border-top: 1px solid var(--line); }
+.es-sp-row:first-of-type { border-top: 0; }
+.es-sp-row[data-st="done"] .es-sp-name b { color: var(--ink-2); }
+.es-sp-name { display: flex; align-items: center; gap: 4px 8px; flex-wrap: wrap; min-width: 0; overflow-wrap: anywhere; }
+.es-sp-ico { flex: 0 0 auto; }
+.es-sp-qty { font-size: .82rem; color: var(--ink-3); font-weight: 700; }
+.es-sp-meta { display: flex; align-items: center; gap: 4px 8px; flex-wrap: wrap; margin-top: 4px; font-size: .85rem; color: var(--ink-2); }
+.es-sp-dim { font-variant-numeric: tabular-nums; }
+.es-sp-ctl { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 8px; min-width: 0; }
+.es-sp-lab { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.es-sp-lab > span { font-size: .75rem; font-weight: 700; color: var(--ink-3); }
+.es-sp-fix { white-space: nowrap; }
+.es-sp-links { grid-column: 1 / -1; }
+@media (min-width: 760px) {
+  .es-sp-row { grid-template-columns: minmax(0, 1fr) minmax(280px, 380px); align-items: center; column-gap: 16px; }
+}
+@media (pointer: coarse) {
+  .es-body .es-spbar-btn, .es-body .es-sp-fix, .es-body .es-sp-back, .es-body .es-sp-copybtn { min-height: 44px; }
+  .es-sp-in { min-height: 44px; }
+  .es-sp-help > summary, .es-sp-more > summary { min-height: 44px; }
+}
+@media (max-width: 400px) { .es-spbar-bar { width: 64px; } .es-sp-dl { grid-template-columns: 1fr; gap: 2px; } .es-sp-dl dd { margin-bottom: 6px; } }
+`);
+
+  /* 짐 목록 압축·처리 색·터치 크기 (UX 개선 레인 E: E2·E5·E6·E7·E10·E13) */
+  MV.css('es-ux', `
+/* 처리별 색: 카드 왼쪽 4px·표 첫 칸·처리 칸 앞 점 (흐린 투명도 대신 — 어두운 테마에서도 구분돼요) */
+.es-icard, .es-tbl tbody tr { --es-tone: var(--line-2); }
+.es-icard[data-tone="kid"], .es-tbl tr[data-tone="kid"] { --es-tone: var(--kid); }
+.es-icard[data-tone="good"], .es-tbl tr[data-tone="good"] { --es-tone: var(--good); }
+.es-icard[data-tone="bad"], .es-tbl tr[data-tone="bad"] { --es-tone: var(--bad); }
+.es-icard[data-tone="warn"], .es-tbl tr[data-tone="warn"] { --es-tone: var(--warn); }
+.es-icard { border-left: 4px solid var(--es-tone); padding-left: 10px; }
+.es-tbl tbody tr td:first-child { box-shadow: inset 4px 0 0 var(--es-tone); }
+.es-fdot { width: 10px; height: 10px; border-radius: 50%; background: var(--es-tone); flex: none; }
+.es-fsel { display: flex; align-items: center; gap: 6px; }
+.es-icard.is-out, .es-tbl tr.is-out td { border-style: dashed; background: var(--bg); }
+.es-icard.is-out .es-namebtn, .es-tbl tr.is-out .es-namebtn { color: var(--ink-2); }
+/* 카드: 이름 2줄까지, 모델명·링크·메모는 아래 한 줄 */
+.es-icard .es-nametxt { display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.es-icard .es-icard-meta { gap: 2px 8px; }
+.es-metatxt { flex: 0 1 auto; min-width: 0; font-variant-numeric: tabular-nums; color: var(--ink-2); }
+.es-icard-main { min-width: 0; }
+.es-mlink { display: inline-flex; align-items: center; min-height: 32px; color: var(--brand-ink, var(--brand)); font-weight: 700; text-decoration: underline; text-underline-offset: 2px; text-decoration-thickness: 1px; overflow-wrap: anywhere; }
+.es-notebtn { display: inline-flex; align-items: center; min-height: 32px; padding: 0 10px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--ink-2); font: inherit; font-size: .8rem; font-weight: 700; cursor: pointer; }
+.es-notebtn[aria-expanded="true"] { background: var(--bg-3); }
+.es-icard-note { margin-top: 6px; padding: 8px 10px; border-radius: 10px; background: var(--bg); font-size: .84rem; line-height: 1.5; color: var(--ink-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.es-flash { animation: es-flash 1.6s ease-out; }
+@keyframes es-flash { 0%, 40% { box-shadow: 0 0 0 3px var(--brand); } 100% { box-shadow: 0 0 0 3px transparent; } }
+.es-tbl tr.es-flash td { background: var(--brand-bg); transition: background 1.2s; }
+@media (prefers-reduced-motion: reduce) { .es-flash { animation: none; outline: 3px solid var(--brand); } }
+/* 요약: 미정 행동 줄 · 규격 확인 끝 · 개수 0 칩 */
+.es-todo { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; padding: 8px 12px; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--line)); background: var(--warn-bg); color: var(--warn-ink, var(--warn)); font: inherit; font-size: .88rem; text-align: left; cursor: pointer; }
+.es-todo b { font-weight: 800; }
+.es-todo-t { flex: 1 1 auto; min-width: 0; }
+@media (max-width: 600px) { .es-todo-n { display: none; } }
+.es-todo-go { flex: none; font-weight: 800; white-space: nowrap; text-decoration: underline; text-underline-offset: 3px; }
+.es-todo.is-on { background: var(--warn); color: var(--bg-2); border-color: var(--warn); }
+.es-fchip:disabled { cursor: default; background: transparent; border-style: dashed; color: var(--ink-3); }
+.es-fchip:disabled b { color: var(--ink-3); }
+.es-nowrap { white-space: nowrap; }
+/* 짐 추가 줄 '더보기' */
+.es-addrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.es-more { margin-top: 10px; }
+.es-more .es-presetwrap { margin-top: 10px; }
+/* 키보드: 짐 목록으로 건너뛰기 (포커스될 때만 보여요) */
+.es-body { position: relative; }
+.es-skip { position: absolute; left: -9999px; top: 0; }
+.es-skip:focus { left: 0; z-index: 5; padding: 10px 14px; border-radius: 10px; background: var(--ink); color: var(--bg); font-weight: 800; }
+/* 견적: 계약 금액이 가장 크게 · 모델은 접힌 참고 */
+.es-hero.es-hero-ct { background: linear-gradient(135deg, var(--good-bg) 0%, var(--bg-2) 70%); border-color: color-mix(in srgb, var(--good) 28%, var(--line)); }
+.es-hero-ct .es-eyebrow { color: var(--good-ink, var(--good)); }
+.es-ct-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 6px; font-size: .92rem; }
+.es-ct-line b { overflow-wrap: anywhere; }
+.es-ref { margin: 0; padding: 10px 12px; border-radius: 12px; background: var(--bg-2); border: 1px solid var(--line); font-size: .88rem; color: var(--ink-2); line-height: 1.5; }
+.es-ref b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.es-model-d { border: 1px solid var(--line); border-radius: 12px; background: var(--bg-2); }
+.es-model-d > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; min-height: var(--tap, 40px); padding: 6px 12px; font-weight: 800; font-size: .9rem; }
+.es-model-d > summary::-webkit-details-marker { display: none; }
+.es-model-d > summary::after { content: '▾'; margin-left: auto; color: var(--ink-3); }
+.es-model-d[open] > summary::after { content: '▴'; }
+.es-model-in { padding: 0 12px 12px; display: flex; flex-direction: column; gap: 8px; }
+.es-model-in .es-bar { margin-top: 6px; }
+.es-model-in .callout { margin: 0; font-size: .86rem; }
+.es-qcmp-card .es-qc-amt small, .es-qtbl td .es-qamt-sub { display: block; font-size: var(--fs-min, .75rem); font-weight: 650; color: var(--ink-3); }
+.es-qwarns li.es-qsync { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.es-qwarns li.es-qsync > span { flex: 1 1 220px; min-width: 0; }
+@media (max-width: 600px) { .es-export-ta { min-height: 55vh; } }
+/* 터치 기기: 누르는 곳 44px (공통 토큰 --tap) */
+@media (pointer: coarse) {
+  .es-body .es-isel, .es-body .es-iqty, .es-fchip, .es-pchip, .es-namebtn, .es-tabs button, .es-seg-b, .es-notebtn, .es-mlink { min-height: var(--tap, 44px); }
+  .es-body .btn-sm, .es-head .btn-sm, .es-pv .btn-sm, .es-body .es-check, .es-lgfix { min-height: var(--tap, 44px); }
+  .es-body .btn-sm.btn-icon, .es-qcard-head .btn-icon { width: var(--tap, 44px); min-height: var(--tap, 44px); }
+  .es-srcs a { display: inline-flex; align-items: center; min-height: var(--tap, 44px); }
+  .es-pv-row .input, .es-pv-row .select, .es-pv-sub .input, .es-pv-sub .es-pv-brand { min-height: var(--tap, 44px); }
+  .es-coef-toggle, .es-model-d > summary { min-height: var(--tap, 44px); }
+  .es-body .btn, .es-body .select, .es-body .input, .es-statbtn { min-height: var(--tap, 44px); }
+  .es-inlink { display: inline-flex; align-items: center; min-height: var(--tap, 44px); }
+}
 `);
 
   /* ======================= 화면 상태 (모듈 메모리) ======================= */
@@ -1440,7 +1583,37 @@
     fates: new Set(), cat: '', q: '', sort: 'cat', onlyAssumed: false,
     coefOpen: false, groupsOpen: new Set(['base', 'vol']), presetsAll: false,
     scrollToTabs: false, focusQuote: null,
+    moreOpen: null,         // 짐 목록 '더보기'(붙여넣기·업체 목록·빠른 추가) — null 이면 표가 보이는 넓은 화면만 펼침
+    memoOpen: new Set(),    // 메모를 펼친 짐 카드
+    fchipX: 0,              // 폰에서 가로로 넘기는 처리별 칩 줄의 위치 (다시 그려도 그대로)
+    keepIds: new Set(),     // 처리를 바꿔 필터에서 빠졌지만 다음 조작 전까지 흐리게 남겨 둘 짐
+    inputsOpen: false,      // 계약 뒤 '이사 조건' 카드 펼침 (계약 전에는 늘 펼침)
+    modelOpen: false,       // 계약 뒤 '모델 계산 보기' 펼침
+    leftScroll: null,       // 짐 목록을 떠날 때 스크롤 (탭바로 돌아와도 그 자리)
+    showAfter: null,        // 추가한 짐 '보기' — 짐 목록을 그린 뒤 그 카드로
   };
+  /* 필터·정렬·검색·'더보기' 기억 — 기기 편의라 이 기기 브라우저에만 (공유 기록·백업에 넣지 않음). 저장소를 못 쓰면 기본값 */
+  const INV_MEM_KEY = 'mv:es:inv';
+  const SORT_IDS = ['cat', 'room', 'vol', 'fate', 'name'];
+  function memLoad() {
+    try {
+      const raw = window.localStorage ? window.localStorage.getItem(INV_MEM_KEY) : null;
+      const o = raw ? JSON.parse(raw) : null;
+      if (!o || typeof o !== 'object') return;
+      if (Array.isArray(o.fates)) mem.fates = new Set(o.fates.filter((f) => FATE_IDS.has(f)));
+      if (typeof o.cat === 'string' && MV.inv && (MV.inv.CATS || []).some((c) => c.id === o.cat)) mem.cat = o.cat;
+      if (SORT_IDS.includes(o.sort)) mem.sort = o.sort;
+      if (typeof o.q === 'string') mem.q = o.q.slice(0, 80);
+      mem.onlyAssumed = o.onlyAssumed === true;
+      if (typeof o.more === 'boolean') mem.moreOpen = o.more;
+    } catch (e) { /* 무시 */ }
+  }
+  function memSave() {
+    try {
+      window.localStorage.setItem(INV_MEM_KEY, JSON.stringify({ fates: Array.from(mem.fates), cat: mem.cat, sort: mem.sort, q: mem.q, onlyAssumed: mem.onlyAssumed, more: mem.moreOpen }));
+    } catch (e) { /* 무시 */ }
+  }
+  memLoad();
   const TABS = [
     { id: 'inventory', label: '짐 목록', short: '짐 목록', icon: '📦' },
     { id: 'estimate', label: '이사 견적', short: '견적', icon: '🧮' },
@@ -1702,7 +1875,8 @@
     return region(() => {
       const est = R.est;
       const n = invItems().length;
-      // 머리말 숫자는 자금·LG 탭과 같은 ‘부가세 포함’(실제로 낼 돈)으로, 부가세 별도는 보조로
+      // 머리말 숫자는 자금·LG 탭과 같은 ‘부가세 포함’(실제로 낼 돈)으로, 부가세 별도는 보조로.
+      // '업체에 보낼 짐 목록' 단추는 머리말에 두지 않아요 (탭마다 머리말 높이가 달라 탭 줄이 오르내렸어요) — 짐 목록 '더보기'·업체 비교 탭에 있어요
       return el('div', { class: 'view-head es-head' },
         el('div',
           el('h1', '🚚 짐·견적'),
@@ -1710,11 +1884,10 @@
             ? el('div', { class: 'sub' }, '짐 ', el('b', n + '개'), ' · 이사업체 ', el('b', '계약 확정 ' + won(est.contract.pay)), ' ', el('span', { class: 'es-vat' }, est.contract.noVat ? '부가세 없음' : '부가세 포함'),
               ' (' + est.contract.company + ') · 모델 추정 약 ' + won(est.pay.typical) + '(부가세 포함, 참고)')
             : el('div', { class: 'sub' }, '짐 ', el('b', n + '개'), ' · 예상 이사비 ', el('b', '약 ' + won(est.pay.typical)), ' ', el('span', { class: 'es-vat' }, '부가세 포함'),
-              ' (' + won(est.pay.low) + '~' + won(est.pay.high) + ') · 부가세 별도 약 ' + won(est.ex.typical) + ' · 추정치')),
-        R.tab === 'inventory' ? null : el('div', { class: 'actions' },
-          el('button', { type: 'button', class: 'btn btn-sm', onclick: openExport }, '📋 업체에 보낼 짐 목록')));
+              ' (' + won(est.pay.low) + '~' + won(est.pay.high) + ') · 부가세 별도 약 ' + won(est.ex.typical) + ' · 추정치')));
     }, 'head');
   }
+  const exportBtn = (small) => el('button', { type: 'button', class: 'btn' + (small ? ' btn-sm' : ''), onclick: openExport }, '📋 업체에 보낼 짐 목록');
   function tabsEl(cur) {
     const est = estSt();
     const counts = { inventory: invItems().length, quotes: quotesOf(est).length };
@@ -1744,19 +1917,26 @@
     inv.forEach((it) => { const f = FATE_IDS.has(it.fate) ? it.fate : 'undecided'; m[f]++; });
     return m;
   }
+  /* 가져갈 짐(가져감·미정) — 규격 확인 대상과 같은 처리 (MV.inv.SPEC_FATES) */
+  const fateId = (it) => (FATE_IDS.has(it && it.fate) ? it.fate : 'undecided');
+  const isTakeFate = (it) => (MV.inv.SPEC_FATES || ['move', 'undecided']).includes(fateId(it));
+  const assumedTake = (it) => !!it.assumed && isTakeFate(it);
+  function invMatch(it, q) {
+    const f = fateId(it);
+    if (mem.fates.size && !mem.fates.has(f)) return false;
+    if (mem.cat && it.cat !== mem.cat) return false;
+    if (mem.onlyAssumed && !assumedTake(it)) return false;
+    if (q) {
+      const hay = [it.name, it.note, it.model, it.room, it.roomNew, MV.inv.cat(it.cat).label, MV.inv.fate(it.fate).label].join(' ').toLowerCase();
+      if (!q.split(/\s+/).every((w) => hay.includes(w))) return false;
+    }
+    return true;
+  }
+  const curQ = () => mem.q.trim().toLowerCase();
+  /* 필터에 맞는 짐 + 처리를 바꿔 방금 빠진 짐(keepIds — 다음 조작 전까지 흐리게) */
   function invFiltered() {
-    const q = mem.q.trim().toLowerCase();
-    let list = invItems((it) => {
-      const f = FATE_IDS.has(it.fate) ? it.fate : 'undecided';
-      if (mem.fates.size && !mem.fates.has(f)) return false;
-      if (mem.cat && it.cat !== mem.cat) return false;
-      if (mem.onlyAssumed && !it.assumed) return false;
-      if (q) {
-        const hay = [it.name, it.note, it.model, it.room, it.roomNew, MV.inv.cat(it.cat).label, MV.inv.fate(it.fate).label].join(' ').toLowerCase();
-        if (!q.split(/\s+/).every((w) => hay.includes(w))) return false;
-      }
-      return true;
-    });
+    const q = curQ();
+    let list = invItems((it) => invMatch(it, q) || mem.keepIds.has(it.id));
     const catIdx = (id) => { const i = MV.inv.CATS.findIndex((c) => c.id === id); return i < 0 ? 99 : i; };
     const fateIdx = (id) => { const i = MV.inv.FATES.findIndex((c) => c.id === id); return i < 0 ? 99 : i; };
     const byName = (a, b) => String(a.name).localeCompare(String(b.name), 'ko');
@@ -1771,62 +1951,123 @@
     return list;
   }
   function filtersActive() { return mem.fates.size || mem.cat || mem.onlyAssumed || mem.q.trim(); }
+  /* 필터·정렬·검색을 바꿀 때마다: 흐리게 남겨 둔 짐을 비우고, 이 기기에 기억 */
+  function filterTouched() { mem.keepIds.clear(); memSave(); }
   function clearFilters() {
     mem.fates.clear(); mem.cat = ''; mem.onlyAssumed = false; mem.q = '';
     if (R && R.searchInput) R.searchInput.value = '';
     if (R && R.catSelect) R.catSelect.value = '';
+    filterTouched();
     refreshNamed(['invsum', 'invlist']);
   }
 
+  /* 짧은 이름: '화장대 — 까르엠 …' → '화장대', '전자레인지 수납장 (버려도 돼요)' → '전자레인지 수납장' */
+  const shortName = (it) => clip(nm(it).split(/\s+[—–-]\s+|\s*\(/)[0] || nm(it), 14);
   function invSummary() {
     const inv = invItems();
+    if (!inv.length) return null; // 빈 목록은 아래 빈 상태 카드 하나만
     const fc = fateCounts(inv);
     const moveVol = sum(inv.filter((it) => it.fate === 'move'), rawVol);
-    const assumed = inv.filter((it) => it.assumed).length;
+    const assumed = inv.filter(assumedTake).length; // 버릴 짐·살 짐의 추정 크기는 할 일이 아니라 세지 않아요
     const inpS = inpNow();
     const mk = {};
     inv.filter((it) => lgActive(it, inpS)).forEach((it) => { const m = makerOf(it); mk[m] = (mk[m] || 0) + qtyOf(it); });
     const mkTxt = Object.keys(mk).map((m) => MAKERS[m].who + ' ' + mk[m] + '대').join(' · ');
     const blocked = inv.filter((it) => lgBlockedIt(it, inpS));
-    const fchips = MV.inv.FATES.map((f) => el('button', {
-      type: 'button', class: 'es-fchip' + (mem.fates.has(f.id) ? ' is-on' : ''), 'data-tone': f.cls || '',
-      'aria-pressed': String(mem.fates.has(f.id)), 'data-fk': 'fate-filter-' + f.id,
-      title: f.label + '만 보기 (여러 개 고를 수 있어요)',
-      onclick: () => { if (mem.fates.has(f.id)) mem.fates.delete(f.id); else mem.fates.add(f.id); refreshNamed(['invsum', 'invlist']); },
-    }, el('span', { class: 'es-dot', 'aria-hidden': 'true' }), f.label, el('b', String(fc[f.id] || 0))));
+    const sc = specOk() ? specCounts() : null;
+    const specDone = !!(sc && sc.total && sc.done === sc.total);
+    const und = inv.filter((it) => fateId(it) === 'undecided');
+    const undOnly = mem.fates.size === 1 && mem.fates.has('undecided');
+    const fchips = MV.inv.FATES.map((f) => {
+      const n = fc[f.id] || 0;
+      const on = mem.fates.has(f.id);
+      return el('button', {
+        type: 'button', class: 'es-fchip' + (on ? ' is-on' : ''), 'data-tone': f.cls || '',
+        'aria-pressed': String(on), 'data-fk': 'fate-filter-' + f.id, disabled: !n && !on,
+        title: n || on ? f.label + '만 보기 (여러 개 고를 수 있어요)' : f.label + ' 짐이 없어요',
+        onclick: () => { if (mem.fates.has(f.id)) mem.fates.delete(f.id); else mem.fates.add(f.id); filterTouched(); refreshNamed(['invsum', 'invlist']); },
+      }, el('span', { class: 'es-dot', 'aria-hidden': 'true' }), f.label, el('b', String(n)));
+    });
+    // 이사 전에 정할 일: 처리 '미정' — 누르면 미정만 보기
+    const todo = und.length ? el('button', {
+      type: 'button', class: 'es-todo' + (undOnly ? ' is-on' : ''), 'aria-pressed': String(undOnly), 'data-fk': 'undecided-todo',
+      title: und.map(nm).join(', '),
+      onclick: () => { if (undOnly) mem.fates.clear(); else mem.fates = new Set(['undecided']); filterTouched(); refreshNamed(['invsum', 'invlist']); },
+      'aria-label': '이사 전에 정하세요: 미정 ' + und.length + '개 (' + und.map(nm).join(', ') + ') — ' + (undOnly ? '모두 보기' : '미정만 보기'),
+    }, el('span', { 'aria-hidden': 'true' }, '📝'),
+    el('span', { class: 'es-todo-t' }, el('b', '이사 전에 정하세요: 미정 ' + und.length + '개'),
+      el('span', { class: 'es-todo-n' }, ' · ' + und.slice(0, 3).map(shortName).join(', ') + (und.length > 3 ? ' 외 ' + (und.length - 3) + '개' : ''))),
+    el('span', { class: 'es-todo-go', 'aria-hidden': 'true' }, undOnly ? '모두 보기' : '보기 →')) : null;
     return el('section', { class: 'card es-sumbar', 'aria-label': '짐 요약' },
+      todo,
       el('div', { class: 'es-chiprow' },
-        el('span', { class: 'es-stat', title: '처리가 ‘가져감’인 짐의 가로×깊이×높이 합 (수량 포함)' }, '📦 가져갈 짐 ', el('b', m3(moveVol))),
-        el('span', { class: 'es-stat', style: { background: 'var(--bg-3)', color: 'var(--ink-2)' } }, '전체 ', el('b', inv.length + '개')),
+        // 부피와 '규격 확정' 링크는 한 덩어리 글 — 폰에서 자리가 모자라면 글처럼 줄만 바뀌어요 (따로 두면 한 줄씩 차지해 첫 짐이 아래로 밀려요)
+        el('span', { class: 'es-stat es-statline' },
+          el('span', { title: '처리가 ‘가져감’인 가구·가전의 가로×깊이×높이 합 (수량 포함). 이삿짐 박스·잡동사니는 빼요' }, '📦 가구·가전 ', el('b', m3(moveVol)), ' (가져감)'),
+          specDone ? el('span', { class: 'es-statsep', 'aria-hidden': 'true' }, ' · ') : null,
+          specDone ? el('a', { class: 'es-statlink', href: SPEC_HREF, 'data-fk': 'spec-open', title: '가져갈 짐의 규격을 모두 확정했어요 — 눌러서 규격 확인 목록 보기' }, '✅ 규격 확정 ', el('b', sc.done + '/' + sc.total)) : null),
         mkTxt ? el('button', { type: 'button', class: 'es-stat es-statbtn', 'data-fk': 'maker-stat', title: '제조사 서비스로 따로 옮길 가전 — 눌러서 ‘가전 이전 비교’ 보기', onclick: () => goTab('lg') }, '🔧 ', el('b', mkTxt)) : null,
-        assumed ? el('button', {
+        // 켜 둔 채 마지막 추정 짐을 실측으로 고쳐 0개가 돼도, 끌 수 있게 칩은 남겨 둬요
+        assumed || mem.onlyAssumed ? el('button', {
           type: 'button', class: 'es-fchip es-warnchip' + (mem.onlyAssumed ? ' is-on' : ''), 'aria-pressed': String(mem.onlyAssumed),
-          'data-fk': 'assumed-filter', title: '크기가 추정치인 짐만 보기 (살 짐·버릴 짐도 포함 — 모델명 확인 대상은 아래 ‘규격 확인’ 줄의 숫자예요)',
-          onclick: () => { mem.onlyAssumed = !mem.onlyAssumed; refreshNamed(['invsum', 'invlist']); },
+          'data-fk': 'assumed-filter', title: '크기가 추정치인 가져갈 짐(미정 포함)만 보기 — 버릴 짐·살 짐은 빼요',
+          onclick: () => { mem.onlyAssumed = !mem.onlyAssumed; filterTouched(); refreshNamed(['invsum', 'invlist']); },
         }, '⚠ 추정 크기 ', el('b', assumed + '개')) : null,
         blocked.length ? el('button', {
           type: 'button', class: 'es-fchip es-warnchip es-badchip', 'data-fk': 'lgfix-all',
           title: blocked.map(nm).join(', ') + ' — 제조사 서비스 표시가 켜져 있지만 맡길 수 없어요. 눌러서 이삿짐센터로 바꾸세요.',
           onclick: () => switchToMover(blocked.map((it) => it.id)),
         }, '⚠ 제조사 서비스 불가 ', el('b', blocked.length + '개'), ' — 이삿짐센터로 바꾸기') : null),
-      el('div', { class: 'es-chiprow', role: 'group', 'aria-label': '처리별 보기' }, fchips));
+      fateRow(fchips));
+  }
+  /* 처리별 보기 칩 — 폰(≤600px)에서는 한 줄 가로 스크롤 (두 줄이면 첫 짐이 첫 화면 밖으로 밀려요). 다시 그려도 보던 자리 그대로,
+     켜진 칩이 화면 밖이면 보이게 */
+  function fateRow(fchips) {
+    const row = el('div', { class: 'es-chiprow es-fchips', role: 'group', 'aria-label': '처리별 보기' }, fchips);
+    row.addEventListener('scroll', () => { mem.fchipX = row.scrollLeft; }, { passive: true });
+    requestAnimationFrame(() => {
+      if (!row.isConnected || row.scrollWidth <= row.clientWidth + 1) return;
+      row.scrollLeft = mem.fchipX || 0;
+      const on = row.querySelector('.es-fchip.is-on');
+      if (!on) return;
+      const rr = row.getBoundingClientRect(), cr = on.getBoundingClientRect();
+      if (cr.left < rr.left + 8 || cr.right > rr.right - 24) row.scrollLeft += cr.left - rr.left - 16;
+    });
+    return row;
   }
 
   function invToolbar() {
     const search = el('input', { class: 'input es-search', type: 'search', placeholder: '이름·메모·위치로 찾기', value: mem.q, 'aria-label': '짐 검색', 'data-fk': 'inv-search' });
     const deb = MV.debounce(() => refreshNamed(['invlist']), 160);
-    search.addEventListener('input', () => { mem.q = search.value; deb(); });
-    search.addEventListener('keydown', (e) => { if (e.key === 'Escape' && search.value) { e.preventDefault(); search.value = ''; mem.q = ''; refreshNamed(['invlist']); } });
+    search.addEventListener('input', () => { mem.q = search.value; filterTouched(); deb(); });
+    search.addEventListener('keydown', (e) => { if (e.key === 'Escape' && search.value) { e.preventDefault(); search.value = ''; mem.q = ''; filterTouched(); refreshNamed(['invlist']); } });
     const counts = {};
     invItems().forEach((it) => { counts[it.cat] = (counts[it.cat] || 0) + 1; });
     const cat = el('select', { class: 'select', 'aria-label': '분류', 'data-fk': 'inv-cat' },
       el('option', { value: '' }, '모든 분류'),
       MV.inv.CATS.map((c) => el('option', { value: c.id, selected: mem.cat === c.id }, c.icon + ' ' + c.label + (counts[c.id] ? ' (' + counts[c.id] + ')' : ''))));
-    cat.addEventListener('change', () => { mem.cat = cat.value; refreshNamed(['invsum', 'invlist']); });
+    cat.addEventListener('change', () => { mem.cat = cat.value; filterTouched(); refreshNamed(['invsum', 'invlist']); });
     const sort = el('select', { class: 'select', 'aria-label': '정렬', 'data-fk': 'inv-sort' },
       [['cat', '분류순'], ['room', '지금 방순'], ['vol', '부피 큰 순'], ['fate', '처리순'], ['name', '이름순']].map(([v, l]) => el('option', { value: v, selected: mem.sort === v }, '정렬: ' + l)));
-    sort.addEventListener('change', () => { mem.sort = sort.value; refreshNamed(['invlist']); });
+    sort.addEventListener('change', () => { mem.sort = sort.value; filterTouched(); refreshNamed(['invlist']); });
     if (R) { R.searchInput = search; R.catSelect = cat; }
+    /* '더보기': 붙여넣기·업체에 보낼 짐 목록·빠른 추가 칩 — 폰에서 첫 짐이 첫 화면에 들어오게 접어 둬요 (넓은 화면은 처음에 펼침, 고른 것은 기억) */
+    const moreOn = mem.moreOpen == null ? viewWidth() >= TABLE_MIN_VIEW : !!mem.moreOpen;
+    const more = el('div', { class: 'es-more', id: 'es-inv-more', hidden: !moreOn },
+      el('div', { class: 'es-actions' },
+        el('button', { type: 'button', class: 'btn', onclick: openPaste }, '📝 여러 개 붙여넣기'),
+        exportBtn()),
+      presetRow());
+    const moreBtn = el('button', { type: 'button', class: 'btn btn-ghost', 'aria-expanded': String(moreOn), 'aria-controls': 'es-inv-more', 'data-fk': 'inv-more',
+      title: '여러 개 붙여넣기 · 업체에 보낼 짐 목록 · 빠른 추가' }, moreOn ? '접기 ▴' : '더보기 ▾');
+    moreBtn.addEventListener('click', () => {
+      const on = more.hidden;
+      more.hidden = !on;
+      mem.moreOpen = on;
+      moreBtn.setAttribute('aria-expanded', String(on));
+      moreBtn.textContent = on ? '접기 ▴' : '더보기 ▾';
+      memSave();
+    });
     upd(() => {
       const cs = {};
       invItems().forEach((it) => { cs[it.cat] = (cs[it.cat] || 0) + 1; });
@@ -1837,13 +2078,15 @@
         if (o.textContent !== t) o.textContent = t;
       });
     });
-    return el('section', { class: 'card flat', 'aria-label': '짐 추가·찾기' },
-      el('div', { class: 'es-actions' },
-        el('button', { type: 'button', class: 'btn btn-primary', onclick: () => MV.inv.editor(null) }, '+ 짐 추가'),
-        el('button', { type: 'button', class: 'btn', onclick: openPaste }, '📝 여러 개 붙여넣기'),
-        el('button', { type: 'button', class: 'btn', onclick: openExport }, '📋 업체에 보낼 짐 목록')),
-      presetRow(),
+    const sec = el('section', { class: 'card flat', 'aria-label': '짐 추가·찾기' },
+      el('div', { class: 'es-addrow' },
+        el('button', { type: 'button', class: 'btn btn-primary', 'data-fk': 'inv-add', onclick: () => openEditor(null) }, '+ 짐 추가'),
+        moreBtn),
+      more,
       el('div', { class: 'es-toolbar mt-12' }, search, cat, sort));
+    // 짐이 하나도 없으면 빈 상태 카드(추가·붙여넣기)만 — 검색·분류·정렬은 숨겨요
+    upd(() => { sec.hidden = !invItems().length; }, sec);
+    return sec;
   }
   function presetRow() {
     const cat = MV.catalog || [];
@@ -1851,7 +2094,7 @@
     const wrap = el('div', { class: 'es-presetwrap mt-12' });
     const chip = (c, i) => el('button', {
       type: 'button', class: 'es-pchip', title: c.name + ' (' + c.w + '×' + c.d + '×' + c.h + 'cm) 규격으로 추가',
-      onclick: () => MV.inv.editor(null, { preset: i }),
+      onclick: () => openEditor(null, { preset: i }),
     }, MV.inv.cat(c.cat).icon + ' ' + c.name);
     const draw = () => {
       const toggle = cat.length > 10 ? el('button', { type: 'button', class: 'es-pchip es-pmore', 'aria-expanded': String(mem.presetsAll), onclick: () => { mem.presetsAll = !mem.presetsAll; draw(); } },
@@ -1881,17 +2124,46 @@
   const TABLE_MIN_VIEW = 1020;
   function viewWidth() { return (R && R.root && R.root.clientWidth) || document.documentElement.clientWidth || window.innerWidth || 1280; }
   const tableMode = () => viewWidth() >= TABLE_MIN_VIEW;
+  /* 처리(가져감·버림…) 바꾸기: 바로 저장하지 않고 잠시(0.45초) 모아 마지막 값만 저장해요 — 데스크톱에서 ↓ 로 지나가는 값마다
+     저장·활동 기록이 남지 않게. 칸을 떠나거나(blur) 화면을 떠날 때·창을 닫기 직전에는 바로 저장. 저장한 뒤 되돌리기 토스트 */
+  const fatePend = new Map(); // 짐 id → { v, t }
+  const FATE_WAIT = 450;
+  function fateFlush(id) {
+    const p = fatePend.get(id);
+    if (!p) return;
+    fatePend.delete(id);
+    clearTimeout(p.t);
+    const it = MV.inv.get(id);
+    if (!it) return;
+    const f = p.v;
+    const prev = it.fate;
+    if (f === fateId(it)) return;
+    // 버림·판매·새로 구매로 바꾸면 제조사 서비스가 옮길 일이 없으니 그 표시도 함께 꺼요
+    const dropLg = !!it.lg && (f === 'discard' || f === 'sell' || f === 'buy');
+    const name = nm(it);
+    const label = MV.inv.fate(f).label;
+    // 필터를 켠 채 바꿔서 빠지게 된 짐은 다음 조작 전까지 흐리게 남겨 둬요 (말없이 사라지지 않게)
+    if (filtersActive() && !invMatch(Object.assign({}, it, { fate: f }), curQ())) mem.keepIds.add(id);
+    MV.inv.update(id, dropLg ? { fate: f, lg: false } : { fate: f }, '짐 처리 변경: ' + name + ' → ' + label + (dropLg ? ' (제조사 서비스 표시 끔)' : ''));
+    const undo = dropLg ? { fate: prev, lg: true } : { fate: prev };
+    toast('‘' + clip(name, 20) + '’ 처리를 ' + josa(label, '으로/로') + ' 바꿨어요.' + (dropLg ? ' 제조사 서비스 표시도 껐어요.' : ''),
+      { action: { label: '되돌리기', onClick: () => MV.inv.update(id, undo, '짐 처리 되돌림: ' + name + ' → ' + MV.inv.fate(prev).label) } });
+  }
+  const fateFlushAll = () => { Array.from(fatePend.keys()).forEach((id) => { try { fateFlush(id); } catch (e) { console.error('[estimate]', e); } }); };
   function fateSelect(it) {
+    const pend = fatePend.get(it.id);
+    const cur = pend ? pend.v : fateId(it);
     const s = el('select', { class: 'select es-isel', 'aria-label': nm(it) + ' 처리', 'data-fk': 'fate-' + it.id },
-      MV.inv.FATES.map((f) => el('option', { value: f.id, selected: f.id === it.fate }, f.label)));
-    if (!FATE_IDS.has(it.fate)) s.value = 'undecided';
+      MV.inv.FATES.map((f) => el('option', { value: f.id, selected: f.id === cur }, f.label)));
+    s.value = cur;
     s.addEventListener('change', () => {
-      const f = s.value;
-      // 버림·판매·새로 구매로 바꾸면 제조사 서비스가 옮길 일이 없으니 그 표시도 함께 꺼요
-      const dropLg = !!it.lg && (f === 'discard' || f === 'sell' || f === 'buy');
-      MV.inv.update(it.id, dropLg ? { fate: f, lg: false } : { fate: f }, '짐 처리 변경: ' + nm(it) + ' → ' + MV.inv.fate(f).label + (dropLg ? ' (제조사 서비스 표시 끔)' : ''));
-      if (dropLg) toast('‘' + clip(nm(it), 20) + '’ — ' + josa(MV.inv.fate(f).label, '으로/로') + ' 바꿔 제조사 서비스 표시도 껐어요.');
+      const p = fatePend.get(it.id);
+      if (p) clearTimeout(p.t);
+      fatePend.set(it.id, { v: s.value, t: setTimeout(() => fateFlush(it.id), FATE_WAIT) });
     });
+    // 칸을 떠나면 바로 저장 — 다만 포커스가 다음 칸(수량 등)으로 옮겨 간 뒤에: 그래야 다시 그린 목록에서 그 칸에 포커스가 돌아가요
+    // (blur 안에서 바로 저장하면 포커스가 옮겨 가는 중에 목록을 다시 그려 포커스가 페이지 맨 앞으로 빠져요)
+    s.addEventListener('blur', () => { setTimeout(() => fateFlush(it.id), 0); });
     return s;
   }
   function qtyInput(it) {
@@ -1910,17 +2182,35 @@
     const u = safeUrl(it.url);
     return u ? el('a', { class: 'es-link', href: u, target: '_blank', rel: 'noopener noreferrer', title: u, 'aria-label': nm(it) + ' 제품 링크 열기' }, '🔗') : null;
   }
-  /* 모델명 칩 (적어 둔 짐만) — 누르면 규격 확인 목록 */
+  /* 모델명 칩 (적어 둔 짐만) — 누르면 규격 확인 목록 (표) */
   function modelChip(it) {
     const m = String((it && it.model) || '').trim();
     if (!m) return null;
     return el('a', { class: 'chip brand es-mchip', style: { textDecoration: 'none' }, href: '#/stuff/inventory/spec', title: '모델명 ' + m + ' — 눌러서 규격 확인 목록 보기' }, '모델 ' + clip(m, 18));
   }
-  const dimTxt = (it) => Math.round(num(it.w, 0)) + '×' + Math.round(num(it.d, 0)) + '×' + Math.round(num(it.h, 0));
-  const roomTxt = (it) => (it.room || '—') + ' → ' + (it.roomNew || '—');
-  function nameBtn(it) {
-    return el('button', { type: 'button', class: 'es-namebtn', 'data-fk': 'name-' + it.id, title: '눌러서 고치기', onclick: () => MV.inv.editor(it.id) }, nm(it) || '이름 없는 짐');
+  /* 카드: 모델명은 아래 정보 줄 안의 글자 링크로 (칩 한 줄을 따로 쓰지 않게) */
+  function modelLink(it) {
+    const m = String((it && it.model) || '').trim();
+    if (!m) return null;
+    return el('a', { class: 'es-mlink', href: '#/stuff/inventory/spec', title: '모델명 ' + m + ' — 눌러서 규격 확인 목록 보기' }, '모델 ' + clip(m, 18));
   }
+  const dimTxt = (it) => Math.round(num(it.w, 0)) + '×' + Math.round(num(it.d, 0)) + '×' + Math.round(num(it.h, 0));
+  /* 위치: '안방 → 새 집 작은방1' · 지금 방이 비면 '새 집 거실' · 버릴 짐처럼 새 집 자리가 없으면 '다용도실'만 (예전 '— → —') */
+  const roomTxt = (it) => {
+    const a = String(it.room || '').trim();
+    const b = String(it.roomNew || '').trim();
+    if (a && b) return a + ' → 새 집 ' + b;
+    if (b) return '새 집 ' + b;
+    if (a) return isTakeFate(it) ? a + ' → 새 집 미정' : a;
+    return '';
+  };
+  /* 카드·표 부피: 아주 작은 짐은 '0.0㎥' 대신 '0.1㎥ 미만' */
+  const m3s = (v) => (v > 0 && v < 0.05 ? '0.1㎥ 미만' : m3(v));
+  function nameBtn(it) {
+    const n = nm(it) || '이름 없는 짐';
+    return el('button', { type: 'button', class: 'es-namebtn', 'data-fk': 'name-' + it.id, title: n + ' — 눌러서 고치기', onclick: () => openEditor(it.id) }, el('span', { class: 'es-nametxt' }, n));
+  }
+  const outChip = () => el('span', { class: 'chip', title: '처리를 바꿔 지금 필터에서 빠지는 짐이에요. 필터를 다시 바꾸면 사라져요.' }, '필터에서 빠져요');
   function invList() {
     const all = invItems();
     if (!all.length) {
@@ -1928,17 +2218,21 @@
         el('span', { class: 'big', 'aria-hidden': 'true' }, '📦'),
         el('p', '아직 짐 목록이 비어 있어요. 큰 가구·가전부터 넣으면 이사비가 자동으로 계산돼요.'),
         el('div', { class: 'row', style: { justifyContent: 'center' } },
-          el('button', { type: 'button', class: 'btn btn-primary', onclick: () => MV.inv.editor(null) }, '+ 짐 추가'),
+          el('button', { type: 'button', class: 'btn btn-primary', onclick: () => openEditor(null) }, '+ 짐 추가'),
           el('button', { type: 'button', class: 'btn', onclick: openPaste }, '📝 여러 개 붙여넣기'))));
     }
     const list = invFiltered();
-    const info = el('div', { class: 'es-listinfo' },
-      el('span', filtersActive() ? list.length + '개 표시 (전체 ' + all.length + '개)' : '전체 ' + all.length + '개 · 이름을 누르면 고칠 수 있어요'),
+    const q = curQ();
+    const isOut = (it) => mem.keepIds.has(it.id) && !invMatch(it, q);
+    const shown = list.filter((it) => !isOut(it)).length;
+    const info = el('div', { class: 'es-listinfo', id: 'es-list' },
+      el('span', filtersActive() ? shown + '개 표시 (전체 ' + all.length + '개)' : '전체 ' + all.length + '개 · 이름을 누르면 고칠 수 있어요'),
       filtersActive() ? el('button', { type: 'button', class: 'btn btn-sm btn-ghost', onclick: clearFilters }, '✕ 필터 지우기') : null);
     if (!list.length) {
       return el('section', { class: 'card' }, info, el('div', { class: 'empty' }, el('span', { class: 'big', 'aria-hidden': 'true' }, '🔍'), '조건에 맞는 짐이 없어요.'));
     }
     const faded = (it) => it.fate !== 'move' && it.fate !== 'undecided';
+    const tone = (it) => MV.inv.fate(it.fate).cls || '';
     const inpL = inpNow();
     if (R) R.tableMode = tableMode();
     if (R ? R.tableMode : tableMode()) {
@@ -1947,55 +2241,129 @@
           el('th', { 'aria-label': '분류' }, ''), el('th', '이름 · 메모'), el('th', '처리'), el('th', { class: 'num' }, '수량'),
           el('th', { title: '가로×깊이×높이' }, '크기 (cm)'), el('th', { class: 'num' }, '부피'), el('th', '지금 → 새 집'),
           el('th', '옮기는 곳 · 링크'))),
-        el('tbody', list.map((it) => el('tr', { class: faded(it) ? 'is-faded' : '' },
+        el('tbody', list.map((it) => el('tr', { class: (faded(it) ? 'is-faded' : '') + (isOut(it) ? ' is-out' : ''), 'data-tone': tone(it) },
           el('td', { class: 'es-ico', title: MV.inv.cat(it.cat).label }, MV.inv.cat(it.cat).icon),
           el('td', { class: 'es-namecell' }, el('div', { class: 'es-namewrap' }, nameBtn(it),
             brandChip(it),
             it.assumed ? el('span', { class: 'chip warn', title: '규격을 아직 재지 않은 추정치' }, '추정치') : null,
             modelChip(it),
             isAircon(it) && it.ac ? el('span', { class: 'chip' }, AC_LABEL[it.ac] || it.ac) : null,
-            lgBlockedIt(it, inpL) ? lgFixChip(it) : null),
+            lgBlockedIt(it, inpL) ? lgFixChip(it) : null,
+            isOut(it) ? outChip() : null),
             it.note ? el('div', { class: 'es-memo', title: it.note }, clip(it.note, 80)) : null),
-          el('td', fateSelect(it)),
+          el('td', el('div', { class: 'es-fsel' }, el('span', { class: 'es-fdot', 'aria-hidden': 'true' }), fateSelect(it))),
           el('td', { class: 'num' }, qtyInput(it)),
           el('td', { class: 'es-dim', title: '가로×깊이×높이' }, dimTxt(it)),
-          el('td', { class: 'num' }, m3(rawVol(it))),
+          el('td', { class: 'num' }, m3s(rawVol(it))),
           el('td', { class: 'es-room', title: '지금 집: ' + (it.room || '—') + ' → 새 집: ' + (it.roomNew || '—') },
-            el('div', { class: 'es-roomwrap' }, el('span', it.room || '—'), el('span', '→ ' + (it.roomNew || '—')))),
+            el('div', { class: 'es-roomwrap' }, el('span', it.room || '—'), it.roomNew || isTakeFate(it) ? el('span', '→ ' + (it.roomNew || '—')) : null)),
           el('td', { class: 'es-lgcell' },
             whoChip(it, inpL),
             linkEl(it),
             !whoChip(it, inpL) && !safeUrl(it.url) ? el('span', { class: 'es-muted' }, '—') : null)))));
       return el('section', { class: 'card' }, info, el('div', { class: 'table-wrap' }, tbl));
     }
-    const cards = el('div', { class: 'es-cards' }, list.map((it) => el('article', { class: 'es-icard' + (faded(it) ? ' is-faded' : '') },
-      el('div', { class: 'es-ico', 'aria-hidden': 'true' }, MV.inv.cat(it.cat).icon),
-      el('div',
-        el('div', { class: 'es-icard-top' }, nameBtn(it),
-          brandChip(it),
-          it.assumed ? el('span', { class: 'chip warn' }, '추정치') : null,
-          modelChip(it),
-          whoChip(it, inpL),
-          lgBlockedIt(it, inpL) ? lgFixChip(it) : null),
-        el('div', { class: 'es-icard-ctl' }, fateSelect(it), el('label', { class: 'es-qtylab' }, '수량', qtyInput(it))),
-        el('div', { class: 'es-icard-meta' },
-          el('span', { class: 'es-dim' }, dimTxt(it) + 'cm'),
-          el('span', m3(rawVol(it))),
-          el('span', roomTxt(it)),
-          isAircon(it) && it.ac ? el('span', AC_LABEL[it.ac] || it.ac) : null,
-          linkEl(it)),
-        it.note ? el('div', { class: 'es-icard-meta', title: it.note }, clip(it.note, 90)) : null))));
+    /* 폰 카드: 이름 2줄까지 · '🚚 이삿짐센터'(기본값) 칩은 빼고 제조사 서비스일 때만 · 모델명·🔗·메모는 아래 한 줄 · 메모는 '메모 ▾'로 펼쳐요 */
+    const cards = el('div', { class: 'es-cards' }, list.map((it) => {
+      const out = isOut(it);
+      const note = String(it.note || '').trim();
+      const noteId = 'es-note-' + it.id;
+      const noteOn = !!note && mem.memoOpen.has(it.id);
+      const noteBox = note ? el('div', { class: 'es-icard-note', id: noteId, hidden: !noteOn }, note) : null;
+      let noteBtn = null;
+      if (note) {
+        noteBtn = el('button', { type: 'button', class: 'es-notebtn', 'aria-expanded': String(noteOn), 'aria-controls': noteId, 'data-fk': 'note-' + it.id, title: clip(note, 120) }, noteOn ? '메모 ▴' : '메모 ▾');
+        noteBtn.addEventListener('click', () => {
+          const on = noteBox.hidden;
+          noteBox.hidden = !on;
+          if (on) mem.memoOpen.add(it.id); else mem.memoOpen.delete(it.id);
+          noteBtn.setAttribute('aria-expanded', String(on));
+          noteBtn.textContent = on ? '메모 ▴' : '메모 ▾';
+        });
+      }
+      // 크기·부피·위치는 한 덩어리 글(줄바꿈은 글처럼), 제조사·모델명·🔗·메모 단추는 그 뒤에 이어서 (자리가 모자라면 다음 줄)
+      const metaTxt = [dimTxt(it) + 'cm', m3s(rawVol(it)), roomTxt(it), isAircon(it) && it.ac ? (AC_LABEL[it.ac] || it.ac) : ''].filter(Boolean).join(' · ');
+      return el('article', { class: 'es-icard' + (faded(it) ? ' is-faded' : '') + (out ? ' is-out' : ''), 'data-tone': tone(it) },
+        el('div', { class: 'es-ico', 'aria-hidden': 'true' }, MV.inv.cat(it.cat).icon),
+        el('div', { class: 'es-icard-main' },
+          el('div', { class: 'es-icard-top' }, nameBtn(it),
+            it.assumed ? el('span', { class: 'chip warn' }, '추정치') : null,
+            lgActive(it, inpL) ? whoChip(it, inpL) : null,
+            lgBlockedIt(it, inpL) ? lgFixChip(it) : null,
+            out ? outChip() : null),
+          el('div', { class: 'es-icard-ctl' }, el('span', { class: 'es-fdot', 'aria-hidden': 'true' }), fateSelect(it), el('label', { class: 'es-qtylab' }, '수량', qtyInput(it))),
+          el('div', { class: 'es-icard-meta' },
+            el('span', { class: 'es-metatxt' }, metaTxt),
+            brandChip(it),
+            modelLink(it),
+            linkEl(it),
+            noteBtn),
+          noteBox));
+    }));
     return el('section', { class: 'card' }, info, cards);
   }
+  /* 맨 아래 배너: 계약이 있으면 계약 금액이 큰 숫자(자금·머리말과 같은 돈), 모델 금액은 '짐이 늘면' 참고 한 줄 */
   function invBanner() {
     const est = R.est;
+    if (!invItems().length) return null;
+    const truckVol = '트럭에 싣는 부피 ' + m3(est.volume) + ' (박스·잡동사니 포함)';
+    const ct = est.contract;
+    if (ct) {
+      return el('section', { class: 'card tint-good es-banner', 'aria-label': '이사업체 계약' },
+        el('div',
+          el('div', { class: 'small strong' }, '이사업체 계약 (' + ct.company + ')'),
+          el('div', el('span', { class: 'es-bnum' }, won(ct.pay)), ' ', el('span', { class: 'es-vat' }, ct.noVat ? '부가세 없음' : ct.vatIncluded ? '부가세 포함' : '부가세 별도 + 부가세'),
+            ct.balance ? el('span', { class: 'small es-nowrap' }, ' · 잔금 ' + won(ct.balance) + (ct.balanceDate ? ' ' + D.fmt(ct.balanceDate) : '')) : null),
+          el('div', { class: 'small es-muted' }, '짐이 늘면 추가요금 참고: ', el('span', { class: 'es-nowrap' }, '모델 약 ' + won(est.pay.typical) + ' (부가세 포함)'), ' · ' + tonsLabel(est.tons) + ' · ' + est.crewLabel + ' · ' + truckVol)),
+        el('button', { type: 'button', class: 'btn', onclick: () => goTab('estimate') }, '이사 견적 자세히 →'));
+    }
     return el('section', { class: 'card tint-brand es-banner' },
       el('div',
         el('div', { class: 'small strong' }, '이 짐 목록으로 계산한 예상 이사비 (이삿짐센터)'),
         el('div', el('span', { class: 'es-bnum' }, '약 ' + won(est.pay.typical)), ' ', el('span', { class: 'es-vat' }, '부가세 포함'),
-          el('span', { class: 'small es-muted' }, ' · ' + won(est.pay.low) + '~' + won(est.pay.high))),
-        el('div', { class: 'small es-muted' }, '부가세 별도 약 ' + won(est.ex.typical) + ' · ' + tonsLabel(est.tons) + ' · ' + est.crewLabel + ' · 짐 ' + m3(est.volume))),
+          el('span', { class: 'small es-muted es-nowrap' }, ' · ' + won(est.pay.low) + '~' + won(est.pay.high))),
+        el('div', { class: 'small es-muted' }, '부가세 별도 약 ' + won(est.ex.typical) + ' · ' + tonsLabel(est.tons) + ' · ' + est.crewLabel + ' · ' + truckVol)),
       el('button', { type: 'button', class: 'btn btn-primary', onclick: () => goTab('estimate') }, '이사 견적 자세히 →'));
+  }
+  /* 짐 추가·수정 창 (core MV.inv.editor) + 저장 뒤 알림 — 추가면 '보기'로 그 카드로, 수정은 '저장했어요', 삭제는 알림만 (되돌리기 없음:
+     삭제가 도면 배치·지운 기본 짐 기록까지 바꿔서 되돌리려면 도면 기록을 다시 써야 해요) */
+  function openEditor(id, o) {
+    o = o || {};
+    const before = id && MV.inv.get(id) ? Object.assign({}, MV.inv.get(id)) : null; // 복사본: 저장하면 원래 객체가 바뀔 수 있어요
+    const name0 = before ? (nm(before) || '이름 없는 짐') : '';
+    return MV.inv.editor(id, Object.assign({}, o, {
+      onSave: (saved) => {
+        try { if (typeof o.onSave === 'function') o.onSave(saved); } catch (e) { console.error('[estimate]', e); }
+        if (saved === null) { toast(josa('‘' + clip(name0, 20) + '’', '을/를') + ' 짐 목록에서 지웠어요.'); return; }
+        if (!saved) return;
+        // 고쳐서 지금 필터에서 빠지게 된 짐은 처리 바꾸기처럼 다음 조작 전까지 흐리게 남겨 둬요 (저장하자마자 말없이 사라지지 않게)
+        if (id && before && filtersActive() && invMatch(before, curQ()) && !invMatch(saved, curQ())) {
+          mem.keepIds.add(saved.id);
+          refreshNamed(['invsum', 'invlist']);
+        }
+        const n = '‘' + clip(nm(saved) || '이름 없는 짐', 20) + '’';
+        if (id) toast(josa(n, '을/를') + ' 저장했어요.');
+        else toast(josa(n, '을/를') + ' 추가했어요.', { action: { label: '보기', onClick: () => showItem(saved.id) } });
+      },
+    }));
+  }
+  /* 짐 카드(표 줄)로 스크롤해 잠깐 강조 — 필터에 가려졌으면 필터를 지우고, 다른 화면이면 짐 목록으로 가서 */
+  function showItem(id) {
+    if (!R || R.tab !== 'inventory' || R.sub) { mem.showAfter = id; MV.go('#/stuff/inventory'); return; }
+    if (R.pending) refreshAll();
+    const sel = '[data-fk="name-' + (window.CSS && CSS.escape ? CSS.escape(id) : id) + '"]';
+    let b = R.root.querySelector(sel);
+    if (!b && filtersActive()) { clearFilters(); b = R.root.querySelector(sel); }
+    if (!b) return;
+    const box = b.closest('.es-icard, tr') || b;
+    let smooth = true;
+    try { smooth = !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); } catch (e) { /* 무시 */ }
+    try { box.scrollIntoView({ block: 'center', behavior: smooth ? 'smooth' : 'auto' }); } catch (e) { box.scrollIntoView(); }
+    box.classList.remove('es-flash');
+    void box.offsetWidth;
+    box.classList.add('es-flash');
+    setTimeout(() => box.classList.remove('es-flash'), 1700);
+    try { b.focus({ preventScroll: true }); } catch (e) { /* 무시 */ }
   }
   /* ======================= 1-b) 규격 확인 (#/stuff/inventory/spec) =======================
      추정 규격으로 넣어 둔 '가져감·미정' 짐을 지금 집 방별로 모아, 모델명을 적고(바로 저장) 상태를 봐요.
@@ -2028,7 +2396,8 @@
   function specBar() {
     if (!specOk()) return null;
     const c = specCounts();
-    if (!c.total) return null;
+    // 다 확정했으면 이 줄은 빼고 요약 줄에 '✅ 규격 확인 끝 n/n' 링크만 (첫 짐이 위로 올라오게)
+    if (!c.total || c.done === c.total) return null;
     return el('section', { class: 'card flat es-spbar', 'aria-label': '규격 확인 요약' },
       el('div', { class: 'es-spbar-t' },
         el('span', { class: 'es-spbar-ico', 'aria-hidden': 'true' }, '📸'),
@@ -2120,7 +2489,7 @@
           it.assumed ? el('span', { class: 'chip warn', title: '아직 재지 않은 예시 크기' }, '추정') : null)),
       el('div', { class: 'es-sp-ctl' },
         el('label', { class: 'es-sp-lab' }, el('span', '모델명'), modelInput(it)),
-        el('button', { type: 'button', class: 'btn btn-sm es-sp-fix', 'data-fk': 'spfix-' + it.id, onclick: () => MV.inv.editor(it.id) }, '✎ 크기 고치기')),
+        el('button', { type: 'button', class: 'btn btn-sm es-sp-fix', 'data-fk': 'spfix-' + it.id, onclick: () => openEditor(it.id) }, '✎ 크기 고치기')),
       MV.inv.specLinks(modelTxt(it), 'es-sp-links'));
   }
   function specHead() {
@@ -2138,7 +2507,7 @@
         el('span', { class: 'chip warn' }, '📸 확인 필요 ' + c.need)),
       el('p', { class: 'small mb-0 es-muted' }, '크기를 추정으로 넣어 둔 가져갈 짐(미정 포함)이에요. 모델명을 적으면 바로 저장되고 검색 링크가 생겨요. ',
         '사진이나 모델명을 클로드에게 보내면 규격을 찾아 넣어 드려요. 크기를 고치면 \'확정\'이 돼요.'),
-      el('p', { class: 'small mb-0 es-muted' }, '버릴 짐·팔 짐은 뺐어요. ' + (c.buy ? '살 짐 ' + c.buy + '개는 ' : '') + '살 물건은 살 때 정해요.'));
+      el('p', { class: 'small mb-0 es-muted' }, '버릴 짐·팔 짐은 뺐어요. ' + (c.buy ? '살 짐 ' + c.buy + '개는 살 때 정해요.' : '살 물건은 살 때 정해요.')));
   }
   function specHelp() {
     const rows = [
@@ -2178,53 +2547,6 @@
     });
   }
   function renderSpec(body, ctx) {
-    MV.css('es-spec', `
-.es-spbar { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; padding: 10px 14px; margin-bottom: 12px; }
-.es-spbar-t { display: flex; align-items: center; gap: 6px 8px; flex-wrap: wrap; min-width: 0; font-size: .92rem; }
-.es-spbar-bar { width: 90px; flex: 0 0 auto; }
-.es-spbar-btn { flex: 0 0 auto; }
-.es-sp-head .es-sp-top { display: flex; align-items: center; gap: 6px 10px; flex-wrap: wrap; margin-bottom: 8px; }
-.es-sp-h { margin: 0; }
-.es-sp-prog { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 10px; margin: 4px 0 10px; }
-.es-sp-head p { margin-top: 8px; }
-.es-sp-help { border-bottom: 1px solid var(--line); padding-bottom: 6px; }
-.es-sp-help > summary { cursor: pointer; font-weight: 800; min-height: 40px; display: flex; align-items: center; list-style: none; }
-.es-sp-help > summary::-webkit-details-marker { display: none; }
-.es-sp-help > summary::after { content: '▾'; margin-left: 6px; color: var(--ink-3); }
-.es-sp-help[open] > summary::after { content: '▴'; }
-.es-sp-dl { display: grid; grid-template-columns: minmax(110px, 200px) 1fr; gap: 6px 12px; margin: 8px 0; font-size: .9rem; }
-.es-sp-dl dt { font-weight: 800; }
-.es-sp-dl dd { margin: 0; color: var(--ink-2); }
-.es-sp-copy { display: flex; flex-direction: column; gap: 8px; }
-.es-sp-copybtn { align-self: flex-start; max-width: 100%; white-space: normal; text-align: left; }
-.es-sp-more > summary { cursor: pointer; font-size: .85rem; color: var(--ink-2); font-weight: 700; min-height: 32px; display: inline-flex; align-items: center; }
-.es-sp-ta { min-height: 180px; font-size: .85rem; margin-top: 6px; }
-.es-sp-room { padding-top: 10px; }
-.es-sp-rh { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 0 0 6px; font-size: 1.02rem; }
-.es-sp-rn { font-size: .8rem; color: var(--ink-3); font-weight: 700; }
-.es-sp-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 10px 0; border-top: 1px solid var(--line); }
-.es-sp-row:first-of-type { border-top: 0; }
-.es-sp-row[data-st="done"] .es-sp-name b { color: var(--ink-2); }
-.es-sp-name { display: flex; align-items: center; gap: 4px 8px; flex-wrap: wrap; min-width: 0; overflow-wrap: anywhere; }
-.es-sp-ico { flex: 0 0 auto; }
-.es-sp-qty { font-size: .82rem; color: var(--ink-3); font-weight: 700; }
-.es-sp-meta { display: flex; align-items: center; gap: 4px 8px; flex-wrap: wrap; margin-top: 4px; font-size: .85rem; color: var(--ink-2); }
-.es-sp-dim { font-variant-numeric: tabular-nums; }
-.es-sp-ctl { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 8px; min-width: 0; }
-.es-sp-lab { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.es-sp-lab > span { font-size: .75rem; font-weight: 700; color: var(--ink-3); }
-.es-sp-fix { white-space: nowrap; }
-.es-sp-links { grid-column: 1 / -1; }
-@media (min-width: 760px) {
-  .es-sp-row { grid-template-columns: minmax(0, 1fr) minmax(280px, 380px); align-items: center; column-gap: 16px; }
-}
-@media (pointer: coarse) {
-  .es-body .es-spbar-btn, .es-body .es-sp-fix, .es-body .es-sp-back, .es-body .es-sp-copybtn { min-height: 44px; }
-  .es-sp-in { min-height: 44px; }
-  .es-sp-help > summary, .es-sp-more > summary { min-height: 44px; }
-}
-@media (max-width: 400px) { .es-spbar-bar { width: 64px; } .es-sp-dl { grid-template-columns: 1fr; gap: 2px; } .es-sp-dl dd { margin-bottom: 6px; } }
-`);
     if (!specOk()) { body.appendChild(errCard('규격 확인 목록을 열 수 없어요', null, false)); return; }
     body.appendChild(region(specHead, 'sphead'));
     body.appendChild(specCopyCard());
@@ -2234,6 +2556,14 @@
     if (ctx && ctx.onCleanup) ctx.onCleanup(() => { off(); Array.from(specPending.values()).forEach((fn) => { try { fn(); } catch (e) { /* 무시 */ } }); specPending.clear(); });
   }
   function renderInventory(body) {
+    // 기억해 둔 '⚠ 추정 크기' 필터가 이제 맞는 짐이 없으면(모두 실측으로 고침) 꺼요 — 들어올 때마다 빈 목록만 보이지 않게
+    if (mem.onlyAssumed && !invItems(assumedTake).length) { mem.onlyAssumed = false; memSave(); }
+    // 키보드: 탭 줄 다음 Tab 한 번에 첫 짐으로 (포커스될 때만 보여요). 주소(#/…)는 바꾸지 않아요
+    body.appendChild(el('a', { class: 'es-skip', href: '#/stuff/inventory', onclick: (e) => {
+      e.preventDefault();
+      const b = R && R.root.querySelector('[data-region="invlist"] .es-namebtn');
+      if (b) { try { b.focus(); } catch (er) { /* 무시 */ } }
+    } }, '짐 목록으로 건너뛰기'));
     body.appendChild(region(specBar, 'specbar'));
     body.appendChild(region(invSummary, 'invsum'));
     body.appendChild(invToolbar());
@@ -2723,8 +3053,10 @@
     return quotesOf(estSt()).map((q) => normQuote(q, raw)).filter(Boolean).map((n) => (basis === 'inc' ? n.inc : n.amount));
   }
   /* 보정 비율은 부가세 별도 금액끼리 나눠요 (견적 중앙값 ÷ 모델 기준가) — ‘부가세 포함으로 보기’를 켜고 꺼도 같은 값 */
+  /* 계약한 견적은 보정·‘같은 조건 환산’ 비교 대상에서 빼요 — 낼 돈은 계약 금액 그대로라, 모델을 계약에 맞추면 오히려 헷갈려요 */
+  const calibQuotes = (est) => quotesOf(est).filter((q) => !q.contracted);
   function calibTarget(raw, est) {
-    const nq = quotesOf(est).map((q) => normQuote(q, raw)).filter(Boolean);
+    const nq = calibQuotes(est).map((q) => normQuote(q, raw)).filter(Boolean);
     const medEx = median(nq.map((n) => n.ex));
     const med = median(nq.map((n) => n.amount));
     return { nq, ns: nq.map((n) => n.amount), med, medEx, f: medEx && raw.subtotalEx ? medEx / raw.subtotalEx : null };
@@ -2732,13 +3064,13 @@
   /* 보정에 쓴 견적의 ‘서명’ — 견적 자체(금액·부가세·포함 항목)가 바뀌었는지만 봐요.
      짐·조건이 바뀌면 같은 견적이라도 ‘같은 조건 환산’ 금액이 달라지므로, 그걸로 ‘견적이 바뀌었다’고 하면 안 돼요 */
   function quoteSig(est) {
-    return quotesOf(est).filter((q) => num(q.amount, 0) > 0)
+    return calibQuotes(est).filter((q) => num(q.amount, 0) > 0)
       .map((q) => [q.id, Math.round(num(q.amount, 0)), q.noVat ? 2 : q.vatIncluded === false ? 0 : 1, q.ladder ? 1 : 0, q.aircon ? 1 : 0, q.waste ? 1 : 0, q.arrange ? 1 : 0].join(':'))
       .sort().join('|');
   }
   /* 업체 견적에 ‘포함’ 체크가 안 돼 모델 금액을 더한 항목 (보정 비율이 크게 흔들리는 원인) */
   function missingAdds(raw, est) {
-    const qs = quotesOf(est).filter((q) => num(q.amount, 0) > 0);
+    const qs = calibQuotes(est).filter((q) => num(q.amount, 0) > 0);
     const pe = raw.partsEx || {};
     const vm = raw.vatIncl ? raw.vatMul : 1;
     return [['ladder', '사다리차'], ['aircon', '에어컨 이전'], ['waste', '폐기물'], ['arrange', '정리 인력']]
@@ -2752,8 +3084,11 @@
     return el('p', { class: 'small es-calib-miss' }, '⚠ ' + ms.map((m) => '견적 ' + m.n + '곳에 ‘' + m.label + '’ 포함이 체크되지 않아 모델 금액 약 ' + won(m.v) + '을 더해 비교했어요').join(' · ') +
       '. 견적에 들어 있다면 ‘업체 견적 비교’에서 체크하세요 — 보정 비율이 크게 달라져요.');
   }
-  function calibBox(compact) {
+  /* quiet: 계약 뒤 히어로의 접힌 '모델 계산 보기' 안 — 단추를 모두 보조 단추로 (할 일처럼 보이지 않게) */
+  function calibBox(compact, quiet) {
     const raw = rawEst();
+    const pri = quiet ? '' : ' btn-primary';
+    const hasContract = !!(R && R.est && R.est.contract);
     const est0 = estSt();
     const t = calibTarget(raw, est0);
     const ns = t.ns;
@@ -2780,10 +3115,12 @@
           '는 그대로 따라가요. 업체가 바뀐 짐으로 견적을 다시 주면 그 금액을 고친 뒤 다시 맞추세요.'));
       }
       box.appendChild(el('div', { class: 'row' },
-        quotesChanged && f ? el('button', { type: 'button', class: 'btn btn-sm btn-primary', onclick: applyCalibration }, '견적이 바뀌었어요 — 다시 맞추기 (×' + MV.clamp(f, 0.5, 2).toFixed(2) + ')') : null,
-        el('button', { type: 'button', class: 'btn btn-sm' + (!ns.length ? ' btn-primary' : ''), onclick: clearCalibration }, '보정 해제')));
+        quotesChanged && f ? el('button', { type: 'button', class: 'btn btn-sm' + pri, onclick: applyCalibration }, '견적이 바뀌었어요 — 다시 맞추기 (×' + MV.clamp(f, 0.5, 2).toFixed(2) + ')') : null,
+        el('button', { type: 'button', class: 'btn btn-sm' + (!ns.length ? pri : ''), onclick: clearCalibration }, '보정 해제')));
     } else if (!ns.length) {
-      box.appendChild(el('p', '방문견적을 1곳 이상 ‘업체 견적 비교’에 넣으면, 모델의 기준가를 실제 견적 중앙값에 맞출 수 있어요. 언제든 해제할 수 있어요.'));
+      box.appendChild(el('p', hasContract
+        ? '계약한 견적은 보정에 쓰지 않아요 — 낼 돈은 계약 금액 그대로예요. 다른 업체 견적을 넣으면 그 중앙값에 모델을 맞출 수 있어요.'
+        : '방문견적을 1곳 이상 ‘업체 견적 비교’에 넣으면, 모델의 기준가를 실제 견적 중앙값에 맞출 수 있어요. 언제든 해제할 수 있어요.'));
       if (compact) box.appendChild(el('div', { class: 'row' }, el('button', { type: 'button', class: 'btn btn-sm', onclick: () => goTab('quotes') }, '업체 견적 넣으러 가기 →')));
     } else {
       const diff = f - 1;
@@ -2792,7 +3129,7 @@
       const mn2 = missingNote(raw, est0);
       if (mn2) box.appendChild(mn2);
       if (f < 0.5 || f > 2) box.appendChild(el('p', { class: 'small', style: { color: 'var(--bad)' } }, '차이가 너무 커요(×' + f.toFixed(2) + '). 금액·포함 항목을 다시 확인하세요. 보정은 ×0.5~×2 사이로만 해요.'));
-      box.appendChild(el('div', { class: 'row' }, el('button', { type: 'button', class: 'btn btn-sm btn-primary', onclick: applyCalibration }, '모델을 견적에 맞추기 (×' + MV.clamp(f, 0.5, 2).toFixed(2) + ')')));
+      box.appendChild(el('div', { class: 'row' }, el('button', { type: 'button', class: 'btn btn-sm' + pri, onclick: applyCalibration }, '모델을 견적에 맞추기 (×' + MV.clamp(f, 0.5, 2).toFixed(2) + ')')));
     }
     return box;
   }
@@ -2823,29 +3160,63 @@
       el('div', { class: 'es-contract-sub' }, '계약금 ' + won(ct.deposit) + (ct.depositPaid ? ' 냄' : ' (아직 안 냄)') + ' · 잔금 ' + won(ct.balance) + (ct.balanceDate ? ' — ' + D.fmt(ct.balanceDate) + ' 이사 당일' : '')),
       compact ? null : el('p', { class: 'small es-muted' }, '모델 금액은 같은 조건으로 계산한 참고용 추정이에요. 자금 화면은 계약 금액으로 계산해요. 에어컨 설치는 따로 부른 기사(자금 화면 ‘에어컨 설치’ 줄)예요.'));
   }
+  function heroFacts(est) {
+    const acInc = est.counts.acN > 0;
+    const mkAcN = invItems((it) => isAircon(it) && lgActive(it, est.inputs)).length;
+    return el('div', { class: 'es-facts' },
+      el('span', { class: 'chip', title: '트럭에 싣는 부피: 가구·가전(모양·틈 보정) + 이삿짐 박스 + 목록 밖 잡동사니' }, '📦 트럭에 싣는 부피 ' + m3(est.volume) + ' (박스 포함)'),
+      el('span', { class: 'chip brand' }, '🚚 ' + est.truckLabel),
+      el('span', { class: 'chip' }, '👷 ' + est.crewLabel),
+      el('span', { class: 'chip' + (est.surchargePct ? ' warn' : ' good') }, '📅 ' + est.dateLabel + (est.surchargePct ? ' +' + r1(est.surchargePct) + '%' : ' 할증 없음')),
+      el('span', { class: 'chip' }, '❄️ 에어컨 ' + (acInc ? '포함 (' + est.counts.acN + '대)' : mkAcN ? '제외 (제조사 서비스)' : '제외')));
+  }
   function heroCard() {
     const est = R.est;
     const qp = quotePoints('inc');
     const lg = est.lgCost;
-    const acInc = est.counts.acN > 0;
-    const mkAcN = invItems((it) => isAircon(it) && lgActive(it, est.inputs)).length;
     const pay = est.pay;
+    const ct = est.contract;
+    if (ct) {
+      /* 계약 뒤: 가장 큰 숫자는 계약 금액(실제로 낼 돈 — 자금 화면과 같은 돈). 모델 금액은 '짐이 늘면' 참고 한 줄 + 접힌 '모델 계산 보기' */
+      const cal = calibOf(estSt());
+      const calApplied = Math.abs(cal.factor - 1) > 1e-6;
+      const showCalib = calApplied || calibTarget(rawEst(), estSt()).ns.length > 0;
+      const modelD = el('details', { class: 'es-model-d', open: !!mem.modelOpen },
+        el('summary', '🧮 모델 계산 보기'),
+        el('div', { class: 'es-model-in' },
+          el('div', { class: 'es-rangetxt' }, '모델 범위 ' + won(pay.low) + ' ~ ' + won(pay.high) + ' (부가세 포함)'),
+          el('div', { class: 'es-exline' }, '부가세 별도 약 ' + won(est.ex.typical) + ' (' + won(est.ex.low) + ' ~ ' + won(est.ex.high) + ')'),
+          rangeBar(pay, qp),
+          heroFacts(est),
+          disclaimer(true),
+          showCalib ? calibBox(true, true) : null));
+      modelD.addEventListener('toggle', () => { mem.modelOpen = modelD.open; });
+      return el('section', { class: 'card es-hero es-hero-ct', 'aria-label': '이사업체 계약과 예상 이사비' },
+        el('div', { class: 'es-hero-grid' },
+          el('div',
+            el('div', { class: 'es-eyebrow' }, '이사업체 계약 · 실제로 낼 돈'),
+            el('div', { class: 'es-big', title: F.won(ct.pay) }, won(ct.pay), el('small', ct.noVat ? '부가세 없음' : ct.vatIncluded ? '부가세 포함' : '부가세 별도 + 부가세')),
+            el('div', { class: 'es-ct-line' }, el('span', { class: 'chip good' }, '✅ 계약 확정'), el('b', ct.company),
+              ct.contractDate ? el('span', { class: 'small es-muted' }, D.fmt(ct.contractDate) + ' 계약') : null),
+            el('div', { class: 'es-contract-sub mt-8' }, '계약금 ' + won(ct.deposit) + (ct.depositPaid ? ' 냄' : ' (아직 안 냄)') + ' · 잔금 ' + won(ct.balance) + (ct.balanceDate ? ' — ' + D.fmt(ct.balanceDate) + ' 이사 당일' : '')),
+            el('p', { class: 'small es-muted mt-8 mb-0' }, '자금 화면도 이 계약 금액으로 계산해요. 에어컨 설치는 따로 부른 기사예요 (자금 화면 ‘에어컨 설치’ 줄).')),
+          el('div', { class: 'es-hero-side' },
+            lgBlockedCallout(est),
+            lg && lg.typical > 0 ? el('div', { class: 'es-lgsum' }, '🔧 ' + (lg.label || '제조사 서비스') + '로 옮기는 가전 ' + lg.count + '대 별도 ', el('b', '약 ' + won(lg.typical)),
+              el('span', '(' + won(lg.low) + '~' + won(lg.high) + ') → 계약 ' + josa(won(ct.pay), '과/와') + ' 합치면 약 ' + won(ct.pay + lg.typical))) : null,
+            el('p', { class: 'es-ref' }, '짐이 늘면 추가요금 참고: 모델 약 ', el('b', won(pay.typical)), ' (부가세 포함 · ' + est.truckLabel + ' · ' + est.crewLabel + ')'),
+            modelD)));
+    }
     return el('section', { class: 'card es-hero', 'aria-label': '예상 이사비' },
       el('div', { class: 'es-hero-grid' },
         el('div',
-          el('div', { class: 'es-eyebrow' }, (est.contract ? '모델 추정 (참고) · 이삿짐센터' : '이삿짐센터 예상 비용 · 추정치') + (est.calibFactor !== 1 ? ' (방문견적 보정)' : '')),
+          el('div', { class: 'es-eyebrow' }, '이삿짐센터 예상 비용 · 추정치' + (est.calibFactor !== 1 ? ' (방문견적 보정)' : '')),
           el('div', { class: 'es-big', title: F.won(pay.typical) + ' (부가세 포함)' }, '약 ' + won(pay.typical), el('small', '부가세 포함')),
           el('div', { class: 'es-rangetxt' }, '범위 ' + won(pay.low) + ' ~ ' + won(pay.high)),
           el('div', { class: 'es-exline' }, '부가세 별도 약 ' + won(est.ex.typical) + ' (' + won(est.ex.low) + ' ~ ' + won(est.ex.high) + ') — 업체 견적이 ‘부가세 별도’면 이 숫자와 비교하세요'),
           rangeBar(pay, qp),
-          el('div', { class: 'es-facts' },
-            el('span', { class: 'chip' }, '📦 짐 ' + m3(est.volume)),
-            el('span', { class: 'chip brand' }, '🚚 ' + est.truckLabel),
-            el('span', { class: 'chip' }, '👷 ' + est.crewLabel),
-            el('span', { class: 'chip' + (est.surchargePct ? ' warn' : ' good') }, '📅 ' + est.dateLabel + (est.surchargePct ? ' +' + r1(est.surchargePct) + '%' : ' 할증 없음')),
-            el('span', { class: 'chip' }, '❄️ 에어컨 ' + (acInc ? '포함 (' + est.counts.acN + '대)' : mkAcN ? '제외 (제조사 서비스)' : '제외')))),
+          heroFacts(est)),
         el('div', { class: 'es-hero-side' },
-          contractBox(est.contract),
           lgBlockedCallout(est),
           lg && lg.typical > 0 ? el('div', { class: 'es-lgsum' }, '🔧 ' + (lg.label || '제조사 서비스') + '로 옮기는 가전 ' + lg.count + '대 별도 ', el('b', '약 ' + won(lg.typical)),
             el('span', '(' + won(lg.low) + '~' + won(lg.high) + ') → 이사 전체 약 ' + won(est.totalPay.typical) + ' (부가세 포함 — 이삿짐센터 ' + won(est.pay.typical) + ' + ' + (lg.label || '제조사 서비스') + ')')) : null,
@@ -3094,6 +3465,8 @@
 
   /* ---------- 금액 표 ---------- */
   const GROUP_TITLE = { base: '기본 운반·포장', lift: '사다리차·엘리베이터', special: '특수 작업', extra: '기타', tax: '세금', calib: '보정' };
+  /* 폰에서 금액 아래 범위 '40.8만원~60만원' — '~' 뒤에서만 줄을 바꿀 수 있게 (만원 사이에서는 안 끊겨요) */
+  const rngSpan = (lo, hi) => el('span', { class: 'es-l-rng' }, won(lo) + '~', document.createElement('wbr'), won(hi));
   function linesCard() {
     const est = R.est;
     const rows = [];
@@ -3103,7 +3476,7 @@
       rows.push(el('tr', { class: l.typical === 0 ? 'is-zero' : '' },
         el('td', { class: 'es-l-label' }, l.label, l.detail ? el('span', { class: 'es-l-detail' }, l.detail) : null),
         el('td', { class: 'num es-l-lohi' }, won(l.low)),
-        el('td', { class: 'num es-l-typ' }, (l.typical < 0 ? '−' + won(-l.typical) : won(l.typical)), el('span', { class: 'es-l-rng' }, won(l.low) + '~' + won(l.high))),
+        el('td', { class: 'num es-l-typ' }, (l.typical < 0 ? '−' + won(-l.typical) : won(l.typical)), rngSpan(l.low, l.high)),
         el('td', { class: 'num es-l-lohi' }, won(l.high))));
     });
     return el('section', { class: 'card es-linescard', 'aria-label': '금액 내역' },
@@ -3113,12 +3486,12 @@
         el('tbody', rows),
         el('tfoot',
           el('tr', el('td', '합계 ', el('span', { class: 'es-vat' }, basisLabel(est.vatIncl))), el('td', { class: 'num es-l-lohi' }, won(est.low)),
-            el('td', { class: 'num es-l-typ' }, won(est.typical), el('span', { class: 'es-l-rng' }, won(est.low) + '~' + won(est.high))),
+            el('td', { class: 'num es-l-typ' }, won(est.typical), rngSpan(est.low, est.high)),
             el('td', { class: 'num es-l-lohi' }, won(est.high))),
           // 부가세 별도로 보는 중이면 실제로 낼 돈(부가세 포함)을 한 줄 더 — 머리말·히어로·자금 화면과 같은 숫자.
           // 계약한 업체가 있으면 실제로 낼 돈은 계약 금액이라 이 줄은 '모델 추정(참고)'
           est.vatIncl ? null : el('tr', { class: 'es-l-pay' }, el('td', est.contract ? '모델 추정 ' : '실제로 낼 돈 ', el('span', { class: 'es-vat' }, '부가세 ' + fmtDec(est.coef.vat_pct) + '% 포함' + (est.contract ? ' · 참고' : ''))), el('td', { class: 'num es-l-lohi' }, won(est.pay.low)),
-            el('td', { class: 'num es-l-typ' }, won(est.pay.typical), el('span', { class: 'es-l-rng' }, won(est.pay.low) + '~' + won(est.pay.high))),
+            el('td', { class: 'num es-l-typ' }, won(est.pay.typical), rngSpan(est.pay.low, est.pay.high)),
             el('td', { class: 'num es-l-lohi' }, won(est.pay.high)))))),
       est.lgCost && est.lgCost.typical > 0 ? el('p', { class: 'small es-muted mt-8 mb-0' }, '🔧 ' + (est.lgCost.label || '제조사 서비스') + '로 옮길 가전 ' + est.lgCost.count + '대(약 ' + won(est.lgCost.typical) + ', 부가세 포함 소비자가)는 위 금액에 없어요 — 제조사에 따로 내요. 둘을 더한 이사 전체는 부가세 포함 약 ' + won(est.totalPay.typical) + '이에요.') : null);
   }
@@ -3242,11 +3615,25 @@
     card.appendChild(inner);
     return card;
   }
+  /* 계약 뒤 '이사 조건' 카드는 기본으로 접어요 (모델 계산용 입력이라 할 일이 아니에요) — 펼친 내용·입력은 그대로 */
+  function foldInputs(card) {
+    const inner = el('div', { class: 'es-coef-inner', id: 'es-inputs-inner', hidden: !mem.inputsOpen });
+    while (card.firstChild) inner.appendChild(card.firstChild);
+    const toggle = el('button', { type: 'button', class: 'es-coef-toggle', 'aria-expanded': String(!!mem.inputsOpen), 'aria-controls': 'es-inputs-inner', 'data-fk': 'inputs-toggle' },
+      el('span', { 'aria-hidden': 'true' }, '✏️'), el('h2', '이사 조건'), el('span', { class: 'chip' }, '모델 계산용 · 계약 뒤엔 참고'), el('span', { class: 'es-chev', 'aria-hidden': 'true' }, '▾'));
+    toggle.addEventListener('click', () => {
+      mem.inputsOpen = !mem.inputsOpen;
+      toggle.setAttribute('aria-expanded', String(mem.inputsOpen));
+      inner.hidden = !mem.inputsOpen;
+    });
+    card.append(toggle, inner);
+    return card;
+  }
   function renderEstimate(body) {
     body.appendChild(region(heroCard, 'hero'));
     const grid = el('div', { class: 'es-est-grid' });
     const left = el('div', { class: 'es-est-col' });
-    left.appendChild(inputsCard());
+    left.appendChild(R.est && R.est.contract ? foldInputs(inputsCard()) : inputsCard());
     const right = el('div', { class: 'es-est-col' });
     right.appendChild(region(linesCard, 'lines'));
     right.appendChild(region(whyCard, 'why'));
@@ -3299,6 +3686,33 @@
     const ns = quotesOf(estSt()).map((x) => normQuote(x, raw)).filter(Boolean).map((x) => x.amount);
     return ns.length >= 3 ? median(ns) : null;
   }
+  /* 체크리스트와 맞추기 (E3): 계약 견적인데 체크리스트에서 이미 끝낸 확인이 견적 표시에는 꺼져 있으면, 경고 대신 한 줄 + 단추.
+     가족이 누를 때만 표시를 바꾸고 되돌리기를 줘요 (자동으로 켜지 않아요 — move/estimate 기록이라 두 기기가 합쳐요) */
+  const CK_SYNC = [
+    { item: 'mover-05', keys: ['licenseChecked', 'insuranceChecked'], what: '허가증·보험 확인함',
+      say: (t) => '체크리스트에서 ' + josa('‘' + t + '’', '을/를') + ' 끝냈어요. 여기에도 허가증·적재물배상보험 확인함으로 표시할까요?' },
+    { item: 'mover-13', keys: ['ladder'], what: '사다리차 포함',
+      say: (t, v) => '체크리스트에서 ' + josa('‘' + t + '’', '을/를') + ' 끝냈어요. 사다리차가 계약 금액에 들어 있으면 표시하세요' + (v > 0 ? ' — 비교에 더한 모델 사다리차 약 ' + josa(won(v), '이/가') + ' 빠져요.' : '.') },
+  ];
+  const ckTitle = (it) => String((it && it.title) || '').replace(/^\s*\[[^\]]*\]\s*/, '').replace(/\s*\([^)]*\)\s*$/, '').trim();
+  function checklistSync(q) {
+    if (!q || !q.contracted || !MV.items || typeof MV.items.get !== 'function') return [];
+    return CK_SYNC.map((c) => {
+      const it = MV.items.get(c.item);
+      if (!it || !it.done || c.keys.every((k) => q[k])) return null;
+      return Object.assign({ title: ckTitle(it) || c.what }, c);
+    }).filter(Boolean);
+  }
+  function markChecked(id, keys, what) {
+    const q = getQuote(id);
+    if (!q) return;
+    const prev = {};
+    const patch = {};
+    keys.forEach((k) => { prev[k] = !!q[k]; patch[k] = true; });
+    const co = clip(q.company || '이름 없는 업체', 40);
+    updQuote(id, patch, '이사업체 견적 표시: ' + co + ' — ' + what + ' (체크리스트와 맞춤)');
+    toast(josa(what, '으로/로') + ' 표시했어요.', { action: { label: '되돌리기', onClick: () => updQuote(id, prev, '이사업체 견적 표시 되돌림: ' + co + ' — ' + what) } });
+  }
   function quoteEval(q, est, raw, peerMed) {
     const n = normQuote(q, raw);
     const out = { n, badges: [], warns: [], tooCheap: false, tooHigh: false, diff: null };
@@ -3313,17 +3727,25 @@
     const diffSay = (d) => (Math.abs(d) < 0.005 ? '모델과 거의 같아요' : '모델보다 ' + Math.abs(Math.round(d * 100)) + '% ' + (d < 0 ? '낮아요' : '높아요'));
     /* 계약한 견적인데 사다리차 포함을 아직 확인 못 함 — 모델의 사다리차 값을 더한 비교라 참고만 (포함이면 차이도 함께 알려 줌) */
     const ladderAdd = q.contracted ? n.adds.find((a) => a.label === '사다리차') : null;
+    const sync = checklistSync(q);
+    const synced = (k) => sync.some((x) => x.keys.includes(k));
     if (q.contracted) out.badges.push({ t: '✅ 계약 확정', cls: 'good' });
-    out.badges.push({ t: pctTxt(out.diff) + (ladderAdd ? ' (참고)' : ''), cls: ladderAdd ? '' : out.tooCheap ? 'bad' : out.tooHigh ? 'warn' : (pm || Math.abs(out.diff) <= 0.15) ? 'good' : '' });
-    if (pm && Math.abs(peerDiff) >= 0.005) out.badges.push({ t: '다른 견적 중앙값보다 ' + Math.abs(Math.round(peerDiff * 100)) + '% ' + (peerDiff < 0 ? '낮음' : '높음'), cls: out.tooCheap ? 'bad' : out.tooHigh ? 'warn' : '' });
-    if (out.tooCheap) out.warns.push({ t: (pm ? '다른 견적들보다 눈에 띄게 싸요' : '모델 하한(' + won(est.low) + ')보다 싸요') + ' — 당일 ‘짐이 많다’며 증차·증원 추가요금을 요구할 위험이 있어요. 포함 항목을 서면으로 받으세요.', k: 'bad' });
+    // 계약한 견적은 모델과의 차이를 참고로만 (모델은 신뢰도 낮은 추정 — 빨간·노란 경고로 보이지 않게)
+    out.badges.push({ t: pctTxt(out.diff) + (ladderAdd || q.contracted ? ' (참고)' : ''), cls: ladderAdd || q.contracted ? '' : out.tooCheap ? 'bad' : out.tooHigh ? 'warn' : (pm || Math.abs(out.diff) <= 0.15) ? 'good' : '' });
+    if (pm && Math.abs(peerDiff) >= 0.005) out.badges.push({ t: '다른 견적 중앙값보다 ' + Math.abs(Math.round(peerDiff * 100)) + '% ' + (peerDiff < 0 ? '낮음' : '높음'), cls: q.contracted ? '' : out.tooCheap ? 'bad' : out.tooHigh ? 'warn' : '' });
+    if (q.contracted && (out.tooCheap || out.tooHigh)) {
+      out.warns.push({ t: out.tooCheap
+        ? '모델 추정보다 낮은 계약이에요 — 모델은 신뢰도 낮은 추정이라 참고만 하세요. 당일 추가요금이 없도록 계약서에 짐 목록·작업 범위가 적혀 있는지 보세요.'
+        : '모델 추정보다 높은 계약이에요 — 포함 항목(사다리차·에어컨 분리·폐기물)이 계약서에 적혀 있는지 보세요.', k: 'info' });
+    } else if (out.tooCheap) out.warns.push({ t: (pm ? '다른 견적들보다 눈에 띄게 싸요' : '모델 하한(' + won(est.low) + ')보다 싸요') + ' — 당일 ‘짐이 많다’며 증차·증원 추가요금을 요구할 위험이 있어요. 포함 항목을 서면으로 받으세요.', k: 'bad' });
     else if (out.tooHigh) out.warns.push({ t: (pm ? '다른 견적들보다 눈에 띄게 비싸요' : '모델 상한(' + won(est.high) + ')보다 비싸요') + ' — 포함 항목을 다시 확인하고 협상해 보세요.', k: 'warn' });
-    else if (!pm && out.diff < -0.15) out.warns.push({ t: '모델 범위 안이지만 꽤 낮은 편이에요. 모델은 신뢰도 낮은 추정치라 견적 3곳이 모이면 서로 비교해 판단하세요.', k: 'info' });
-    if (ladderAdd) out.warns.push({ t: '사다리차가 계약에 들어 있는지 아직 몰라요 — 비교에 모델의 사다리차 약 ' + won(raw.parts.ladder) + '을 더해서 위 % 는 참고만 하세요. 들어 있으면 ' + diffSay((n.amount - ladderAdd.v) / est.typical - 1) + '. 계약서로 확인하면 ‘사다리차 포함’을 체크하세요.', k: 'warn' });
+    else if (!pm && out.diff < -0.15 && !q.contracted) out.warns.push({ t: '모델 범위 안이지만 꽤 낮은 편이에요. 모델은 신뢰도 낮은 추정치라 견적 3곳이 모이면 서로 비교해 판단하세요.', k: 'info' });
+    sync.forEach((x) => out.warns.push({ t: x.say(x.title, x.keys.includes('ladder') ? raw.parts.ladder : 0), k: 'info', btn: { label: josa(x.what, '으로/로') + ' 표시', fk: 'qsync-' + q.id + '-' + x.item, onClick: () => markChecked(q.id, x.keys, x.what) } }));
+    if (synced('ladder')) { /* 위 한 줄로 대신해요 */ } else if (ladderAdd) out.warns.push({ t: '사다리차가 계약에 들어 있는지 아직 몰라요 — 비교에 모델의 사다리차 약 ' + won(raw.parts.ladder) + '을 더해서 위 % 는 참고만 하세요. 들어 있으면 ' + diffSay((n.amount - ladderAdd.v) / est.typical - 1) + '. 계약서로 확인하면 ‘사다리차 포함’을 체크하세요.', k: 'warn' });
     else if (!q.ladder && raw.parts.ladder > 0) out.warns.push({ t: '사다리차 미포함(또는 미확인) — 약 ' + won(raw.parts.ladder) + ' 더 들 수 있어요 (환산에 더했어요).', k: 'warn' });
     if (!q.aircon && raw.parts.aircon > 0) {
       out.warns.push(q.contracted
-        ? { t: '에어컨은 분리·운반까지이고 설치는 따로 부른 기사가 해요 — 비교할 땐 모델의 에어컨 설치비 약 ' + won(raw.parts.aircon) + '을 더했어요 (설치비는 자금 화면 ‘에어컨 설치’ 줄).', k: 'info' }
+        ? { t: '에어컨은 분리·운반까지이고 설치는 따로 부른 기사가 해요 — 설치비는 자금 화면 ‘에어컨 설치’ 줄에 있어서 비교에 더하지 않았어요.', k: 'info' }
         : { t: '에어컨 이전 미포함(또는 미확인) — 약 ' + won(raw.parts.aircon) + ' (환산에 더했어요).', k: 'warn' });
     }
     if (!q.waste && raw.parts.waste > 0) out.warns.push({ t: '폐기물 처리 미포함 — 약 ' + won(raw.parts.waste) + ' (환산에 더했어요).', k: 'warn' });
@@ -3344,8 +3766,8 @@
       if (p < 0.05) out.warns.push({ t: '계약금이 총액의 ' + Math.round(p * 100) + '%예요. 업체가 어기면 받는 배상(계약금의 배수)도 작아져요 — ' + c.deposit_pct + '% 안팎을 권해요.', k: 'warn' });
       else if (p > 0.2) out.warns.push({ t: '계약금이 총액의 ' + Math.round(p * 100) + '%로 많아요 — ' + c.deposit_pct + '% 안팎을 권해요.', k: 'warn' });
     }
-    if (!q.licenseChecked) out.warns.push({ t: '허가증(화물자동차 운송주선사업) 사본 확인 전이에요' + (q.contracted ? ' — 계약했으니 계약서·사업자등록증과 함께 받아 두세요.' : '.'), k: q.contracted ? 'warn' : 'info' });
-    if (!q.insuranceChecked) out.warns.push({ t: '적재물배상보험 증권 확인 전 — 법정 최저는 사고당 500만원 수준이라 1천만원 이상인지 보세요.' + (q.contracted ? ' 파손 보상은 이사화물 표준약관대로인지도 확인하세요.' : ''), k: q.contracted ? 'warn' : 'info' });
+    if (!q.licenseChecked && !synced('licenseChecked')) out.warns.push({ t: '허가증(화물자동차 운송주선사업) 사본 확인 전이에요' + (q.contracted ? ' — 계약했으니 계약서·사업자등록증과 함께 받아 두세요.' : '.'), k: q.contracted ? 'warn' : 'info' });
+    if (!q.insuranceChecked && !synced('insuranceChecked')) out.warns.push({ t: '적재물배상보험 증권 확인 전 — 법정 최저는 사고당 500만원 수준이라 1천만원 이상인지 보세요.' + (q.contracted ? ' 파손 보상은 이사화물 표준약관대로인지도 확인하세요.' : ''), k: q.contracted ? 'warn' : 'info' });
     if (!q.visitDone) out.warns.push({ t: q.contracted ? '방문견적 없이 한 계약이면 계약서에 짐 목록·작업 범위(포장·에어컨 분리·사다리차·엘리베이터)와 ‘사전 동의 없는 추가요금 없음’을 적어 받으세요.' : '방문견적 전 금액이에요 — 전화·플랫폼 견적은 당일 추가요금 위험이 커요.', k: 'info' });
     return out;
   }
@@ -3373,7 +3795,8 @@
         est.vatIncl ? null : el('span', { class: 'small strong' }, '부가세 포함 약 ' + won(est.pay.typical)),
         el('span', { class: 'small es-muted' }, won(est.low) + ' ~ ' + won(est.high) + ' · ' + est.truckLabel + ' · ' + est.crewLabel +
           ' · 사다리차 ' + (est.parts.ladder > 0 ? '포함' : '없음') + ' · 에어컨 ' + (est.counts.acN ? est.counts.acN + '대 포함' : '제외'))),
-      el('div', { class: 'mt-12' }, calibBox(false)),
+      // 계약 뒤에는 보정이 할 일이 아니라 참고라서 단추를 기본 모양으로 (머리 카드의 보정 상자와 같게)
+      el('div', { class: 'mt-12' }, calibBox(false, !!(est && est.contract))),
       el('p', { class: 'small es-muted mt-8 mb-0' }, '업체 견적에 빠진 항목(사다리차·에어컨 등)은 모델 금액을 더해 ‘같은 조건 환산’으로 비교해요. 부가세도 모델과 같은 기준으로 맞춰요 — 지금 모델은 ',
         el('b', basisLabel(est.vatIncl)), est.vatIncl ? ' 금액이라 ‘부가세 별도’ 견적에 ' + r1(est.coef.vat_pct) + '%를 더해요.' : ' 시세라 ‘부가세 포함’ 견적에서 부가세를 빼고 비교해요. 부가세 포함으로 비교하려면 ‘이사 견적’ 탭의 ‘금액 내역·업체 비교도 부가세 포함으로 보기’를 켜세요.'));
   }
@@ -3394,20 +3817,32 @@
       .sort((a, b) => (a.ev.n ? a.ev.n.amount : Infinity) - (b.ev.n ? b.ev.n.amount : Infinity));
     const incl = (q) => [['ladder', '사다리차'], ['aircon', '에어컨'], ['arrange', '정리'], ['waste', '폐기물']].filter(([k]) => q[k]).map(([, l]) => l);
     const checks = (q) => [['visitDone', '방문'], ['licenseChecked', '허가'], ['insuranceChecked', '보험']].map(([k, l]) => el('span', { class: 'chip ' + (q[k] ? 'good' : ''), title: q[k] ? l + ' 확인함' : l + ' 확인 전' }, (q[k] ? '✓ ' : '') + l));
+    /* 계약한 줄은 큰 숫자 = 계약 금액(실제로 낼 돈), 같은 조건 환산은 비교용 보조 줄 (예전: 환산값이 크게 보여 '아정당 272만원'으로 읽혔어요) */
+    const vatTxt = (q) => (q.noVat ? '부가세 없음' : q.vatIncluded === false ? '부가세 별도' : '부가세 포함');
+    const payOf = (q) => (q.noVat || q.vatIncluded !== false ? num(q.amount, 0) : num(q.amount, 0) * raw.vatMul);
+    const amtTxt = (q) => (num(q.amount, 0) > 0 ? won(q.amount) : '—');
+    const payNote = (q) => (!q.noVat && q.vatIncluded === false ? '낼 돈 (견적 ' + amtTxt(q) + ' + 부가세)' : '낼 돈 · ' + vatTxt(q));
     const tbl = el('table', { class: 'tbl es-qtbl' },
-      el('thead', el('tr', el('th', '업체'), el('th', { class: 'num' }, '같은 조건 환산', el('span', { class: 'tiny es-muted', style: { display: 'block', fontWeight: '600' } }, basisLabel(raw.vatIncl))), el('th', '모델·다른 견적 대비'), el('th', '포함 · 확인'))),
+      el('thead', el('tr', el('th', '업체'), el('th', { class: 'num' }, '견적 금액'), el('th', { class: 'num' }, '같은 조건 환산', el('span', { class: 'tiny es-muted', style: { display: 'block', fontWeight: '600' } }, basisLabel(raw.vatIncl) + ' · 비교용')), el('th', '모델·다른 견적 대비'), el('th', '포함 · 확인'))),
       el('tbody', rows.map(({ q, ev }) => el('tr',
         el('td', { class: 'es-qco-td' + (best && best.id === q.id ? ' es-qbest' : '') }, el('div', { class: 'es-qco', title: q.company || '' }, q.company || '이름 없는 업체'),
           best && best.id === q.id ? el('span', { class: 'chip good' }, '⭐ 추천') : null,
           el('div', { class: 'tiny es-muted' }, (num(q.tons, 0) ? tonsLabel(num(q.tons, 0)) : '톤 —') + ' · ' + (num(q.crew, 0) ? q.crew + '명' : '인원 —') + (q.date ? ' · ' + D.fmt(q.date) : ''))),
-        el('td', { class: 'num' }, el('b', ev.n ? won(ev.n.amount) : '—'), el('div', { class: 'tiny es-muted' }, '견적 ' + (num(q.amount, 0) > 0 ? won(q.amount) : '—'))),
+        q.contracted && num(q.amount, 0) > 0
+          ? el('td', { class: 'num' }, el('b', won(payOf(q))), el('span', { class: 'es-qamt-sub' }, payNote(q)))
+          : el('td', { class: 'num' }, el('b', amtTxt(q)), el('span', { class: 'es-qamt-sub' }, vatTxt(q))),
+        el('td', { class: 'num' }, q.contracted ? (ev.n ? won(ev.n.amount) : '—') : el('b', ev.n ? won(ev.n.amount) : '—')),
         el('td', el('div', { class: 'es-qbadges', style: { marginTop: 0 } }, ev.badges.map((b) => el('span', { class: 'chip ' + b.cls }, b.t)))),
         el('td', el('div', { class: 'small' }, incl(q).length ? '포함: ' + incl(q).join('·') : '포함 항목 미확인'), el('div', { class: 'es-qbadges', style: { marginTop: '4px' } }, checks(q)))))));
     const cards = el('div', { class: 'es-qcmp-cards' }, rows.map(({ q, ev }) => el('div', { class: 'es-qcmp-card' },
       el('div', { class: 'strong', style: { minWidth: '0' } }, el('span', { class: 'es-qco', title: q.company || '' }, q.company || '이름 없는 업체'), best && best.id === q.id ? el('span', { class: 'chip good', style: { marginLeft: '6px' } }, '⭐ 추천') : null),
-      el('div', { class: 'es-qc-amt' }, ev.n ? won(ev.n.amount) : '—'),
+      q.contracted && num(q.amount, 0) > 0
+        ? el('div', { class: 'es-qc-amt' }, won(payOf(q)), el('small', payNote(q)))
+        : el('div', { class: 'es-qc-amt' }, ev.n ? won(ev.n.amount) : '—', el('small', '같은 조건 환산')),
       el('div', { class: 'es-qc-sub' }, ev.badges.map((b) => el('span', { class: 'chip ' + b.cls }, b.t)),
-        el('span', '견적 ' + (num(q.amount, 0) > 0 ? won(q.amount) : '—') + ' · ' + (num(q.tons, 0) ? tonsLabel(num(q.tons, 0)) : '톤 —') + ' · ' + (num(q.crew, 0) ? q.crew + '명' : '인원 —'))))));
+        el('span', (q.contracted
+          ? (ev.n ? '같은 조건 환산 ' + won(ev.n.amount) + ' (비교용)' : '')
+          : '견적 ' + amtTxt(q) + ' (' + vatTxt(q) + ')') + ' · ' + (num(q.tons, 0) ? tonsLabel(num(q.tons, 0)) : '톤 —') + ' · ' + (num(q.crew, 0) ? q.crew + '명' : '인원 —'))))));
     return el('section', { class: 'card', 'aria-label': '견적 비교표' },
       sectionHead('📊', '견적 비교', '같은 조건·' + basisLabel(raw.vatIncl) + ' 환산 금액 순'),
       el('div', { class: 'table-wrap es-qcmp-tbl' }, tbl), cards,
@@ -3524,7 +3959,9 @@
         const dep = Math.max(0, num(q.deposit, 0));
         normTxt.textContent = '✅ 계약 확정: 낼 돈 ' + won(payQ) + (q.noVat ? ' (부가세 없음)' : '') + (dep ? ' = 계약금 ' + won(dep) + (q.depositPaid ? ' 냄' : '') + ' + 잔금 ' + won(Math.max(0, payQ - dep)) + (normDate(q.balanceDate) ? ' ' + D.fmt(q.balanceDate) : '') : '') + '. ' + normTxt.textContent;
       }
-      warns.replaceChildren(...ev.warns.map((w) => el('li', { class: 'is-' + w.k }, w.t)));
+      warns.replaceChildren(...ev.warns.map((w) => (w.btn
+        ? el('li', { class: 'is-' + w.k + ' es-qsync' }, el('span', w.t), el('button', { type: 'button', class: 'btn btn-sm', 'data-fk': w.btn.fk, onclick: w.btn.onClick }, w.btn.label))
+        : el('li', { class: 'is-' + w.k }, w.t))));
       if (document.activeElement !== company && company.value !== (q.company || '')) company.value = q.company || '';
       ['ladder', 'aircon', 'arrange', 'waste', 'visitDone', 'licenseChecked', 'insuranceChecked', 'contracted', 'depositPaid'].forEach((k) => {
         const x = card.querySelector('[data-fk="q-' + id + '-' + k + '"]'); if (x && x.checked !== !!q[k]) x.checked = !!q[k];
@@ -3576,12 +4013,13 @@
       // 가이드 링크는 맨 위에 — 데스크톱에서 이 칸이 따로 스크롤돼 아래쪽이 잘 안 보여요
       el('div', { class: 'row es-ask-links' },
         el('a', { class: 'btn btn-sm', href: '#/guide/mover' }, '📘 업체 고르는 법 가이드 →'),
+        R && R.est && R.est.contract ? null : exportBtn(true),
         srcLinks(['jjan', 'terms'])),
       el('div', { class: 'callout warn small' }, '견적은 꼭 문자·PDF 같은 서면으로 받고, 버릴 것과 제조사 서비스가 옮길 것은 현장에서 실물로 표시하세요. 2021~2023 포장이사 피해 중 약 70%가 파손이었어요.', ' ', srcLinks(['kca', 'herald'])),
       el('ol', ASK.map((t) => el('li', t))));
   }
   function renderQuotes(body) {
-    body.appendChild(region(() => (R.est.contract ? el('section', { class: 'card', 'aria-label': '계약한 이사업체' }, contractBox(R.est.contract)) : null), 'qcontract'));
+    body.appendChild(region(() => (R.est.contract ? el('section', { class: 'card', 'aria-label': '계약한 이사업체' }, contractBox(R.est.contract), el('div', { class: 'row mt-8' }, exportBtn(true))) : null), 'qcontract'));
     body.appendChild(region(quotesTop, 'qtop'));
     const grid = el('div', { class: 'es-q-grid' });
     const main = el('div', { class: 'es-q-main' });
@@ -3787,7 +4225,7 @@
       return el('div', { class: 'es-lgi' + (onLg ? ' is-lg' : '') },
         el('div', { class: 'es-ico', 'aria-hidden': 'true' }, MV.inv.cat(it.cat).icon),
         el('div',
-          el('div', { class: 'es-lgi-name' }, el('button', { type: 'button', class: 'es-namebtn es-lgi-nb', 'data-fk': 'lgname-' + it.id, title: '눌러서 이름·제조사 고치기', onclick: () => MV.inv.editor(it.id) }, nm(it) || '이름 없는 가전'),
+          el('div', { class: 'es-lgi-name' }, el('button', { type: 'button', class: 'es-namebtn es-lgi-nb', 'data-fk': 'lgname-' + it.id, title: '눌러서 이름·제조사 고치기', onclick: () => openEditor(it.id) }, nm(it) || '이름 없는 가전'),
             qtyOf(it) > 1 ? el('span', { class: 'chip' }, qtyOf(it) + '대') : null,
             brandTag,
             it.assumed ? el('span', { class: 'chip warn' }, '규격 추정') : null,
@@ -3951,7 +4389,7 @@
       out,
       acBlock,
       ssAcOn.length ? el('p', { class: 'small mt-8 mb-0' }, el('b', '예비안: '), '현 거주자가 ' + D.fmt(md) + '까지 살아 미리 설치가 안 되면, 이사 전에 지금 집에서 철거만 하고' + (ssAcOn.some((it) => lgKind(it) === 'ac_2in1') ? '(2in1 철거 약 11.4만원)' : '') + ' ' + D.fmt(md) + ' 잔금 뒤~' + D.fmt(D.add(md, 1)) + '에 새 집에 재설치해요' + (ssAcOn.some((it) => lgKind(it) === 'ac_2in1') ? '(약 28.5만원)' : '') + '. 그 사이 운반은 이삿짐센터에 부탁하세요.') : null,
-      el('p', { class: 'small es-muted mt-8 mb-0' }, '가전 가이드도 같이 보세요. ', el('a', { href: '#/guide/appliance/lg' }, '가전이사 가이드 →')));
+      el('p', { class: 'small es-muted mt-8 mb-0' }, '가전 가이드도 같이 보세요. ', el('a', { class: 'es-inlink', href: '#/guide/appliance/lg' }, '가전이사 가이드 →')));
   }
   function lgCaveatsCard() {
     const mk = lgCandidates().filter(lgOn);
@@ -4031,6 +4469,8 @@
       body.appendChild(errCard('이 화면을 그리다 문제가 생겼어요', e, false, () => MV.rerender(true)));
     }
     ctx.subscribe((e) => { if (R !== myR) return; if (e && e.reset) return; requestRefresh(); });
+    // 창을 닫기 직전: 모아 두던 처리(가져감·버림…) 바꾸기를 마저 저장
+    const offFlush = MV.store.on('flush', fateFlushAll);
     document.addEventListener('pointerdown', onPtrDown, true);
     document.addEventListener('pointerup', onPtrUp, true);
     document.addEventListener('pointercancel', onPtrUp, true);
@@ -4046,6 +4486,10 @@
       ro.observe(root);
     }
     ctx.onCleanup(() => {
+      fateFlushAll();
+      try { offFlush(); } catch (e) { /* 무시 */ }
+      // 짐 목록을 떠나 다른 화면으로 가면 스크롤을 기억 — 탭바로 돌아와도 그 자리 (뒤로 가기는 셸이 되돌려요)
+      try { if (tabId === 'inventory' && !sub && MV.route && MV.route.name !== 'stuff') mem.leftScroll = { y: window.scrollY }; } catch (e) { /* 무시 */ }
       /* 다른 탭에서 저장하면 core 가 {reset:true} 로 화면 전체를 다시 그려요(app.js). 그때 입력 중이던 칸과 글자를 기억해 두었다가
          새 화면에서 같은 칸(data-fk)에 되살려, 포커스와 입력이 사라지지 않게 함 */
       try {
@@ -4083,12 +4527,23 @@
     // 탭 버튼을 보이게, 탭을 바꿨으면 탭 위치로
     const act = tabs.querySelector('button.active');
     if (act) tabs.scrollLeft = Math.max(0, act.offsetLeft - 12);
+    const left = mem.leftScroll;
+    mem.leftScroll = null;
     if (mem.scrollToTabs) {
       mem.scrollToTabs = false;
       requestAnimationFrame(() => {
         const top = tabs.getBoundingClientRect().top + window.scrollY - (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--topbar-h')) || 56) - 8;
         if (window.scrollY > top) window.scrollTo(0, Math.max(0, top));
       });
+    } else if (mem.showAfter && tabId === 'inventory' && !sub) {
+      // 다른 화면에서 누른 '보기' — 그린 뒤 그 짐으로
+      const id = mem.showAfter;
+      mem.showAfter = null;
+      requestAnimationFrame(() => requestAnimationFrame(() => { if (R === myR) showItem(id); }));
+    } else if (left && tabId === 'inventory' && !sub && !MV.navBack && left.y > 0) {
+      /* 탭바·링크로 짐 목록에 돌아오면 셸은 맨 위로 보내요 → 셸이 맨 위로 보낸 뒤(두 프레임 뒤) 떠날 때 자리로.
+         그사이 손으로 움직였으면 그대로 둬요 */
+      requestAnimationFrame(() => requestAnimationFrame(() => { if (R === myR && window.scrollY < 4) window.scrollTo(0, left.y); }));
     }
   }
 

@@ -6,7 +6,8 @@
      #/checklist                     데스크톱·태블릿: 🔥 지금 할 일 / 폰: 채널 목록
      #/checklist/<partId>            채널
      #/checklist/<partId>/<itemId>   채널 + 스레드
-     #/checklist/~focus|~week|~all|~done|~activity[/<itemId>]   특수 채널
+     #/checklist/~focus|~all|~done|~activity[/<itemId>]   특수 채널
+       (예전 '🗓 7일 안에' #/checklist/~week 는 10/26 가족 요청으로 '🔥 지금 할 일'에 합침 → 주소는 ~focus 로 바꿔 열어요)
      #/checklist/~search/<검색어>[/<itemId>]
 
    화면 안에서의 이동(채널·항목 클릭)은 history.pushState/replaceState 로 처리해 다시 그리지 않습니다.
@@ -19,9 +20,10 @@
   const D = MV.date;
 
   /* ---------------- 상수 ---------------- */
+  /* 🔥 지금 할 일 (10/26 가족 요청): 예전 '지금 할 일'과 '7일 안에'를 한 채널로 — 기한 지남 + 오늘부터 7일 안 마감 (홈 '지금 할 일'과 같은 범위).
+     7일은 늘 오늘에서 셈 (MV.items.status 의 'week' = 7일 안). 설명 글은 spDesc() 가 날짜에 맞춰 만듦 */
   const SPECIALS = [
-    { id: '~focus', emoji: '🔥', name: '지금 할 일', desc: '기한이 지났거나 오늘·3일 안에 마감인 일', statuses: ['overdue', 'today', 'soon'] },
-    { id: '~week', emoji: '🗓', name: '7일 이내', desc: '지난 것 포함, 앞으로 7일 안에 마감인 일', statuses: ['overdue', 'today', 'soon', 'week'] },
+    { id: '~focus', emoji: '🔥', name: '지금 할 일', desc: '기한 지남·오늘부터 7일 안 마감 — 중요도 순', statuses: ['overdue', 'today', 'soon', 'week'] },
     { id: '~all', emoji: '📋', name: '전체', desc: '아직 끝나지 않은 모든 할 일', statuses: ['overdue', 'today', 'soon', 'week', 'later', 'nodate'] },
     { id: '~done', emoji: '✅', name: '완료', desc: '끝낸 일 (최근에 끝낸 순)' },
     { id: '~activity', emoji: '🕘', name: '최근 활동', desc: '체크·메모·수정 기록' },
@@ -31,14 +33,43 @@
   SPECIALS.concat([SEARCH]).forEach((s) => { SPECIAL_MAP[s.id] = s; });
 
   const BUCKETS = [
-    { id: 'overdue', label: '지연', cls: 'ck-bad' },
+    { id: 'overdue', label: '기한 지남', cls: 'ck-bad' },
     { id: 'today', label: '오늘', cls: 'ck-warn' },
-    { id: 'soon', label: '3일 이내', cls: '' },
-    { id: 'week', label: '이번 주(7일)', cls: '' },
+    { id: 'soon', label: '3일 안에', cls: '' },
+    { id: 'week', label: '7일 안에', cls: '' },
     { id: 'later', label: '이후', cls: '' },
     { id: 'nodate', label: '기한 없음', cls: '' },
     { id: 'done', label: '완료', cls: '' },
   ];
+  const BUCKET_MAP = {};
+  BUCKETS.forEach((b) => { BUCKET_MAP[b.id] = b; });
+  /* 🔥 지금 할 일은 중요도 묶음 순서 (10/26 가족 요청 — 홈 '지금 할 일'과 같은 순서): 중요 → 보통 → 여유,
+     묶음 안은 기한 순 (기한 지남 → 오늘 → 그 뒤) → 원래 순서. 날짜 묶음 머리는 없고, 줄마다 기한 칩(오늘 · n일 지남 · 내일 · D-n)으로 급한 정도를 보여요.
+     기한 지남도 모두 보여요 (5개만 보이기는 없앰) */
+  const isNowCh = (ch) => ch === '~focus';
+  const PRI_GROUPS = ['high', 'mid', 'low'];
+  const priKey = (it) => (PRI_RANK[it.priority] != null ? it.priority : 'mid');   // 이상한 값은 '보통'으로 (정렬 cmpItems 와 같은 기본값)
+  const priLabel = (k) => { const P = MV.items.PRIORITY || {}; return (P[k] && P[k].label) || PRI_LABEL[k]; };
+  /* 예전 '🗓 7일 안에'(~week) 주소·기억은 합친 '🔥 지금 할 일'로 */
+  const OLD_CH = { '~week': '~focus' };
+  const normCh = (ch) => (ch && OLD_CH[ch]) || ch;
+  /* 할 일 기한 말 (MV.ui.dueChip 과 같은 말): 오늘 · 내일 · D-n · n일 지남 */
+  const relLabel = (n) => (n === 0 ? '오늘' : n === 1 ? '내일' : n > 1 ? 'D-' + n : (-n) + '일 지남');
+  /* 특수 채널 설명 — 🔥 지금 할 일은 '7일 안'이 며칠까지인지 날짜로 (이사 전날·이사 당일이면 그렇게): 날마다 오늘에서 다시 셈.
+     short: 폰 목록 머리의 한 줄 (다른 특수 채널 설명은 폰에서 숨기지만, 이 채널은 범위·순서를 알려야 해서 짧게 보여요) */
+  function spDesc(sp, short) {
+    if (!sp || sp.id !== '~focus') return sp && !short ? sp.desc : '';
+    try {
+      const end = D.parse(D.add(D.today(), 7));
+      const n = D.diff(D.str(end), D.moveDate());   // 이사 날까지 남은 날 (7일째 날 기준)
+      const md = (end.getMonth() + 1) + '/' + end.getDate();
+      const until = n === 1 ? '이사 전날 ' + md : n === 0 ? '이사 당일 ' + md : md;
+      return short ? '기한 지남 + ' + until + '까지 마감 · 중요도 순'
+        : '기한 지남·오늘부터 7일 안(' + until + '까지) 마감 — 중요도 순';
+    } catch (e) { return short ? '기한 지남 + 7일 안 마감 · 중요도 순' : sp.desc; }
+  }
+  /* 기본 할 일 제목 앞의 '[10/26]' 같은 날짜 표시 — 화면에서만: 기한과 같으면 숨기고, 다르면 흐리게 줄을 그어요 (저장된 제목은 그대로) */
+  const TITLE_TAG = /^\[(\d{1,2})\/(\d{1,2})\]\s*/;
   const PRI_RANK = { high: 0, mid: 1, low: 2 };
   const PRI_LABEL = { high: '중요', mid: '보통', low: '여유' };
   /* 할 일은 사람에게 나눠 배정하지 않음 ('우리 집 할 일'). 옛 기록에 남은 owner 값은 보이지도, 거르기·정렬·검색에도 쓰이지 않음 */
@@ -51,7 +82,9 @@
   const mem = {
     listScroll: {},     // 채널 → 목록 스크롤 (데스크톱 열)
     winScroll: {},      // 폰 화면 키 → window.scrollY
-    doneOpen: {},       // 채널 → 완료 묶음 펼침 여부
+    fieldsOpen: {},     // 항목 → 폰 상세에서 마감·중요도·파트 칸을 펼쳤는지
+    finPartsOpen: false, // 폰 채널 목록: '끝난 파트 n개' 펼침
+    tabAt: -1e9,        // 하단 '체크' 탭을 누른 시각 (돌아오면 보던 자리로)
     draft: '',          // 할 일 입력창 초안
     noteDrafts: {},     // 항목 → 메모 초안
     composerPart: '',   // 특수 채널에서 추가할 파트
@@ -83,11 +116,33 @@
   const NOTE_PH_KEYS = '메모 남기기… (엔터: 저장 · 쉬프트\u2060+\u2060엔터: 줄바꿈)';   // \u2060(보이지 않는 글자): '쉬프트+엔터' 가운데서 줄이 갈리지 않게
   /* 할 일 입력창 예시: 칸 너비에 맞는 것 중 가장 긴 것 (잘린 예시는 오히려 헷갈림) */
   const COMP_PH = ['할 일 추가… 예) 우리은행 방문 ~10/15 !중요', '할 일 추가… 예) 은행 ~10/15', '할 일 추가…'];
-  const MOVE_PH = '📁 파트 옮기기';
   const isSpecial = (ch) => !!ch && ch.charAt(0) === '~';
 
+  /* checklistUI: 이 기기만의 화면 설정 (sync.js 머리말 — 공유 기록에 올라가지 않음). 옛 기록·백업에는 새 칸이 없을 수 있어 읽을 때 기본값으로
+       hideDone       완료 묶음을 처음에 접어 둘지 (채널마다 정한 값이 없을 때의 기본값)
+       doneOpen       { 채널: true|false } 완료 묶음 펼침
+       overdueOpen    (예전 값 — 지금 할 일이 중요도 순이 되며 기한 지남도 모두 보여서 이제 읽지 않음. 남아 있어도 그대로 둠)
+       composerPart   특수 채널 입력창에서 고른 파트 */
   function ui() { return MV.store.ensure('checklistUI', { hideDone: true }); }
-  function setUI(patch) { MV.store.update(() => { Object.assign(ui(), patch); }); }
+  function setUI(patch, silent) { MV.store.update(() => { Object.assign(ui(), patch); }, silent ? { silent: true } : undefined); }
+  const plainObj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : null);
+  function doneOpenFor(ch) {
+    const u = ui(); const m = plainObj(u.doneOpen);
+    if (m && typeof m[ch] === 'boolean') return m[ch];
+    return ch === '~search' || !u.hideDone;
+  }
+  function setDoneOpen(ch, open) { setUI({ doneOpen: Object.assign({}, plainObj(ui().doneOpen) || {}, { [ch]: !!open }) }); }
+
+  /* 하단 '체크' 탭: 누른 시각을 기억 → 돌아왔을 때 보던 목록의 스크롤 자리로 (탭바 링크는 셸이 그림 — 여기서는 읽기만) */
+  document.addEventListener('click', (e) => {
+    const a = e.target && e.target.closest ? e.target.closest('#nav a[data-view="checklist"]') : null;
+    if (a) mem.tabAt = performance.now();
+  }, true);
+  /* 기록 이동(뒤로·앞으로·해시 링크) 시각: 이때 브라우저는 창 스크롤을 이미 다음 기록 칸 자리로 옮겼을 수 있어서,
+     폰에서는 떠나는 순간의 window.scrollY 를 읽지 않고 스크롤할 때마다 기억해 둔 값을 써요 (render 의 onWinScroll) */
+  let popAt = -1e9;
+  window.addEventListener('popstate', () => { popAt = performance.now(); }, true);
+  const popRecent = () => performance.now() - popAt < 400;
 
   function hashFor(ch, itemId, q) {
     let h = '#/checklist';
@@ -102,6 +157,11 @@
     return h;
   }
   const guideHash = (g) => '#/guide/' + String(g).replace('#', '/');
+  /* 마지막으로 본 목록 (이 기기 메모리만): 예전 '~week' 는 '~focus' 로, 지워진 파트·검색이면 '~focus' */
+  function rememberedCh() {
+    const ch = normCh(mem.lastChannel);
+    return ch && ch !== '~search' && (SPECIAL_MAP[ch] || MV.parts.get(ch)) ? ch : '~focus';
+  }
 
   function statusOf(it) { try { return MV.items.status(it); } catch (e) { return 'nodate'; } }
   function openStatusOf(it) { return statusOf(Object.assign({}, it, { done: false })); }
@@ -144,8 +204,7 @@
     const d = D.parse(due);
     if (!d) return '';
     const n = D.diff(D.today(), D.str(d));
-    const rel = n === 0 ? '오늘' : n > 0 ? 'D-' + n : (-n) + '일 지남';
-    return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + WEEK[d.getDay()] + ', ' + rel;
+    return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + WEEK[d.getDay()] + ', ' + relLabel(n);   // 화면 기한 칩과 같은 말 (내일 포함)
   }
 
   /* ---------------- 빠른 입력 파서 ---------------- */
@@ -260,6 +319,54 @@
       return { icon, text: cut };
     }
     return null;
+  }
+
+  /* 설명·메모 읽기: 인터넷 주소는 새 창 링크, 전화번호는 누르면 전화 거는 링크 (저장된 글은 그대로).
+     전화번호: 0으로 시작하는 지역·휴대폰 번호(02-123-4567, 010 1234 5678, 01012345678), 0505-123-4567 같은 안심번호,
+     1588-1234 같은 대표번호. 앞에 숫자·'-'·'.' 이 붙었거나 뒤에 숫자·'-' 가 이어지면 계좌번호(3333-01-1234567 같은)처럼
+     더 긴 번호의 일부라 링크로 만들지 않아요 (옛 사파리도 읽게 lookbehind 는 쓰지 않음) */
+  const RICH_RE = /(https?:\/\/[^\s<>"')\]]+)|(0(?:50\d|\d{1,2})[-. ]?\d{3,4}[-. ]?\d{4}|1[5-9]\d{2}-\d{4})/g;
+  const TEL_BEFORE = /[\d.-]/; const TEL_AFTER = /[\d-]/;
+  function richText(text) {
+    const frag = document.createDocumentFragment();
+    String(text == null ? '' : text).split('\n').forEach((line, li) => {
+      if (li) frag.appendChild(document.createElement('br'));
+      let last = 0; let m;
+      RICH_RE.lastIndex = 0;
+      while ((m = RICH_RE.exec(line))) {
+        const idx = m.index; const s = m[0];
+        let node = null;
+        if (m[1]) {
+          node = el('a', { href: m[1], target: '_blank', rel: 'noopener noreferrer' }, m[1].length > 60 ? m[1].slice(0, 57) + '…' : m[1]);
+        } else if (!TEL_BEFORE.test(line.charAt(idx - 1)) && !TEL_AFTER.test(line.charAt(idx + s.length))) {
+          node = el('a', { href: 'tel:' + s.replace(/\D/g, ''), class: 'ck-tel' }, s);
+        }
+        if (!node) continue;
+        if (idx > last) frag.appendChild(document.createTextNode(line.slice(last, idx)));
+        frag.appendChild(node);
+        last = idx + s.length;
+      }
+      if (last < line.length) frag.appendChild(document.createTextNode(line.slice(last)));
+    });
+    return frag;
+  }
+  /* 목록 줄 제목: 앞의 '[M/D]' 가 기한과 같으면 숨기고(칩이 같은 말을 함), 기한이 바뀌어 다르면 흐리게 줄을 그어 보여요 */
+  function titleBits(it, terms) {
+    const t = str(it.title) || '(제목 없음)';
+    const m = TITLE_TAG.exec(t);
+    const d = m ? D.parse(it.due) : null;
+    const rest = m ? t.slice(m[0].length) : t;
+    if (!m || !d || !rest.trim()) return { text: t, node: highlight(t, terms) };
+    const tag = m[0].trim();
+    if (terms && terms.some((x) => tag.toLowerCase().includes(x))) return { text: t, node: highlight(t, terms) };   // 검색한 말이 날짜 표시에 있으면 그대로
+    const same = d.getMonth() + 1 === +m[1] && d.getDate() === +m[2];
+    if (same) return { text: rest, node: highlight(rest, terms) };
+    const frag = document.createDocumentFragment();
+    frag.appendChild(el('s', { class: 'ck-tag-old', title: '처음 적은 날짜예요 · 지금 기한은 ' + D.fmt(it.due) }, tag));
+    frag.appendChild(document.createTextNode(' '));
+    const hl = highlight(rest, terms);   // 찾는 말이 없으면 글자 그대로 돌려줌
+    frag.appendChild(typeof hl === 'string' ? document.createTextNode(hl) : hl);
+    return { text: rest, node: frag };
   }
 
   /* ---------------- DOM 도우미 ---------------- */
@@ -468,7 +575,8 @@
     const compBtn = el('button', { type: 'button', class: 'btn btn-primary ck-comp-btn', 'aria-label': '할 일 추가' }, '추가');
     const compNote = el('div', { class: 'ck-comp-note', role: 'status', hidden: true });
     const compPrev = el('div', { class: 'ck-comp-prev', 'aria-live': 'polite' });
-    const composer = el('div', { class: 'ck-composer' }, compNote, el('div', { class: 'ck-comp-row' }, compPartWrap, compInput, compBtn), compPrev);
+    const compFab = el('button', { type: 'button', class: 'btn btn-primary ck-comp-fab', 'aria-label': '할 일 추가하기' }, el('span', { 'aria-hidden': 'true' }, '＋'), ' 할 일');
+    const composer = el('div', { class: 'ck-composer' }, compNote, el('div', { class: 'ck-comp-row' }, compPartWrap, compInput, compBtn), compPrev, compFab);
     const main = el('section', { class: 'ck-main', 'aria-label': '할 일 목록' }, head, sub, list, composer);
 
     const thread = el('aside', { class: 'ck-thread', 'aria-label': '항목 상세' });
@@ -593,6 +701,11 @@
       if (how !== 'init') saveScroll(prevKey, listKey());   // 아직 아무것도 바꾸기 전 (레이아웃이 깨끗해 읽기가 쌈)
 
       let ch = params[0] || null; let q = ''; let itemId = null;
+      if (ch && OLD_CH[ch]) {   // 예전 '🗓 7일 안에'(~week) 주소 → 합친 '🔥 지금 할 일'로 (기록 칸은 바꿔 쓰기 — 뒤로 가기가 두 번 걸리지 않게)
+        ch = OLD_CH[ch];
+        try { history.replaceState(history.state, '', hashFor(ch, params[1] || null)); } catch (e) { /* 무시 */ }
+        MV.route = { name: 'checklist', params: MV.parseHash().params };
+      }
       if (ch === '~search') { q = params[1] || ''; itemId = params[2] || null; }
       else itemId = params[1] || null;
       if (itemId && !MV.items.get(itemId)) {
@@ -635,10 +748,20 @@
       if (how === 'init') {
         const sy = mem.sideScroll || 0;
         if (sy > 0) inFrame(() => { chans.scrollTop = sy; });
-        if (inPlace && isPhone()) {
+        if (isPhone()) {
           const k = screenKey();
-          const y = k.indexOf('thread:') === 0 ? 0 : (mem.winScroll[k] || 0);
-          inFrame(() => { if (screenKey() === k) restoreWinScroll(k, y); });   // 셸의 scrollTo 다음에
+          const isThread = k.indexOf('thread:') === 0;
+          // 다른 화면에 갔다가 '체크' 탭이나 뒤로 가기로 돌아오면 보던 목록 자리로 (데스크톱 목록 칸은 이미 늘 그렇게 함).
+          // 다른 화면의 링크로 새로 열면 맨 위 (새 기록 칸은 아직 state 가 없음 — 셸·이 화면이 다녀간 칸에만 mvNav·ckPrev 가 있음)
+          let revisit = false;
+          try { const s = history.state; revisit = !!(s && typeof s === 'object' && (s.mvNav || s.ckPrev)); } catch (e) { revisit = false; }
+          const byTab = performance.now() - mem.tabAt < 1500;
+          mem.tabAt = -1e9;   // 한 번만 (탭을 누른 뒤 곧바로 다른 링크로 들어와도 예전 자리로 가지 않게)
+          const back = !isThread && (byTab || revisit);
+          if (inPlace || back) {
+            const y = isThread ? 0 : (mem.winScroll[k] || 0);
+            if (inPlace || y) inFrame(() => { if (screenKey() === k) restoreWinScroll(k, y); });   // 셸의 scrollTo 다음에
+          }
         }
         if (inPlace && mem.focusRow && !isPhone()) {
           const a = list.querySelector('.ck-row[data-id="' + cssEsc(mem.focusRow) + '"] .ck-row-title');
@@ -702,7 +825,7 @@
 
     /* ---------- 사이드바 ---------- */
     function computeCounts() {
-      const byPart = {}; const sp = { '~focus': 0, '~week': 0, '~all': 0, '~done': 0, '~activity': 0 };
+      const byPart = {}; const sp = { '~focus': 0, '~all': 0, '~done': 0, '~activity': 0 };
       let overdue = 0; let total = 0; let done = 0; let focusOver = 0;
       MV.items.list().forEach((it) => {
         const s = statusOf(it);
@@ -711,21 +834,20 @@
         if (s === 'done') { p.done++; done++; sp['~done']++; return; }
         sp['~all']++;
         if (s === 'overdue') { p.overdue++; overdue++; focusOver++; }
-        if (s === 'overdue' || s === 'today' || s === 'soon') sp['~focus']++;
-        if (s !== 'later' && s !== 'nodate') sp['~week']++;
+        if (s !== 'later' && s !== 'nodate') sp['~focus']++;   // 기한 지남 + 오늘부터 7일 안
       });
       return { byPart, sp, overdue, total, done, focusOver };
     }
-    function chanRow(id, emoji, name, meta, badge, active, title) {
+    function chanRow(id, emoji, name, meta, badge, active, title, fin) {
       const hash = hashFor(id);
       return el('a', {
-        class: 'ck-chan' + (active ? ' ck-active' : ''), href: hash, 'data-fkey': 'ch:' + id,
+        class: 'ck-chan' + (active ? ' ck-active' : '') + (fin ? ' ck-chan-fin' : ''), href: hash, 'data-fkey': 'ch:' + id,
         'aria-current': active ? 'page' : null, title: title || null, onclick: linkNav(hash),
       },
       el('span', { class: 'ck-chan-emo', 'aria-hidden': 'true' }, emoji),
       el('span', { class: 'ck-chan-name' }, name),
       meta != null && meta !== '' ? el('span', { class: 'ck-chan-meta' }, meta) : null,
-      badge ? el('span', { class: 'badge ck-chan-badge', title: '기한 지난 항목 ' + badge + '개', 'aria-label': '지연 ' + badge + '개' }, String(badge)) : null);
+      badge ? el('span', { class: 'badge ck-chan-badge', title: '기한 지남 ' + badge + '개', 'aria-label': '기한 지남 ' + badge + '개' }, String(badge)) : null);
     }
     /* 내용 서명이 같으면 DOM 을 건드리지 않음 → 누르는 도중(mousedown~click)에 노드가 바뀌어 클릭이 사라지는 일을 막음 */
     let sideTopSig = null; let chansSig = null;
@@ -743,7 +865,7 @@
           MV.ui.progress(c.total ? c.done / c.total : 0),
           el('p', { class: 'ck-ws-note' },
             '이사 ' + (dd.n === 0 ? '오늘' : dd.label) + ' · ' + D.fmt(D.moveDate()),
-            c.overdue ? el('span', { class: 'ck-ws-over' }, ' · 지연 ' + c.overdue) : null));
+            c.overdue ? el('span', { class: 'ck-ws-over' }, ' · 기한 지남 ' + c.overdue) : null));
       }
 
       const groups = []; const gmap = new Map();
@@ -753,7 +875,10 @@
         gmap.get(g).push(p);
       });
       const stOf = (p) => c.byPart[p.id] || { total: 0, done: 0, overdue: 0 };
-      const sig = JSON.stringify([active, SPECIALS.map((x) => c.sp[x.id] || 0), c.focusOver,
+      const isFin = (st) => st.total > 0 && st.done === st.total;
+      // 다 끝난 파트: 흐리게. 폰 채널 목록에서는 맨 아래 '끝난 파트 n개' 로 접어 둠 (펼침은 이 화면을 쓰는 동안만 기억)
+      const foldFin = isPhone();
+      const sig = JSON.stringify([active, SPECIALS.map((x) => [c.sp[x.id] || 0, spDesc(x)]), c.focusOver, foldFin, !!mem.finPartsOpen,
         groups.map((g) => [g, gmap.get(g).map((p) => { const st = stOf(p); return [p.id, emo(p), p.name || '', p.desc || '', st.done, st.total, st.overdue]; })])]);
       if (sig === chansSig) return;
       chansSig = sig;
@@ -763,15 +888,27 @@
         x.id, x.emoji, x.name,
         x.id === '~activity' ? '' : String(c.sp[x.id] || 0),
         x.id === '~focus' ? c.focusOver : 0,
-        active === x.id, x.desc))));
+        active === x.id, spDesc(x)))));
+      const partRow = (p) => {
+        const st = stOf(p); const fin = isFin(st);
+        return chanRow(p.id, emo(p), p.name || '이름 없는 파트', (fin ? '✓ ' : '') + st.done + '/' + st.total, st.overdue, active === p.id,
+          (fin ? '모두 끝났어요' + (p.desc ? ' · ' + p.desc : '') : p.desc), fin);
+      };
+      const finParts = [];
       groups.forEach((g) => {
-        nodes.push(el('div', { class: 'ck-group' },
-          el('h2', { class: 'ck-group-h' }, g),
-          gmap.get(g).map((p) => {
-            const st = stOf(p);
-            return chanRow(p.id, emo(p), p.name || '이름 없는 파트', st.done + '/' + st.total, st.overdue, active === p.id, p.desc);
-          })));
+        const ps = gmap.get(g).filter((p) => { if (foldFin && isFin(stOf(p))) { finParts.push(p); return false; } return true; });
+        if (!ps.length) return;
+        nodes.push(el('div', { class: 'ck-group' }, el('h2', { class: 'ck-group-h' }, g), ps.map(partRow)));
       });
+      if (finParts.length) {
+        const open = !!mem.finPartsOpen;
+        nodes.push(el('div', { class: 'ck-group ck-group-fin' },
+          el('button', {
+            type: 'button', class: 'ck-fin-tog', 'aria-expanded': String(open), 'data-fkey': 'finparts',
+            onclick: () => { mem.finPartsOpen = !open; renderSidebar(); },
+          }, el('span', { class: 'ck-caret', 'aria-hidden': 'true' }, open ? '▾' : '▸'), '✓ 끝난 파트 ' + finParts.length + '개'),
+          open ? finParts.map(partRow) : null));
+      }
       if (!groups.length) nodes.push(el('p', { class: 'ck-side-empty' }, '파트가 없어요. 아래에서 새 파트를 만들어 보세요.'));
       put(chans, ...nodes);
       restoreFocusIn(side, fk);
@@ -782,7 +919,7 @@
       const sp = SPECIAL_MAP[ch];
       if (sp) {
         if (ch === '~search') return { emoji: sp.emoji, name: cur.q ? '“' + cur.q + '” 검색' : '검색', desc: cur.q ? sp.desc : '검색창에 찾을 말을 적어 보세요.', special: true };
-        return { emoji: sp.emoji, name: sp.name, desc: sp.desc, special: true };
+        return { emoji: sp.emoji, name: sp.name, desc: spDesc(sp), short: spDesc(sp, true), special: true };
       }
       const p = MV.parts.get(ch);
       if (p) return { emoji: emo(p), name: p.name || '이름 없는 파트', desc: p.desc || '', part: p };
@@ -792,13 +929,12 @@
     function renderHeader() {
       const ch = effCh();
       const info = channelInfo(ch);
-      const u = ui();
       // 요약 숫자 먼저 계산 → 서명이 같으면 그대로 둠
       let sum = null;
       if (info.part) {
         const st = MV.parts.stats(info.part.id);
         sum = ['part', st.pct, st.done, st.total, st.overdue];
-      } else if (ch === '~focus' || ch === '~week' || ch === '~all') {
+      } else if (ch === '~focus' || ch === '~all') {
         // 목록과 같은 기준(방금 체크해 잠깐 남아 있는 줄 포함) → 머리 숫자와 묶음 숫자가 어긋나지 않게
         const its = listItemsFor(ch);
         const st = (it) => (it.done ? openStatusOf(it) : statusOf(it));
@@ -811,7 +947,7 @@
       } else if (ch === '~activity') {
         sum = ['act', (MV.store.get().activity || []).length];
       }
-      const sig = JSON.stringify([ch, cur.q, info.emoji, info.name, info.desc, info.part ? (info.part.guide || '') : '', !!info.missing, !!u.hideDone, sum]);
+      const sig = JSON.stringify([ch, cur.q, info.emoji, info.name, info.desc, info.short || '', info.part ? (info.part.guide || '') : '', !!info.missing, sum]);
       if (sig === headSig) return;
       headSig = sig;
 
@@ -834,15 +970,23 @@
         el('span', { class: 'ck-spacer' }),
         guideBtn, menuBtn));
 
-      // 진행률·요약
+      // 진행률·요약 — 파트·전체: '기한 지남 n'·'오늘 n' 은 누르면 그 묶음으로
+      const jump = (bid, n) => el('button', {
+        type: 'button', class: 'chip ck-jump ' + (bid === 'overdue' ? 'bad' : 'warn'), 'data-fkey': 'jump:' + bid,
+        title: BUCKET_MAP[bid].label + ' 묶음으로', onclick: () => jumpTo(bid),
+      }, BUCKET_MAP[bid].label + ' ' + n);
       let summary = null;
       if (sum && sum[0] === 'part') {
         summary = el('div', { class: 'ck-prog' }, MV.ui.progress(sum[1]), el('span', { class: 'ck-prog-txt' }, sum[2] + '/' + sum[3] + ' 완료'),
-          sum[4] ? el('span', { class: 'chip bad' }, '지연 ' + sum[4]) : null);
+          sum[4] ? jump('overdue', sum[4]) : null);
       } else if (sum && sum[0] === 'sp') {
+        // 🔥 지금 할 일은 중요도 묶음이라 '기한 지남'·'오늘' 묶음이 따로 없음 → 숫자만 알려 주는 칩 (급한 일은 줄의 기한 칩으로)
+        const now = isNowCh(ch);
+        const cnt = (bid, n) => (!n ? null : now
+          ? el('span', { class: 'chip ' + (bid === 'overdue' ? 'bad' : 'warn'), title: BUCKET_MAP[bid].label + ' ' + n + '개 — 줄마다 기한 칩으로 보여요' }, BUCKET_MAP[bid].label + ' ' + n)
+          : jump(bid, n));
         summary = el('div', { class: 'ck-prog ck-prog-sp' },
-          sum[1] ? el('span', { class: 'chip bad' }, '지연 ' + sum[1]) : null,
-          sum[2] ? el('span', { class: 'chip warn' }, '오늘 ' + sum[2]) : null,
+          cnt('overdue', sum[1]), cnt('today', sum[2]),
           el('span', { class: 'ck-prog-txt' }, '모두 ' + sum[3] + '개'));
       } else if (sum && sum[0] === 'done') {
         summary = el('div', { class: 'ck-prog ck-prog-sp' }, el('span', { class: 'ck-prog-txt' }, '완료 ' + sum[1] + '개'));
@@ -851,21 +995,28 @@
       } else if (sum && sum[0] === 'act') {
         summary = el('div', { class: 'ck-prog ck-prog-sp' }, el('span', { class: 'ck-prog-txt' }, '기록 ' + sum[1] + '개 (최근 300개까지)'));
       }
-      let filters = null;
-      if (ch !== '~activity' && !info.missing && !(ch === '~search' && !cur.q)) {
-        const showHide = !!info.part || ch === '~search';
-        filters = !showHide ? null : el('div', { class: 'ck-filters' },
-          el('button', {
-            type: 'button', class: 'ck-toggle', 'aria-pressed': String(!!u.hideDone), 'data-fkey': 'hide',
-            title: '켜 두면 끝낸 일은 아래 “완료” 묶음에 접혀 있어요',
-            onclick: () => { mem.doneOpen = {}; setUI({ hideDone: !ui().hideDone }); },
-          }, el('span', { class: 'ck-switch', 'aria-hidden': 'true' }), '완료 숨기기'));
-      }
+      // (끝낸 일 접기·펼치기는 목록의 '▾ 완료' 묶음 머리 하나로 — 채널마다 기억)
       put(sub,
-        info.desc ? el('p', { class: 'ck-head-desc' }, info.desc) : null,
-        (summary || filters) ? el('div', { class: 'ck-head-bar' }, summary, filters) : null);
+        info.desc ? el('p', { class: 'ck-head-desc' + (info.special ? ' ck-head-desc-sp' : '') }, info.desc) : null,
+        info.short ? el('p', { class: 'ck-head-desc ck-head-desc-short' }, info.short) : null,   // 폰에서만 보임 (긴 설명 대신)
+        summary ? el('div', { class: 'ck-head-bar' }, summary) : null);
       sub.hidden = !sub.firstChild;
       restoreFocusIn(head, fkH); restoreFocusIn(sub, fkS);
+    }
+    /* 머리의 '기한 지남 n'·'오늘 n' → 그 묶음 머리가 위 고정 머리 바로 아래에 오게 */
+    function jumpTo(bid) {
+      const sec = secCache.get('b:' + bid);
+      if (!sec || !sec.node.isConnected) return;
+      if (isPhone()) {
+        const hb = head.getClientRects().length ? Math.max(0, head.getBoundingClientRect().bottom) : 0;
+        window.scrollTo(0, Math.max(0, Math.round(window.scrollY + sec.node.getBoundingClientRect().top - hb - 4)));
+      } else {
+        list.scrollTop += sec.node.getBoundingClientRect().top - list.getBoundingClientRect().top;
+      }
+      if (sec.head && sec.head.isConnected) {
+        if (sec.head.tagName !== 'BUTTON') sec.head.tabIndex = -1;
+        sec.head.focus({ preventScroll: true });
+      }
     }
 
     /* ---------- ⋯ 메뉴 ---------- */
@@ -939,9 +1090,16 @@
         done.forEach((it) => lines.push('☑ ' + (sp ? '[' + ((MV.parts.get(it.partId) || {}).name || '파트 없음') + '] ' : '') + it.title));
       } else {
         const open = items.filter((it) => !it.done).sort(cmpItems);
+        const now = isNowCh(ch);   // 🔥 지금 할 일: 화면과 같은 중요도 순 (중요 → 보통 → 여유, 묶음 안은 기한 순)
+        if (now) open.sort((a, b) => (PRI_RANK[priKey(a)] - PRI_RANK[priKey(b)]) || cmpItems(a, b));
         lines.push(info.emoji + ' ' + info.name + ' — 남은 할 일 ' + open.length + '개');
         lines.push('(' + D.fmt(today) + ' 기준 · 이사 ' + (dd.n === 0 ? '오늘' : dd.label) + ')');
+        let lastPri = null;
         open.forEach((it) => {
+          if (now && priKey(it) !== lastPri) {
+            lastPri = priKey(it);
+            lines.push('[' + priLabel(lastPri) + ' ' + open.filter((x) => priKey(x) === lastPri).length + ']');
+          }
           const p = MV.parts.get(it.partId);
           const due = dueText(it.due);
           lines.push('☐ ' + (it.priority === 'high' ? '❗' : '') + (sp ? '[' + (p ? p.name : '파트 없음') + '] ' : '') + it.title +
@@ -993,22 +1151,28 @@
       if (it.id === cur.itemId) cls.push('ck-sel');
       const href = hashFor(ch, it.id, cur.q);
       const terms = ch === '~search' ? termsOf(cur.q) : null;
+      const tb = titleBits(it, terms);
       const cb = el('button', {
         type: 'button', class: 'ck-cb', role: 'checkbox', 'aria-checked': it.done ? 'true' : 'false',
-        'aria-label': (it.done ? '완료 취소: ' : '완료로 표시: ') + it.title, 'data-fkey': 'cb:' + it.id,
+        'aria-label': (it.done ? '완료 취소: ' : '완료로 표시: ') + tb.text, 'data-fkey': 'cb:' + it.id,
         onclick: (e) => { e.stopPropagation(); toggleItem(it.id); },
       }, el('span', { class: 'ck-cb-box', 'aria-hidden': 'true' }));
       const title = el('a', {
         class: 'ck-row-title', href, 'data-fkey': 'row:' + it.id,
         onclick: (e) => { if (!plainLinkClick(e)) return; e.preventDefault(); e.stopPropagation(); selectItem(it.id); },
-      }, highlight(it.title || '(제목 없음)', terms));
+      }, tb.node);
       const meta = [];
       if (opts.doneMeta) meta.push(el('span', { class: 'chip good' }, '✓ ' + D.time(it.doneAt) + ' 완료'));
-      else meta.push(MV.ui.dueChip(it.due, it.done));
+      else if (opts.short && !it.done && D.valid(it.due)) {
+        // '오늘'·'기한 지남' 묶음 안: 날짜는 묶음 머리가 말해 주니 짧게 ('오늘', '3일 지남') — 날짜는 title 로
+        const n = D.diff(D.today(), D.str(D.parse(it.due)));
+        meta.push(n > 0 ? MV.ui.dueChip(it.due, false) : el('span', { class: 'chip ' + (n < 0 ? 'bad' : 'warn'), title: D.fmtLong(it.due) }, relLabel(n)));
+      } else meta.push(MV.ui.dueChip(it.due, it.done));
       if (it.priority === 'high' && !it.done) meta.push(el('span', { class: 'chip bad' }, '중요'));
       const nn = notesOf(it).length;
       if (nn) meta.push(el('span', { class: 'ck-meta-n', title: '메모 ' + nn + '개' }, '💬 ' + nn));
-      if (it.guide) meta.push(el('span', { class: 'ck-meta-n', title: '관련 가이드가 있어요' }, '📖'));
+      // 📖 관련 가이드: 누르면 바로 그 가이드로 (누르는 영역 40×40, 줄 높이는 그대로)
+      if (it.guide) meta.push(el('a', { class: 'ck-glink', href: guideHash(it.guide), title: '관련 가이드 읽기', 'aria-label': '관련 가이드 읽기: ' + tb.text }, el('span', { 'aria-hidden': 'true' }, '📖')));
       if (opts.showPart) {
         const p = MV.parts.get(it.partId);
         meta.push(el('button', {
@@ -1038,7 +1202,6 @@
       const nodeBlocks = (...nodes) => nodes.map((node) => ({ node }));
       if (ch === '~activity') return nodeBlocks(...buildActivity());
       const info = channelInfo(ch);
-      const u = ui();
       if (info.missing) {
         return nodeBlocks(emptyState('❓', '이 파트를 찾을 수 없어요. 삭제되었을 수 있어요.',
           el('button', { type: 'button', class: 'btn btn-sm', onclick: () => nav(hashFor('~focus'), { replace: true }) }, '🔥 지금 할 일 보기')));
@@ -1067,9 +1230,8 @@
       }
 
       if (!items.length) {
-        if (ch === '~search') return nodeBlocks(emptyState('🔍', '“' + cur.q + '”와(과) 맞는 항목이 없어요.'));
-        if (ch === '~focus') return nodeBlocks(emptyState('😌', '급한 일이 없어요! 다음 일주일을 미리 볼까요?', el('button', { type: 'button', class: 'btn btn-sm', onclick: () => goChannel('~week') }, '🗓 7일 이내 보기')));
-        if (ch === '~week') return nodeBlocks(emptyState('🗓', '7일 안에 마감인 일이 없어요.', el('button', { type: 'button', class: 'btn btn-sm', onclick: () => goChannel('~all') }, '📋 전체 보기')));
+        if (ch === '~search') return nodeBlocks(emptyState('🔍', '“' + cur.q + '”에 맞는 항목이 없어요. 다른 말로 찾아 보세요.'));
+        if (ch === '~focus') return nodeBlocks(emptyState('😌', '기한 지난 일도, 7일 안에 마감인 일도 없어요!', el('button', { type: 'button', class: 'btn btn-sm', onclick: () => goChannel('~all') }, '📋 남은 할 일 모두 보기')));
         if (ch === '~all') return nodeBlocks(emptyState('🎉', '남은 할 일이 하나도 없어요. 수고하셨어요!'));
         return nodeBlocks(emptyState('🌱', '아직 할 일이 없어요. 아래 입력창에 첫 할 일을 적어 보세요.'));
       }
@@ -1078,29 +1240,55 @@
       BUCKETS.forEach((b) => { buckets[b.id] = []; });
       items.forEach((it) => {
         let s = statusOf(it);
-        if (s === 'done' && lingering.has(it.id) && ch !== '~search') s = openStatusOf(it);
+        // 방금 체크한 줄은 1.3초 동안 원래 묶음에 (검색 결과도 — 다음 줄이 손가락 밑으로 미끄러져 들어오지 않게)
+        if (s === 'done' && lingering.has(it.id)) s = openStatusOf(it);
         (buckets[s] || buckets.nodate).push(it);
       });
       BUCKETS.forEach((b) => { buckets[b.id].sort(b.id === 'done' ? cmpDone : cmpItems); });
       const out = [];
       const openN = items.length - buckets.done.length;
       if (openN === 0 && info.part) out.push({ node: emptyState('🎉', '이 파트는 모두 끝났어요!') });
+      if (isNowCh(ch)) {
+        /* 🔥 지금 할 일: 중요 → 보통 → 여유 묶음 (작은 머리 + 개수), 묶음 안은 기한 순 (기한 지남 → 오늘 → 그 뒤) → 원래 순서.
+           날짜 묶음이 없으니 줄마다 기한 칩: 오늘·기한 지남은 짧게('오늘', '3일 지남' — 빨강·주황), 그 뒤는 '10/28(수) · D-2'.
+           방금 체크한 줄은 1.3초 동안 제자리 (기한·중요도가 그대로라 같은 묶음 같은 자리) */
+        const groups = {};
+        PRI_GROUPS.forEach((k) => { groups[k] = []; });
+        items.forEach((it) => { groups[priKey(it)].push(it); });
+        PRI_GROUPS.forEach((k) => {
+          const arr = groups[k].sort(cmpItems);
+          if (!arr.length) return;
+          const label = priLabel(k);
+          out.push({
+            sec: true, key: 'p:' + k, cls: 'ck-pri-sec', headSig: 'p:' + k + '|' + label + '|' + arr.length,
+            head: () => el('h3', { class: 'ck-bucket-h ck-pri-h ck-pri-' + k + (k === 'high' ? ' ck-bad' : ''), title: '중요도 ' + label + ' — 기한이 빠른 순' },
+              label, el('span', { class: 'ck-count' }, String(arr.length))),
+            rows: arr.map((it) => {
+              const st = it.done ? openStatusOf(it) : statusOf(it);
+              return [it, { showPart, short: st === 'today' || st === 'overdue' }];
+            }),
+          });
+        });
+        return out;
+      }
       BUCKETS.forEach((b) => {
         const arr = buckets[b.id];
         if (!arr.length) return;
         if (b.id === 'done') {
-          const open = mem.doneOpen[ch] != null ? mem.doneOpen[ch] : (ch === '~search' || !u.hideDone);
+          const open = doneOpenFor(ch);
           out.push({
             sec: true, key: 'b:done', cls: 'ck-bucket-done', headSig: 'done|' + arr.length + '|' + open + '|' + ch,
             head: () => el('button', {
               type: 'button', class: 'ck-bucket-h ck-done-h', 'aria-expanded': String(open), 'data-fkey': 'donegrp',
-              onclick: () => { mem.doneOpen[ch] = !open; renderList(); },
+              title: open ? '끝낸 일 접기' : '끝낸 일 펼치기',
+              onclick: () => setDoneOpen(ch, !open),
             }, el('span', { class: 'ck-caret', 'aria-hidden': 'true' }, open ? '▾' : '▸'), '완료', el('span', { class: 'ck-count' }, String(arr.length))),
             rows: open ? arr.map((it) => [it, { showPart }]) : [],
           });
           return;
         }
-        out.push({ sec: true, key: 'b:' + b.id, headSig: b.id + '|' + arr.length, head: () => bucketHead(b.label, arr.length, b.cls), rows: arr.map((it) => [it, { showPart }]) });
+        const short = b.id === 'today' || b.id === 'overdue';
+        out.push({ sec: true, key: 'b:' + b.id, headSig: b.id + '|' + arr.length, head: () => bucketHead(b.label, arr.length, b.cls), rows: arr.map((it) => [it, { showPart, short }]) });
       });
       return out;
     }
@@ -1112,7 +1300,7 @@
       const p = MV.parts.get(it.partId);
       return [ch, ch === '~search' ? cur.q + '\u0002' + haystack(it) : '', D.today(), it.title, it.done ? 1 : 0, it.doneAt || '', it.due || '',
         it.priority || '', notesOf(it).length, it.guide ? 1 : 0, it.partId,
-        opts.showPart && p ? (p.emoji || '') + p.name : '', lingering.has(it.id) ? 1 : 0, opts.showPart ? 1 : 0, opts.doneMeta ? 1 : 0].join('\u0001');
+        opts.showPart && p ? (p.emoji || '') + p.name : '', lingering.has(it.id) ? 1 : 0, opts.showPart ? 1 : 0, opts.doneMeta ? 1 : 0, opts.short ? 1 : 0, it.guide || ''].join('\u0001');
     }
     function getRow(it, ch, opts) {
       const sig = rowSig(it, ch, opts);
@@ -1350,19 +1538,22 @@
     function updateComposer() {
       const ch = effCh();
       const sp = isSpecial(ch);
-      const show = (ch === '~focus' || ch === '~week' || ch === '~all') || (!sp && !!MV.parts.get(ch));
+      const show = (ch === '~focus' || ch === '~all') || (!sp && !!MV.parts.get(ch));
       composer.hidden = !show;
       if (!show) return;
       compPartWrap.hidden = !sp;
       if (!sp) hideCompNote();
       if (sp && document.activeElement !== compPart) {
         const parts = MV.parts.list();
-        const want = parts.some((p) => p.id === mem.composerPart) ? mem.composerPart : (parts[0] ? parts[0].id : '');
+        const saved = typeof ui().composerPart === 'string' ? ui().composerPart : mem.composerPart;   // 고른 파트는 이 기기에 기억
+        const want = parts.some((p) => p.id === saved) ? saved : (parts[0] ? parts[0].id : '');
         fillPartSelect(compPart, want);
       }
       if (compInput.value !== mem.draft && document.activeElement !== compInput) compInput.value = mem.draft;
       updatePreview();
     }
+    /* 🔥 지금 할 일에서 날짜 없이 적으면 오늘 할 일로 (적은 목록에 바로 보이게) — 미리보기 칩으로 알려 줌 */
+    const defaultDue = () => (isNowCh(effCh()) ? D.today() : null);
     function updatePreview() {
       const raw = compInput.value;
       mem.draft = raw;
@@ -1374,9 +1565,13 @@
       }
       const p = parseQuick(raw);
       const chips = [];
-      if (p.due) {
-        const dd = D.dday(p.due);
-        chips.push(el('span', { class: 'chip ' + (dd.n < 0 ? 'bad' : dd.n <= 3 ? 'warn' : 'brand') }, '📅 ' + D.fmt(p.due) + ' · ' + (dd.n === 0 ? '오늘' : dd.label)));
+      const due = p.due || defaultDue();
+      if (due) {
+        const n = D.diff(D.today(), due);
+        chips.push(el('span', {
+          class: 'chip ' + (n < 0 ? 'bad' : n <= 3 ? 'warn' : 'brand'),
+          title: p.due ? D.fmtLong(due) : '날짜를 적지 않으면 오늘 할 일로 넣어요 (예: ~내일, ~10/30)',
+        }, '📅 ' + (p.due ? D.fmt(due) + ' · ' + relLabel(n) : '오늘')));
       } else chips.push(el('span', { class: 'chip' }, '📅 기한 없음'));
       if (p.priority) chips.push(el('span', { class: 'chip ' + (p.priority === 'high' ? 'bad' : '') }, PRI_LABEL[p.priority]));
       p.bad.forEach((b) => chips.push(el('span', { class: 'chip warn' }, '“' + b + '” 날짜를 못 읽었어요')));
@@ -1397,6 +1592,7 @@
     function hideCompNote() {
       clearTimeout(compNoteTimer); compNoteTimer = null;
       if (!compNote.hidden) { compNote.hidden = true; put(compNote); }
+      composer.classList.remove('ck-noted');
     }
     function showCompNote(pf) {
       const p = MV.parts.get(pf.partId);
@@ -1407,6 +1603,7 @@
         el('button', { type: 'button', class: 'btn btn-sm ck-comp-note-go', onclick: () => { hideCompNote(); goChannel(pf.partId, pf.id); } }, '보기'),
         el('button', { type: 'button', class: 'ck-x ck-comp-note-x', 'aria-label': '알림 닫기', onclick: () => hideCompNote() }, '×'));
       compNote.hidden = false;
+      composer.classList.add('ck-noted');   // 폰: 접힌 입력창이어도 알림이 보이게 펼침
       clearTimeout(compNoteTimer);
       compNoteTimer = setTimeout(hideCompNote, 7000);
     }
@@ -1425,7 +1622,7 @@
       if (!partId || !MV.parts.get(partId)) { MV.ui.toast('추가할 파트를 먼저 만들어 주세요'); return; }
       compInput.value = ''; mem.draft = '';
       hideCompNote();
-      const it = MV.items.add({ partId, title: p.title.slice(0, TITLE_MAX).trim(), due: p.due || null, priority: p.priority || 'mid' });
+      const it = MV.items.add({ partId, title: p.title.slice(0, TITLE_MAX).trim(), due: p.due || defaultDue(), priority: p.priority || 'mid' });
       pendingFlash = { id: it.id, partId, title: it.title };
       updatePreview();
       compInput.focus({ preventScroll: true });
@@ -1437,7 +1634,26 @@
       else if (e.key === 'Escape' && !e.isComposing && compInput.value) { e.preventDefault(); e.stopPropagation(); compInput.value = ''; updatePreview(); }
     });
     compBtn.addEventListener('click', addFromComposer);
-    compPart.addEventListener('change', () => { mem.composerPart = compPart.value; updatePreview(); });
+    compPart.addEventListener('change', () => {
+      mem.composerPart = compPart.value;
+      setUI({ composerPart: compPart.value }, true);   // 이 기기에 기억 (다시 그리지 않음)
+      updatePreview();
+      if (isPhone()) compInput.focus({ preventScroll: true });   // 폰: 파트를 고른 뒤 바로 적을 수 있게 (입력창이 접히지 않게)
+    });
+    /* 폰: 입력창은 '＋ 할 일' 단추로 접어 둠 (목록이 더 보이게). 누르거나 글이 있거나 안에 초점이 있으면 펼침 */
+    function openComposer() {
+      if (composer.hidden) return;
+      composer.classList.add('ck-comp-open');   // 먼저 보이게 한 뒤 같은 누름 안에서 초점 → 폰 자판이 뜸
+      compInput.focus({ preventScroll: true });
+    }
+    compFab.addEventListener('click', openComposer);
+    composer.addEventListener('focusin', (e) => { if (e.target !== compFab) composer.classList.add('ck-comp-open'); });
+    composer.addEventListener('focusout', () => {
+      setTimeout(() => {
+        if (!alive || composer.contains(document.activeElement)) return;
+        if (!compInput.value.trim()) composer.classList.remove('ck-comp-open');
+      }, 0);
+    });
 
     /* ---------- 검색 ---------- */
     const runSearch = MV.debounce(() => {
@@ -1453,7 +1669,7 @@
     }, 250);
     function exitSearch(refocus) {
       if (performance.now() - backAt < 1500) return;   // 이미 뒤로 가는 중 (두 번 뒤로 가지 않게)
-      const target = isPhone() ? '#/checklist' : hashFor(mem.lastChannel && (MV.parts.get(mem.lastChannel) || SPECIAL_MAP[mem.lastChannel]) ? mem.lastChannel : '~focus');
+      const target = isPhone() ? '#/checklist' : hashFor(rememberedCh());
       mem.refocusSearch = !!refocus;
       goBackTo(target);
       if (!(performance.now() - backAt < 50)) { mem.refocusSearch = false; if (refocus) searchInput.focus(); }   // 제자리 이동(replace)이면 지금 바로
@@ -1632,13 +1848,15 @@
       const f = T.f = {};
       const id = it.id;
 
-      // 머리: 파트 칩 + 옮기기 + 닫기
+      // 머리: 파트 칩 + (폰) 완료 + 닫기 — 폰에서는 머리가 위에 붙어 있어 설명을 읽다가도 바로 완료할 수 있게
       f.back = el('button', { type: 'button', class: 'btn btn-ghost ck-th-back ck-phone-only', onclick: () => closeThread() }, '← 목록');
       f.partChip = el('button', { type: 'button', class: 'chip ck-pchip ck-th-part', onclick: () => { const x = curItem(); if (x && MV.parts.get(x.partId)) goChannel(x.partId, x.id); } });
-      f.moveSel = el('select', { class: 'select ck-move', 'aria-label': '다른 파트로 옮기기', title: '다른 파트로 옮기기' });
-      f.moveSel.addEventListener('change', () => { const v = f.moveSel.value; f.moveSel.value = ''; if (v) moveTo(v); });
+      f.headDone = el('button', { type: 'button', class: 'ck-th-hdone ck-phone-only', onclick: () => toggleItem(id) });
       f.close = el('button', { type: 'button', class: 'btn btn-ghost btn-icon ck-th-close', 'aria-label': '상세 닫기', title: '닫기 (이스케이프 키)', onclick: () => closeThread() }, '✕');
-      const headEl = f.head = el('div', { class: 'ck-th-head' }, f.back, f.partChip, el('span', { class: 'ck-spacer' }), f.moveSel, f.close);
+      const headEl = f.head = el('div', { class: 'ck-th-head' }, f.back, f.partChip, el('span', { class: 'ck-spacer' }), f.headDone, f.close);
+      // 파트 옮기기: 본문의 '파트' 칸 (지금 파트가 골라져 있고, 바꾸면 옮겨요)
+      f.moveSel = el('select', { class: 'select ck-move', 'aria-label': '파트 (바꾸면 그 파트로 옮겨요)', title: '다른 파트로 옮기기' });
+      f.moveSel.addEventListener('change', () => { const v = f.moveSel.value; const x = curItem(); if (v && x && v !== x.partId) moveTo(v); });
 
       // 완료 + 제목
       f.doneBtn = el('button', { type: 'button', class: 'ck-th-done', onclick: () => toggleItem(id) });
@@ -1688,14 +1906,28 @@
         MV.items.update(id, { priority: v }, '🚩 중요도 변경: ' + x.title + ' → ' + PRI_LABEL[v]);
       }, '중요도');
 
-      // 설명
-      f.detail = el('textarea', { class: 'textarea ck-detail', id: 'ck-detail-' + String(id).replace(/[^\w-]/g, ''), rows: '3', 'aria-label': '설명', placeholder: '자세한 내용, 전화번호, 준비물, 결정한 것…' });
+      // 설명: 처음엔 읽기 화면(주소·전화번호를 누를 수 있음, 폰 자판이 뜨지 않음) → '✏️ 수정'으로 고치기
+      T.editDetail = false;
+      f.detail = el('textarea', { class: 'textarea ck-detail', id: 'ck-detail-' + String(id).replace(/[^\w-]/g, ''), rows: '3', 'aria-label': '설명', placeholder: '자세한 내용, 전화번호, 준비물, 결정한 것…', hidden: true });
       f.detail.value = it.detail || '';
       f.detail._orig = f.detail.value;
       f.detail.addEventListener('focus', () => { const x = curItem(); f.detail._orig = x ? (x.detail || '') : f.detail.value; });
-      f.detail.addEventListener('input', () => { autosize(f.detail, 420); renderDetailPreview(f.detail.value); saveDetailSoon(); });
-      f.detail.addEventListener('blur', () => { if (T.id === id) { saveDetailSoon.flush(); commitDetail(true); } });
+      f.detail.addEventListener('input', () => { autosize(f.detail, detailMax()); renderDetailPreview(f.detail.value); saveDetailSoon(); });
+      f.detail.addEventListener('blur', () => {
+        if (T.id !== id) return;
+        saveDetailSoon.flush(); commitDetail(true);
+        // 다른 곳을 누르는 중이면 그 누름이 끝난 뒤에 읽기 화면으로 (누르는 도중에 칸 높이가 바뀌어 누른 곳이 밀리지 않게)
+        afterHold(() => { if (T.f === f && T.editDetail && document.activeElement !== f.detail) { T.editDetail = false; renderDetailMode(); } });
+      });
       f.detailPrev = el('div', { class: 'ck-detail-prev' });
+      f.detailView = el('div', { class: 'ck-detail-view' });
+      f.detailView.addEventListener('click', (e) => {   // 마우스 화면: 글을 누르면 고치기 (링크·글 고르기는 그대로). 터치 화면은 '✏️ 수정'으로만
+        if (isTouch() || e.target.closest('a, button')) return;
+        const sel = window.getSelection && window.getSelection();
+        if (sel && String(sel).length > 0) return;
+        editDetail();
+      });
+      f.detailEdit = el('button', { type: 'button', class: 'btn btn-ghost btn-sm ck-detail-edit', 'aria-label': '설명 수정', onclick: () => editDetail() }, '✏️ 수정');
 
       // 링크·가이드
       f.links = el('div', { class: 'ck-links' });
@@ -1707,14 +1939,27 @@
       f.stamps = el('p', { class: 'ck-stamps' });
       const delBtn = el('button', { type: 'button', class: 'btn btn-danger btn-sm ck-del', onclick: deleteItem }, '🗑 항목 삭제');
 
+      // 마감·중요도·파트: 폰에서는 한 줄 요약 단추로 접어 둠 (설명이 첫 화면에 보이게) — 펼침은 항목마다 기억
+      f.fieldsSum = el('button', { type: 'button', class: 'ck-fields-sum', 'aria-expanded': 'false', onclick: () => setFieldsOpen(!mem.fieldsOpen[id]) });
+      f.fields = el('div', { class: 'ck-fields' },
+        f.fieldsSum,
+        el('div', { class: 'ck-field' }, el('span', { class: 'ck-field-l' }, '마감'), dueBox),
+        el('div', { class: 'ck-field' }, el('span', { class: 'ck-field-l' }, '중요도'), f.prio),
+        el('div', { class: 'ck-field' }, el('span', { class: 'ck-field-l' }, '파트'), f.moveSel));
+      const setFieldsOpen = (open) => {
+        mem.fieldsOpen[id] = !!open;
+        f.fields.classList.toggle('ck-open', !!open);
+        f.fieldsSum.setAttribute('aria-expanded', String(!!open));
+      };
+      setFieldsOpen(!!mem.fieldsOpen[id]);
+
       f.body = el('div', { class: 'ck-th-body' },
         el('div', { class: 'ck-th-top' }, f.doneBtn),
         f.title,
-        el('div', { class: 'ck-fields' },
-          el('div', { class: 'ck-field' }, el('span', { class: 'ck-field-l' }, '마감'), dueBox),
-          el('div', { class: 'ck-field' }, el('span', { class: 'ck-field-l' }, '중요도'), f.prio)),
-        el('div', { class: 'ck-sec' }, el('label', { class: 'ck-sec-h', for: f.detail.id }, '설명'), f.detail, f.detailPrev),
-        el('div', { class: 'ck-sec' }, el('div', { class: 'ck-sec-h' }, '링크', el('button', { type: 'button', class: 'btn btn-ghost btn-sm ck-addlink', onclick: addLink }, '+ 링크 추가')), f.links, f.guide),
+        el('div', { class: 'ck-sec ck-desc' }, el('div', { class: 'ck-sec-h' }, el('span', '설명'), f.detailEdit), f.detailView, f.detail, f.detailPrev),
+        f.fields,
+        f.guide,
+        el('div', { class: 'ck-sec' }, el('div', { class: 'ck-sec-h' }, '링크', el('button', { type: 'button', class: 'btn btn-ghost btn-sm ck-addlink', onclick: addLink }, '+ 링크 추가')), f.links),
         el('div', { class: 'ck-sec ck-thread-sec' }, el('div', { class: 'ck-sec-h ck-thread-h' }, '💬 메모', f.notesCount), f.notes),
         f.stamps,
         el('div', { class: 'ck-th-danger' }, delBtn));
@@ -1748,7 +1993,38 @@
       put(thread, headEl, f.body, foot);
       syncThread(true);
       // (f.body 는 새로 만든 칸이라 스크롤은 이미 맨 위 — scrollTop 을 쓰면 레이아웃을 강제로 계산하게 됨)
-      inFrame(() => { if (T.f === f) autosizeAll([[f.title], [f.detail, 420], [f.noteInput, 160]]); });
+      inFrame(() => { if (T.f === f) autosizeAll([[f.title], [f.detail, detailMax()], [f.noteInput, 160]]); });
+    }
+    /* 설명 칸 높이 한도: 컴퓨터·태블릿 칸 안에서는 420px, 폰은 한도 없이(창 전체만 스크롤 — 안쪽 스크롤 상자가 생기지 않게) */
+    const detailMax = () => (isPhone() ? 0 : 420);
+    function editDetail() {
+      const f = T.f;
+      if (!f.detail) return;
+      T.editDetail = true;
+      renderDetailMode();
+      autosize(f.detail, detailMax());
+      f.detail.focus({ preventScroll: true });
+      const n = f.detail.value.length;
+      try { f.detail.setSelectionRange(n, n); } catch (e) { /* 무시 */ }
+      inFrame(() => { if (T.f === f && f.detail.isConnected) { if (isPhone()) revealOnPhone(f.detail, f.foot, f.head); else f.detail.scrollIntoView({ block: 'nearest' }); } });
+    }
+    /* 읽기 ↔ 고치기 화면 (저장된 글은 같음) */
+    let detailViewText = null;
+    function renderDetailMode() {
+      const f = T.f;
+      if (!f.detail) return;
+      const editing = !!T.editDetail;
+      f.detail.hidden = !editing;
+      f.detailView.hidden = editing;
+      if (editing) { f.detailEdit.hidden = true; renderDetailPreview(f.detail.value); return; }
+      f.detailPrev.hidden = true;
+      const it = curItem();
+      const text = it ? str(it.detail) : '';
+      f.detailEdit.hidden = !text.trim();
+      if (text === detailViewText && f.detailView.firstChild) return;
+      detailViewText = text;
+      if (text.trim()) put(f.detailView, richText(text));
+      else put(f.detailView, el('button', { type: 'button', class: 'ck-detail-empty', onclick: () => editDetail() }, '＋ 자세한 내용·전화번호·준비물을 적어 두세요'));
     }
     function syncNoteHint() {
       const ta = T.f.noteInput;
@@ -1785,31 +2061,41 @@
       const pl = partLabel(p);
       if (f.partChip.textContent !== pl) put(f.partChip, el('span', { class: 'ck-th-part-t' }, pl));
       f.partChip.title = p ? p.name + ' 채널 보기' : '';
-      if (ae !== f.moveSel) {
-        fillPartSelect(f.moveSel, '', MOVE_PH);   // 짧게: 서랍·폰 머리에서 잘리지 않게 (전체 뜻은 aria-label·title)
-        MV.$$('option', f.moveSel).forEach((o) => { o.disabled = o.value === it.partId; });
-        f.moveSel.value = '';
-      }
-      // 완료
+      if (ae !== f.moveSel) fillPartSelect(f.moveSel, it.partId);   // 지금 파트가 골라져 있음
+      // 완료 (본문 단추 + 폰 머리 단추)
       f.doneBtn.className = 'ck-th-done' + (it.done ? ' ck-on' : '');
       f.doneBtn.setAttribute('aria-pressed', String(!!it.done));
       put(f.doneBtn, el('span', { class: 'ck-cb-box', 'aria-hidden': 'true' }), it.done ? '완료됨 · ' + D.time(it.doneAt) : '완료로 표시');
+      f.headDone.className = 'ck-th-hdone ck-phone-only' + (it.done ? ' ck-on' : '');
+      f.headDone.setAttribute('aria-pressed', String(!!it.done));
+      f.headDone.setAttribute('aria-label', it.done ? '완료 취소' : '완료로 표시');
+      put(f.headDone, el('span', { class: 'ck-cb-box', 'aria-hidden': 'true' }), it.done ? '완료됨' : '완료');
       thread.classList.toggle('ck-th-isdone', !!it.done);
       // 제목·설명 (입력 중이면 건드리지 않음)
       if (ae !== f.title && f.title.value !== (it.title || '')) { f.title.value = it.title || ''; autosize(f.title); }
-      if (ae !== f.detail && f.detail.value !== (it.detail || '')) { f.detail.value = it.detail || ''; f.detail._orig = f.detail.value; autosize(f.detail, 420); }
-      renderDetailPreview(ae === f.detail ? f.detail.value : (it.detail || ''));
+      if (ae !== f.detail && f.detail.value !== (it.detail || '')) { f.detail.value = it.detail || ''; f.detail._orig = f.detail.value; autosize(f.detail, detailMax()); }
+      renderDetailMode();
       // 마감
       const dueStr = D.valid(it.due) ? D.str(D.parse(it.due)) : '';
       if (ae !== f.due && !f.due._dirty && f.due.value !== dueStr) f.due.value = dueStr;
+      let moveTxt = '';
       if (dueStr) {
-        const dd = D.dday(dueStr);
         const toMove = D.diff(dueStr, D.moveDate());
-        put(f.dueInfo, MV.ui.dueChip(dueStr, it.done), el('span', { class: 'ck-due-move' },
-          toMove > 0 ? '이사 ' + toMove + '일 전' : toMove === 0 ? '이사 당일' : '이사 ' + (-toMove) + '일 후'));
-        f.dueInfo.title = D.fmtLong(dueStr) + ' · ' + dd.label;
+        moveTxt = toMove > 0 ? '이사 ' + toMove + '일 전' : toMove === 0 ? '이사 당일' : '이사 ' + (-toMove) + '일 후';
+        put(f.dueInfo, MV.ui.dueChip(dueStr, it.done), el('span', { class: 'ck-due-move' }, moveTxt));
+        f.dueInfo.title = D.fmtLong(dueStr) + ' · ' + relLabel(D.diff(D.today(), dueStr));
       } else put(f.dueInfo, el('span', { class: 'chip' }, '기한 없음'));
       f.prio.set(it.priority || 'mid');
+      // 폰: 접힌 마감·중요도 칸의 한 줄 요약
+      const pri = it.priority || 'mid';
+      put(f.fieldsSum,
+        el('span', { class: 'ck-field-l' }, '마감'),
+        el('span', { class: 'ck-fields-sum-v' },
+          dueStr ? MV.ui.dueChip(dueStr, it.done) : el('span', { class: 'chip' }, '기한 없음'),
+          moveTxt ? el('span', { class: 'ck-due-move' }, moveTxt) : null,
+          el('span', { class: 'chip' + (pri === 'high' ? ' bad' : '') }, PRI_LABEL[pri] || '보통')),
+        el('span', { class: 'ck-fields-sum-go', 'aria-hidden': 'true' }, '바꾸기 ', el('span', { class: 'ck-caret' }, '▸')));
+      f.fieldsSum.setAttribute('aria-label', '마감 ' + (dueStr ? D.fmt(dueStr) : '없음') + ' · 중요도 ' + (PRI_LABEL[pri] || '보통') + ' — 바꾸기');
       // 링크·가이드
       const links = linksOf(it);
       const lsig = JSON.stringify(links);
@@ -1830,7 +2116,8 @@
           : [el('p', { class: 'ck-none' }, '견적서·제품 페이지 주소를 붙여 두면 편해요.')]));
       }
       const g = it.guide || (p && p.guide) || '';
-      put(f.guide, g ? el('a', { class: 'ck-guide-link', href: guideHash(g) }, '📖 ', it.guide ? '관련 가이드 보기' : (p ? p.name + ' 가이드 보기' : '가이드 보기')) : '');
+      put(f.guide, g ? el('a', { class: 'ck-guide-link', href: guideHash(g) },
+        el('span', { 'aria-hidden': 'true' }, '📖'), it.guide ? '관련 가이드 보기' : (p ? p.name + ' 가이드 보기' : '가이드 보기'), el('span', { class: 'ck-guide-go', 'aria-hidden': 'true' }, '›')) : '');
       f.guide.hidden = !g;
       // 메모
       const notes = notesOf(it);
@@ -1849,7 +2136,7 @@
                 type: 'button', class: 'ck-x ck-note-del', 'aria-label': '메모 지우기', 'data-fkey': 'nd:' + n.id,
                 onclick: () => MV.ui.confirm('이 메모를 지울까요?', { danger: true, okLabel: '지우기', title: '메모 삭제' }).then((ok) => { if (ok && T.id) MV.items.removeNote(T.id, n.id); }),
               }, '×')),
-            el('div', { class: 'ck-note-text' }, MV.linkify(str(n.text))))))
+            el('div', { class: 'ck-note-text' }, richText(str(n.text))))))
           : [el('p', { class: 'ck-none ck-notes-empty' }, '아직 메모가 없어요. 통화 내용, 견적, 결정한 것을 남겨 두면 나중에 찾기 쉬워요.')]));
         restoreFocusIn(f.notes, fk);
         if (T.scrollNotes && !initial) {
@@ -1889,6 +2176,8 @@
        스레드의 제목·설명 칸은 blur 때 저장되는데, blur 는 다른 곳을 누르는 mousedown 순간에 일어남 →
        그때 바로 다시 그리면 누른 사이드바·버튼·체크박스 노드가 바뀌어 첫 클릭이 사라졌음. */
     let holding = false; let holdTimer = null; let pendingRefresh = false;
+    const holdQ = [];   // 누름이 끝난 뒤에 할 화면 바꾸기 (설명 칸 → 읽기 화면 등)
+    function afterHold(fn) { if (holding) holdQ.push(fn); else fn(); }
     function scheduleRefresh() {
       if (!alive) return;
       if (holding) { pendingRefresh = true; return; }
@@ -1900,6 +2189,7 @@
       clearTimeout(holdTimer); holdTimer = null;
       if (!holding) return;
       holding = false;
+      holdQ.splice(0).forEach((fn) => { try { if (alive) fn(); } catch (e) { console.error(e); } });
       if (pendingRefresh) { pendingRefresh = false; scheduleRefresh(); }
     }
     function releaseSoon(ms) { clearTimeout(holdTimer); holdTimer = setTimeout(releaseHold, ms); }
@@ -1962,7 +2252,7 @@
       if (typing || e.isComposing) return;
       const k = e.key;
       if (k === '/') { e.preventDefault(); if (isPhone() && cur.ch) nav('#/checklist'); searchInput.focus(); searchInput.select(); }
-      else if (k === 'n' || k === 'ㅜ') { if (!composer.hidden) { e.preventDefault(); compInput.focus(); } }
+      else if (k === 'n' || k === 'ㅜ') { if (!composer.hidden) { e.preventDefault(); openComposer(); } }
       else if (k === 'j' || k === 'ㅓ') { e.preventDefault(); moveSel(1); }
       else if (k === 'k' || k === 'ㅏ') { e.preventDefault(); moveSel(-1); }
     }
@@ -2017,7 +2307,7 @@
     const onMode = () => {
       if (!alive) return;
       syncDrawer(); renderSidebar();
-      inFrame(() => { if (T.f.title) autosizeAll([[T.f.title], [T.f.detail, 420], [T.f.noteInput, 160]]); });
+      inFrame(() => { if (T.f.title) autosizeAll([[T.f.title], [T.f.detail, detailMax()], [T.f.noteInput, 160]]); });
     };
     const onTouchMode = () => { if (alive) syncNoteHint(); };
     try { mqP.addEventListener('change', onMode); mqD.addEventListener('change', onMode); mqT.addEventListener('change', onTouchMode); } catch (e) { /* 옛 브라우저 */ }
@@ -2027,9 +2317,30 @@
     let sideY = mem.sideScroll || 0;
     chans.addEventListener('scroll', () => { sideY = chans.scrollTop; }, { passive: true });
 
+    /* 폰: 창 스크롤도 스크롤할 때 기억 — 뒤로 가기(안드로이드 뒤로 몸짓)로 떠날 때 읽으면 브라우저가 이미 옮긴
+       이전 화면의 자리가 이 목록 자리로 저장됐음. 기준 줄은 스크롤이 멈춘 뒤 한 번만 계산 (그 전에 떠나면 픽셀로 되살림).
+       처음 그린 프레임의 스크롤(셸·브라우저가 옮긴 자리)은 기억하지 않고, 이 화면이 자리를 정한 뒤부터 기억해요 */
+    let trackWin = false; let anchorT = 0;
+    const onWinScroll = () => {
+      if (!alive || !trackWin || !isPhone() || popRecent()) return;
+      const k = screenKey();
+      mem.winScroll[k] = window.scrollY;
+      if (!/^(list|search)/.test(k)) return;
+      mem.winAnchor[k] = null;
+      clearTimeout(anchorT);
+      anchorT = setTimeout(() => {
+        if (!alive || !isPhone() || popRecent() || screenKey() !== k) return;
+        try { mem.winAnchor[k] = anchorRow(true); } catch (e) { /* 무시 */ }
+      }, 150);
+    };
+    window.addEventListener('scroll', onWinScroll, { passive: true });
+
     ctx.onCleanup(() => {
       try { flushThread(); } catch (e) { /* 무시 */ }
-      saveScroll(screenKey(), listKey());   // alive 를 끄기 전에 (아직 화면에 붙어 있음)
+      window.removeEventListener('scroll', onWinScroll);
+      clearTimeout(anchorT);
+      // alive 를 끄기 전에 (아직 화면에 붙어 있음). 폰에서 기록 이동으로 떠나면 창 스크롤은 이미 다음 칸 자리일 수 있음 → 스크롤하며 기억한 값을 그대로 둠
+      if (!(isPhone() && popRecent())) saveScroll(screenKey(), listKey());
       alive = false;
       lingering.forEach((t) => clearTimeout(t));
       lingering.clear();
@@ -2040,6 +2351,7 @@
     /* ---------- 시작 ---------- */
     compInput.value = mem.draft || '';
     applyRoute(params || [], 'init');
+    inFrame(() => { trackWin = true; });   // init 의 스크롤 되살리기(먼저 줄 선 inFrame) 다음부터 기억
   }
 
   /* ================================================================
@@ -2058,9 +2370,9 @@
 .ck-side-head { flex: none; padding: 14px 12px 6px; }
 .ck-ws-row { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
 .ck-ws-title { font-size: 1.05rem; margin: 0; }
-.ck-ws-sub { margin-left: auto; font-size: .74rem; color: var(--ink-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ck-ws-sub { margin-left: auto; font-size: var(--fs-min); color: var(--ink-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ck-ws .progress { height: 6px; }
-.ck-ws-note { margin: 6px 0 0; font-size: .74rem; color: var(--ink-3); }
+.ck-ws-note { margin: 6px 0 0; font-size: var(--fs-min); color: var(--ink-3); }
 .ck-ws-over { color: var(--bad); font-weight: 700; }
 .ck-search-row { display: flex; align-items: center; gap: 4px; margin-top: 10px; }
 .ck-search { position: relative; flex: 1 1 auto; min-width: 0; }
@@ -2073,16 +2385,22 @@
 .ck-chans { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 4px 8px 12px; }
 .ck-group + .ck-group { margin-top: 4px; }
 .ck-group-sp { padding-bottom: 6px; border-bottom: 1px solid var(--line); }
-.ck-group-h { margin: 0; padding: 12px 8px 4px; font-size: .72rem; font-weight: 800; letter-spacing: .02em; color: var(--ink-3); }
+.ck-group-h { margin: 0; padding: 12px 8px 4px; font-size: var(--fs-min); font-weight: 800; letter-spacing: .02em; color: var(--ink-3); }
 .ck-chan { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 4px 8px; border-radius: 8px; color: var(--ink-2); text-decoration: none; font-size: .9rem; font-weight: 600; line-height: 1.3; }
 .ck-chan:hover { background: var(--bg-3); color: var(--ink); }
 .ck-chan.ck-active { background: var(--brand); color: var(--on-brand); }
 .ck-chan-emo { flex: none; width: 1.4em; text-align: center; overflow: hidden; white-space: nowrap; }
 .ck-chan-name { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ck-chan-meta { flex: none; font-size: .72rem; font-weight: 600; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.ck-chan-meta { flex: none; font-size: var(--fs-min); font-weight: 600; color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .ck-chan.ck-active .ck-chan-meta { color: inherit; opacity: .85; }
-.ck-chan-badge { flex: none; }
+.ck-chan-badge { flex: none; font-size: var(--fs-min); }   /* 공통 .badge(.72rem)보다 조금 크게 — 글자 12px 이상 */
 .ck-chan.ck-active .ck-chan-badge { background: var(--on-brand); color: var(--brand); }
+/* 다 끝난 파트: 흐리게 (글자 대비는 보조 글자와 같은 --ink-3) */
+.ck-chan.ck-chan-fin:not(.ck-active) { color: var(--ink-3); font-weight: 500; }
+.ck-chan.ck-chan-fin:not(.ck-active) .ck-chan-emo { opacity: .6; }
+.ck-chan.ck-chan-fin:not(.ck-active) .ck-chan-meta { color: var(--good-ink); }
+.ck-fin-tog { display: flex; align-items: center; gap: 6px; width: 100%; min-height: var(--tap); padding: 4px 10px; border: 0; border-radius: 10px; background: transparent; color: var(--ink-2); font: inherit; font-size: .9rem; font-weight: 700; text-align: left; cursor: pointer; }
+.ck-fin-tog:hover { background: var(--bg-3); color: var(--ink); }
 .ck-side-empty { font-size: .82rem; color: var(--ink-3); padding: 12px 8px; margin: 0; }
 .ck-side-foot { flex: none; padding: 8px; border-top: 1px solid var(--line); }
 .ck-addpart { width: 100%; min-height: 38px; display: flex; align-items: center; gap: 6px; padding: 0 10px; border: 1px dashed var(--line-2); border-radius: 10px; background: transparent; color: var(--ink-2); font: inherit; font-size: .88rem; font-weight: 700; cursor: pointer; }
@@ -2104,12 +2422,15 @@
 .ck-head { border-bottom: 0; }
 .ck-sub[hidden] + .ck-list { border-top: 1px solid var(--line); }
 .ck-head-desc { margin: 2px 0 0; font-size: .82rem; color: var(--ink-3); line-height: 1.45; }
+.ck-head-desc-short { display: none; }   /* 폰에서만 (넓은 화면은 긴 설명) */
 .ck-head-bar { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; margin-top: 8px; }
 .ck-prog { display: flex; align-items: center; gap: 8px; flex: 1 1 180px; min-width: 0; max-width: 340px; }
 .ck-prog .progress { flex: 1 1 auto; min-width: 60px; }
 .ck-prog-sp { flex: 1 1 auto; max-width: none; }
 .ck-prog-txt { font-size: .78rem; font-weight: 700; color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
-.ck-filters { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+/* 머리 요약: '오늘 n'·'기한 지남 n' 은 그 묶음으로 가는 단추 */
+.ck-jump { border: 0; font: inherit; font-size: .78rem; font-weight: 800; min-height: 30px; padding: 0 12px; cursor: pointer; }
+.ck-jump:hover { filter: brightness(.97); text-decoration: underline; }
 
 /* 세그먼트·토글 */
 .ck-seg { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-radius: 10px; background: var(--bg-3); }
@@ -2117,12 +2438,6 @@
 .ck-seg-b:hover { color: var(--ink); }
 .ck-seg-b[aria-pressed="true"] { background: var(--bg-2); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
 .ck-seg-b.ck-seg-bad[aria-pressed="true"] { color: var(--bad); }
-.ck-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 10px 0 6px; border: 1px solid var(--line); border-radius: 999px; background: var(--bg-2); color: var(--ink-2); font: inherit; font-size: .8rem; font-weight: 700; cursor: pointer; white-space: nowrap; }
-.ck-switch { position: relative; width: 28px; height: 16px; border-radius: 999px; background: var(--line-2); transition: background .15s; flex: none; }
-.ck-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--bg-2); transition: transform .15s; }
-.ck-toggle[aria-pressed="true"] { color: var(--ink); }
-.ck-toggle[aria-pressed="true"] .ck-switch { background: var(--good); }
-.ck-toggle[aria-pressed="true"] .ck-switch::after { transform: translateX(12px); }
 
 /* 목록 */
 .ck-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 0 16px; outline: none; }
@@ -2131,8 +2446,14 @@
 .ck-bucket-h::after { content: ''; flex: 1 1 auto; height: 1px; background: var(--line); }
 .ck-bucket-h .ck-count, .ck-count { font-weight: 700; color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .ck-bucket-h.ck-bad { color: var(--bad); }
-.ck-bucket-h.ck-warn { color: var(--warn); }
-.ck-done-h { cursor: pointer; min-height: 40px; }
+.ck-bucket-h.ck-warn { color: var(--warn-ink); }
+.ck-bucket-h[tabindex="-1"]:focus:not(:focus-visible) { outline: none; }
+/* 🔥 지금 할 일의 중요도 묶음 머리: 앞에 작은 점 (중요 빨강 · 보통 주황 · 여유 회색) */
+.ck-pri-h::before { content: ''; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--ink-3); }
+.ck-pri-h.ck-pri-high::before { background: var(--bad); }
+.ck-pri-h.ck-pri-mid::before { background: var(--warn); }
+.ck-pri-h { font-size: .82rem; }
+.ck-done-h { cursor: pointer; min-height: var(--tap); }
 .ck-done-h:hover { color: var(--ink); }
 .ck-caret { width: 1em; display: inline-block; }
 /* 줄은 position 을 주지 않음: 위치 지정된 줄은 터치 보정(touch adjustment)에서 바로 위 줄의 칩 터치를 가로챔 */
@@ -2145,19 +2466,27 @@
 .ck-row.ck-overdue { box-shadow: inset 3px 0 0 var(--bad); }
 .ck-row.ck-sel { background: var(--brand-bg); box-shadow: inset 3px 0 0 var(--brand); }
 .ck-cb { flex: none; display: grid; place-items: center; width: 40px; height: 40px; padding: 0; border: 0; border-radius: 10px; background: transparent; cursor: pointer; -webkit-tap-highlight-color: transparent; }
-.ck-cb-box { position: relative; display: grid; place-items: center; width: 24px; height: 24px; border: 2px solid var(--line-2); border-radius: 7px; background: var(--bg-2); transition: background .12s, border-color .12s, transform .08s; }
+.ck-cb-box { position: relative; display: grid; place-items: center; width: 24px; height: 24px; border: 2px solid var(--ink-3); border-radius: 7px; background: var(--bg-2); transition: background .12s, border-color .12s, transform .08s; }
 .ck-cb:hover .ck-cb-box { border-color: var(--good); }
 .ck-cb:active .ck-cb-box { transform: scale(.9); }
 .ck-cb[aria-checked="true"] .ck-cb-box, .ck-th-done.ck-on .ck-cb-box { background: var(--good); border-color: var(--good); }
 .ck-cb[aria-checked="true"] .ck-cb-box::after, .ck-th-done.ck-on .ck-cb-box::after { content: ''; width: 6px; height: 12px; margin-top: -2px; border: solid var(--on-good); border-width: 0 2.5px 2.5px 0; transform: rotate(45deg); }
-.ck-row.ck-overdue .ck-cb-box { border-color: color-mix(in srgb, var(--bad) 55%, var(--line-2)); }
+.ck-row.ck-overdue .ck-cb-box { border-color: color-mix(in srgb, var(--bad) 70%, var(--ink-3)); }
 .ck-row-main { flex: 1 1 auto; min-width: 0; padding-top: 8px; }
 .ck-row-title { display: block; color: var(--ink); text-decoration: none; font-size: .95rem; font-weight: 600; line-height: 1.4; border-radius: 4px; }
 .ck-row-title:hover { color: var(--ink); text-decoration: underline; text-decoration-color: var(--line-2); }
 .ck-done .ck-row-title { color: var(--ink-3); font-weight: 500; text-decoration: line-through; text-decoration-color: var(--ink-3); }
 .ck-row-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin-top: 4px; font-size: .76rem; color: var(--ink-3); }
-.ck-row-meta .chip { font-size: .72rem; line-height: 1.6; }
+.ck-row-meta .chip { font-size: var(--fs-min); line-height: 1.6; }
 .ck-meta-n { font-weight: 700; font-variant-numeric: tabular-nums; }
+/* 줄의 📖: 누르면 관련 가이드로. 보이는 크기는 그대로, 누르는 영역만 40×40 (줄 높이는 그대로).
+   위·왼쪽으로는 거의 넓히지 않음 (제목 아래끝·앞 칩을 가리지 않게) → 아래·오른쪽으로 넓힘. 아래로 넘친 곳은 줄(content-visibility → paint 가둠)에서 잘림 */
+.ck-glink { position: relative; z-index: 1; display: inline-grid; place-items: center; min-width: 40px; min-height: 40px; margin: -4px -14px -18px -6px; border-radius: 10px; text-decoration: none; -webkit-tap-highlight-color: transparent;
+  grid-template: 26px / 32px; align-content: start; justify-content: start; }   /* 줄에서 차지하는 자리는 예전처럼 20×18 (칩 줄바꿈 그대로), 아이콘은 그 가운데: 위 4+18/2=13, 왼쪽 6+20/2=16 */
+.ck-glink:hover { background: var(--bg-3); }
+.ck-glink:focus-visible { outline-offset: -6px; }
+/* 제목 앞 날짜 표시가 기한과 다를 때 (기한을 옮긴 기본 할 일) */
+.ck-tag-old { color: var(--ink-3); font-weight: 500; text-decoration-color: var(--ink-3); }
 .ck-pchip { border: 0; font: inherit; cursor: pointer; max-width: 100%; min-width: 0; }
 .ck-th-part { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; }
 /* 목록 줄의 파트 칩: 버튼은 투명한 틀, 모양은 안쪽 span (터치 때 틀만 키워 줄 높이는 그대로) */
@@ -2184,7 +2513,7 @@
 .ck-act-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
 .ck-act-text { font-size: .9rem; line-height: 1.45; }
 .ck-act-link .ck-act-text { font-weight: 600; }
-.ck-act-time { font-size: .74rem; color: var(--ink-3); }
+.ck-act-time { font-size: var(--fs-min); color: var(--ink-3); }
 
 /* 입력창 */
 .ck-composer { flex: none; padding: 10px 12px 12px; border-top: 1px solid var(--line); background: var(--bg-2); }
@@ -2222,6 +2551,7 @@
 .ck-prev-warn { color: var(--bad); font-weight: 700; }
 .ck-shake { animation: ck-shake .3s; }
 @keyframes ck-shake { 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
+.ck-comp-fab { display: none; }   /* 폰에서만 (아래 폰 규칙) */
 
 /* 스레드 */
 .ck-thread { display: none; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg-2); }
@@ -2229,18 +2559,33 @@
 .ck-th-back { flex: none; white-space: nowrap; padding: 0 8px; }
 .ck-th-part { flex: 0 1 auto; min-width: 0; max-width: 52%; min-height: 30px; font-size: .8rem; }
 .ck-th-part-t { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ck-move { flex: 0 1 132px; width: auto; min-width: 96px; max-width: 150px; min-height: 36px; padding: 4px 8px; font-size: .8rem; }   /* '📁 파트 옮기기' 가 다 보이는 너비 → 남는 자리는 파트 칩에 */
+.ck-move { width: auto; min-width: 0; max-width: 100%; min-height: 38px; padding: 4px 30px 4px 10px; font-size: .88rem; }   /* 본문 '파트' 칸: 지금 파트가 골라져 있고 바꾸면 옮겨요 */
+/* 폰 머리의 완료 단추 (위에 붙어 있어 설명을 읽다가도 바로 완료) */
+.ck-th-hdone { flex: none; align-items: center; gap: 6px; min-height: var(--tap); padding: 0 12px 0 8px; border: 1px solid var(--ink-3); border-radius: 999px; background: var(--bg-2); color: var(--ink); font: inherit; font-size: .88rem; font-weight: 800; cursor: pointer; white-space: nowrap; -webkit-tap-highlight-color: transparent; }
+.ck-th-hdone .ck-cb-box { width: 20px; height: 20px; border-radius: 6px; }
+.ck-th-hdone.ck-on { background: var(--good-bg); border-color: color-mix(in srgb, var(--good) 45%, var(--line)); color: var(--good-ink); }
+.ck-th-hdone.ck-on .ck-cb-box { background: var(--good); border-color: var(--good); }
+.ck-th-hdone.ck-on .ck-cb-box::after { content: ''; width: 5px; height: 10px; margin-top: -2px; border: solid var(--on-good); border-width: 0 2.5px 2.5px 0; transform: rotate(45deg); }
 .ck-th-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 14px 16px 20px; }
 .ck-th-top { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-.ck-th-done { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 14px 0 8px; border: 1px solid var(--line-2); border-radius: 999px; background: var(--bg-2); color: var(--ink); font: inherit; font-size: .88rem; font-weight: 700; cursor: pointer; }
+.ck-th-done { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 14px 0 8px; border: 1px solid var(--ink-3); border-radius: 999px; background: var(--bg-2); color: var(--ink); font: inherit; font-size: .88rem; font-weight: 700; cursor: pointer; }
 .ck-th-done:hover { border-color: var(--good); }
 .ck-th-done .ck-cb-box { width: 22px; height: 22px; }
-.ck-th-done.ck-on { background: var(--good-bg); border-color: color-mix(in srgb, var(--good) 40%, var(--line)); color: var(--good); }
+.ck-th-done.ck-on { background: var(--good-bg); border-color: color-mix(in srgb, var(--good) 40%, var(--line)); color: var(--good-ink); }
 .ck-th-title { display: block; width: calc(100% + 16px); margin: 0 -8px; padding: 6px 8px; border: 1px solid transparent; border-radius: 10px; background: transparent; color: var(--ink); font: inherit; font-size: 1.18rem; font-weight: 800; line-height: 1.35; letter-spacing: -.01em; resize: none; overflow: hidden; }
 .ck-th-title:hover { border-color: var(--line); }
 .ck-th-title:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 18%, transparent); }
 .ck-th-isdone .ck-th-title { color: var(--ink-3); text-decoration: line-through; }
-.ck-fields { margin-top: 10px; border-top: 1px solid var(--line); }
+.ck-fields { margin-top: 14px; border-top: 1px solid var(--line); }
+.ck-fields-sum { display: none; }   /* 폰에서만: 접힌 마감·중요도·파트의 한 줄 요약 */
+.ck-desc { margin-top: 8px; }
+.ck-detail-edit { margin-left: auto; min-height: 30px; }
+.ck-detail-view { min-height: 24px; padding: 2px 0; font-size: .95rem; line-height: 1.6; color: var(--ink); overflow-wrap: anywhere; white-space: normal; }
+@media (hover: hover) and (pointer: fine) { .ck-detail-view:not(:has(.ck-detail-empty)) { cursor: text; } }
+.ck-detail-view a.ck-tel { font-weight: 700; white-space: nowrap; }
+.ck-detail-empty { display: flex; align-items: center; width: 100%; min-height: var(--tap); padding: 8px 12px; border: 1px dashed var(--line-2); border-radius: 10px; background: transparent; color: var(--ink-3); font: inherit; font-size: .88rem; text-align: left; cursor: pointer; }
+.ck-detail-empty:hover { border-color: var(--brand); color: var(--ink-2); }
+.ck-note-text a.ck-tel { font-weight: 700; white-space: nowrap; }
 .ck-field { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 8px; align-items: start; padding: 10px 0; border-bottom: 1px solid var(--line); }
 .ck-field-l { padding-top: 8px; font-size: .78rem; font-weight: 800; color: var(--ink-3); }
 .ck-due-row { display: flex; gap: 8px; align-items: center; }
@@ -2263,8 +2608,12 @@
 .ck-x { flex: none; width: 30px; height: 30px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-3); font: inherit; font-size: 1.05rem; line-height: 1; cursor: pointer; }
 .ck-x:hover { background: var(--bad-bg); color: var(--bad); }
 .ck-none { margin: 0; font-size: .82rem; color: var(--ink-3); }
-.ck-guide { margin-top: 8px; }
-.ck-guide-link { display: inline-flex; align-items: center; gap: 4px; min-height: 32px; font-size: .86rem; font-weight: 700; }
+/* 관련 가이드: 마감 칸 바로 아래 큰 단추 */
+.ck-guide { margin-top: 12px; }
+.ck-guide[hidden] { display: none; }
+.ck-guide-link { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 14px; border-radius: 12px; background: var(--brand-bg); color: var(--brand-ink); font-size: .92rem; font-weight: 800; text-decoration: none; }
+.ck-guide-link:hover { text-decoration: underline; }
+.ck-guide-go { margin-left: auto; font-size: 1.2rem; line-height: 1; }
 .ck-thread-sec { margin-top: 20px; }
 .ck-thread-h { padding-bottom: 6px; border-bottom: 1px solid var(--line); }
 .ck-notes { display: flex; flex-direction: column; }
@@ -2274,13 +2623,13 @@
 .ck-note-body { flex: 1 1 auto; min-width: 0; }
 .ck-note-meta { display: flex; align-items: center; gap: 8px; min-height: 22px; }
 .ck-note-who { font-size: .82rem; font-weight: 800; }
-.ck-note-time { font-size: .74rem; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.ck-note-time { font-size: var(--fs-min); color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .ck-note-del { margin-left: auto; width: 28px; height: 28px; opacity: .55; }
 .ck-note:hover .ck-note-del, .ck-note-del:focus-visible { opacity: 1; }
 @media (hover: none) { .ck-note-del { opacity: .8; } }
 .ck-note-text { font-size: .92rem; line-height: 1.55; overflow-wrap: anywhere; white-space: normal; }
 .ck-notes-empty { padding: 8px 0; }
-.ck-stamps { margin: 16px 0 0; font-size: .72rem; color: var(--ink-3); }
+.ck-stamps { margin: 16px 0 0; font-size: var(--fs-min); color: var(--ink-3); }
 .ck-th-danger { margin-top: 10px; }
 .ck-th-foot { flex: none; padding: 10px 12px 12px; border-top: 1px solid var(--line); background: var(--bg-2); }
 .ck-note-row { display: flex; align-items: flex-end; gap: 8px; }
@@ -2303,27 +2652,31 @@
 .ck-emo-input { grid-column: span 2; min-height: 42px; text-align: center; font-size: 1.1rem; }
 .ck-copy-ta { min-height: 220px; font-size: .85rem; }
 
-/* 손가락 터치: 36px 이상 */
+/* 손가락 터치: 머리·주요 단추 44px(--tap), 작은 단추 40px 이상 (보이는 칩은 그대로, 누르는 틀만 키움) */
 @media (pointer: coarse) {
-  .ck-rchip { padding: 8px 2px; margin: -8px -2px; }   /* 누르는 영역 36px, 보이는 칩은 그대로 */
-  .ck-th-part { min-height: 36px; display: inline-flex; align-items: center; }
-  .ck-addlink, .ck-del, .ck-guide-link, .ck-link { min-height: 36px; }
-  .ck-x { width: 36px; height: 36px; }
-  .ck-note-del { width: 36px; height: 36px; }
+  .ck-rchip { padding: 10px 2px; margin: -10px -2px; }   /* 누르는 영역 40px */
+  .ck-back, .ck-menu-btn { width: var(--tap); min-width: var(--tap); min-height: var(--tap); }
+  .ck-guide-btn, .ck-th-back { min-height: var(--tap); }
+  .ck-th-part { min-height: 40px; display: inline-flex; align-items: center; }
+  .ck-addlink, .ck-del, .ck-link, .ck-detail-edit, .ck-jump { min-height: 40px; }
+  .ck-move { min-height: var(--tap); }
+  .ck-x { width: 40px; height: 40px; }
+  .ck-note-del { width: 40px; height: 40px; }
   /* 태블릿(700px 이상)에서도: 마감 바로가기, 중요도 고르기 */
-  .ck-quick, .ck-seg-b { min-height: 36px; }
+  .ck-quick, .ck-seg-b { min-height: 40px; }
   .ck-search-clear { width: 36px; height: 36px; }
 }
-/* 체크리스트가 열려 있으면 토스트를 아래 입력창 위로 (입력창을 가리지 않게) */
+/* 토스트 자리: 폰·좁은 화면에서는 오른쪽에 붙어(app.css) 왼쪽 체크 상자 열을 비워요.
+   여기서는 높이만 — 아래 입력창(폰은 '＋ 할 일' 단추)·메모 입력창을 가리지 않게 그 위로 */
 body:has(.ck) .toast button { white-space: nowrap; flex: none; }
 @media (min-width: 700px) {
   body:has(.ck .ck-composer:not([hidden])) .toast-wrap { bottom: calc(var(--bottom-h) + 128px + env(safe-area-inset-bottom)); }
   body:has(.ck .ck-composer.ck-narrow:not([hidden])) .toast-wrap { bottom: calc(var(--bottom-h) + 170px + env(safe-area-inset-bottom)); }
 }
 @media (max-width: 699px) {
-  body:has(.ck[data-screen="list"] .ck-composer:not([hidden])) .toast-wrap,
+  body:has(.ck[data-screen="list"] .ck-composer:not([hidden])) .toast-wrap { bottom: calc(var(--bottom-h) + 72px + env(safe-area-inset-bottom)); }
   body:has(.ck[data-screen="thread"]) .toast-wrap { bottom: calc(var(--bottom-h) + 84px + env(safe-area-inset-bottom)); }
-  body:has(.ck[data-screen="list"] .ck-composer:not([hidden]):is(:focus-within, .ck-has-text)) .toast-wrap { bottom: calc(var(--bottom-h) + 112px + env(safe-area-inset-bottom)); }
+  body:has(.ck[data-screen="list"] .ck-composer:not([hidden]):is(.ck-comp-open, .ck-has-text, .ck-noted)) .toast-wrap { bottom: calc(var(--bottom-h) + 112px + env(safe-area-inset-bottom)); }
   body:has(.ck:is([data-screen="channels"], [data-screen="search"])) .toast-wrap { bottom: calc(var(--bottom-h) + 16px + env(safe-area-inset-bottom)); }
 }
 
@@ -2415,17 +2768,25 @@ body:has(.ck) .toast button { white-space: nowrap; flex: none; }
   .ck-addpart { min-height: 48px; justify-content: center; }
 
   .ck-head { position: sticky; top: var(--topbar-h); z-index: 6; margin: -14px -16px 0; padding: 8px 10px 8px 6px; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
-  .ck-head-top { min-height: 40px; }
+  .ck-head-top { min-height: 44px; }
   .ck-head-title { font-size: 1.1rem; }
-  .ck-back { font-size: 1.3rem; width: 40px; }
+  .ck-back { font-size: 1.3rem; width: max(40px, var(--tap)); min-height: max(40px, var(--tap)); }
+  .ck-menu-btn { width: max(40px, var(--tap)); min-height: max(40px, var(--tap)); }
   .ck-sub { padding: 10px 0 8px; border-bottom: 0; }
+  .ck-head-desc-sp { display: none; }   /* 특수 채널 설명은 채널 목록 줄의 title 에 있음 → 첫 화면에 할 일을 한 줄 더 */
+  .ck-head-desc-sp + .ck-head-bar { margin-top: 0; }
+  /* 🔥 지금 할 일만: 범위(며칠까지)·순서(중요도 순)를 짧은 한 줄로 */
+  .ck-head-desc-short { display: block; margin: 0; }
+  .ck-head-desc-short + .ck-head-bar { margin-top: 6px; }
+  .ck-sub:has(> .ck-head-desc-sp) { padding: 6px 0 2px; }
   .ck-head-bar { flex-direction: column; align-items: stretch; }
   .ck-prog { max-width: none; flex-basis: auto; }
-  .ck-filters { margin-left: 0; justify-content: space-between; }
   .ck-list { overflow: visible; padding-bottom: 8px; }
   .ck-bucket-h { position: static; padding: 14px 2px 6px; background: transparent; backdrop-filter: none; }
   .ck-row { padding: 6px 4px 8px 0; margin: 0 -4px; border-radius: 12px; contain-intrinsic-size: auto 62px; }   /* 62 + 6 + 8 ≈ 폰 줄 평균 76px */
   .ck-row.ck-overdue { box-shadow: inset 3px 0 0 var(--bad); }
+  /* 왼쪽 막대(기한 지남·고른 줄)가 둥근 모서리를 따라 휘지 않게 왼쪽은 각지게 */
+  .ck-row.ck-overdue, .ck-row.ck-sel { border-radius: 0 12px 12px 0; }
   .ck-row + .ck-row { background-image: linear-gradient(var(--line), var(--line)); background-repeat: no-repeat; background-position: 44px 0; background-size: calc(100% - 48px) 1px; }
   .ck-cb { width: 44px; height: 44px; }
   .ck-cb-box { width: 26px; height: 26px; }
@@ -2433,6 +2794,12 @@ body:has(.ck) .toast button { white-space: nowrap; flex: none; }
   .ck-row-title { font-size: 1rem; }
   .ck-act { padding: 8px 2px; }
   .ck-composer { position: sticky; bottom: calc(var(--bottom-h) + env(safe-area-inset-bottom)); z-index: 6; margin: 0 -16px; padding: 8px 12px 10px; background: color-mix(in srgb, var(--bg) 94%, transparent); backdrop-filter: blur(10px); border-top: 1px solid var(--line); }
+  /* 접힌 입력창: 오른쪽 아래 '＋ 할 일' 단추만 (띠는 투명 — 뒤의 줄을 그대로 누를 수 있음). 누르거나 글·초점·알림이 있으면 펼침 */
+  .ck-composer:not([hidden]):not(.ck-comp-open):not(.ck-has-text):not(.ck-noted) { display: flex; justify-content: flex-end; padding: 8px 12px; background: transparent; backdrop-filter: none; border-top: 0; pointer-events: none; }
+  .ck-composer:not(.ck-comp-open):not(.ck-has-text):not(.ck-noted) > :not(.ck-comp-fab) { display: none; }
+  .ck-composer:not(.ck-comp-open):not(.ck-has-text):not(.ck-noted) > .ck-comp-fab { display: inline-flex; pointer-events: auto; }
+  .ck-comp-fab { align-items: center; gap: 4px; min-height: 48px; padding: 0 20px 0 16px; border-radius: 999px; font-size: 1rem; font-weight: 800; box-shadow: var(--shadow-lg); }
+  .ck-comp-fab > span { font-size: 1.25rem; line-height: 1; }
   .ck-comp-pw { max-width: 33%; }
   .ck-comp-part { min-height: 44px; padding-left: 6px; padding-right: 2px; font-size: .8rem; }
   .ck-comp-btn { padding: 0 12px; }
@@ -2440,15 +2807,26 @@ body:has(.ck) .toast button { white-space: nowrap; flex: none; }
 
   .ck-th-head { position: sticky; top: var(--topbar-h); z-index: 6; margin: -14px -16px 0; padding: 6px 10px 6px 4px; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(10px); }
   .ck-th-close { display: none; }
-  .ck-move { max-width: 46vw; min-width: 124px; }   /* 옮기기 글자가 잘리지 않게: 좁으면 파트 칩이 먼저 줄어듦 */
-  .ck-th-part { flex-shrink: 3; }   /* 좁으면 파트 칩이 먼저 줄어 '옮기기' 글자가 보이게 */
+  .ck-th-top { display: none; }   /* 폰: 완료 단추는 위에 붙은 머리에 */
+  .ck-move { width: 100%; }
+  .ck-th-part { flex-shrink: 3; }   /* 좁으면 파트 칩이 먼저 줄어 '완료' 단추가 다 보이게 */
   .ck-th-back { padding: 0 6px; }
   .ck-th-body { overflow: visible; padding: 14px 0 16px; }
   .ck-th-title { font-size: 1.25rem; }
+  .ck-detail-view { font-size: 1rem; }
   .ck-field { grid-template-columns: 1fr; gap: 4px; }
   .ck-field-l { padding-top: 0; }
-  .ck-quick { min-height: 36px; padding: 0 11px; }
-  .ck-seg-b { min-height: 36px; min-width: 48px; font-size: .88rem; }
+  /* 마감·중요도·파트는 한 줄 요약 단추로 접어 둠 → 누르면 펼침 */
+  .ck-fields-sum { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 48px; padding: 6px 2px; border: 0; border-bottom: 1px solid var(--line); background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+  .ck-fields-sum .ck-field-l { flex: none; }
+  .ck-fields-sum-v { flex: 1 1 auto; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+  .ck-fields-sum-go { flex: none; font-size: .82rem; font-weight: 800; color: var(--brand-ink); white-space: nowrap; }
+  .ck-fields-sum-go .ck-caret { transition: transform .15s; }
+  .ck-fields.ck-open .ck-fields-sum-go .ck-caret { transform: rotate(90deg); }
+  .ck-fields:not(.ck-open) > .ck-field { display: none; }
+  .ck-quick { min-height: 40px; padding: 0 11px; }
+  .ck-seg-b { min-height: 40px; min-width: 48px; font-size: .88rem; }
+  .ck-addlink, .ck-th-part { min-height: 40px; }
   .ck-th-foot { position: sticky; bottom: calc(var(--bottom-h) + env(safe-area-inset-bottom)); z-index: 6; margin: 0 -16px; padding: 8px 12px 10px; background: color-mix(in srgb, var(--bg) 94%, transparent); backdrop-filter: blur(10px); }
   .ck-note-input { font-size: 1rem; }
 }
@@ -2460,6 +2838,13 @@ body:has(.ck) .toast button { white-space: nowrap; flex: none; }
     badge: () => {
       try { return MV.items.list((i) => !i.done && MV.items.status(i) === 'overdue').length; } catch (e) { return 0; }
     },
+    /* 하단 '체크' 탭: 다른 화면에서 누르면 마지막으로 본 목록(처음엔 🔥 지금 할 일)으로 바로 — 폰에서 채널 목록을 한 번 더 누르지 않게.
+       체크리스트 안에서 누르면 지금처럼 채널 목록(폰) / 지금 할 일(컴퓨터) */
+    navHref: () => {
+      if (MV.route && MV.route.name === 'checklist') return '#/checklist';
+      return hashFor(rememberedCh());
+    },
+    ownScroll: true,   // 스크롤은 이 화면이 직접 (mem.winScroll·기준 줄) — 셸의 뒤로 가기 스크롤 기억을 쓰지 않음
     render(root, params, ctx) {
       MV.css('ck', CSS);
       try {

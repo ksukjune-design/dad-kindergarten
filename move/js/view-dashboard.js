@@ -1,10 +1,19 @@
 /* ============================================================
    우리집 이사 관리 — 대시보드 (홈)
    "지금 뭘 해야 하지? 일정대로 가고 있나?" 에 답하는 첫 화면.
-   섹션: 히어로(D-day·진행률) / 지금 할 일 / 주간 워크플랜 / 11/3 돈 흐름 / 이사 견적 /
+   섹션: 히어로(D-day·진행률) / 지금 할 일 / 11/3 돈 흐름 / 이사 견적 / 주간 워크플랜 /
          파트별 진행 / 최근 활동 / 바로가기
          (데스크톱은 '지금 할 일' 옆에 돈 흐름·견적을 두고, 한 줄로 쌓이는 화면에선 위 순서대로)
-   주간 워크플랜: 주마다 이정표 + 중요 FLAG_LIMIT 개 + 파트 묶음 ROW_BUDGET 줄, 나머지는 '+n'·파트 칩으로 펼침.
+   폰 첫 화면(≤520px): 히어로를 한 줄로 줄이고(단지·층 줄 숨김), '지금 할 일'이 5줄쯤 보이게.
+     폰·태블릿 세로(≤860px, 아코디언): 주간 칸은 처음에 모두 접힘, 돈 흐름은 결과 숫자 먼저·계산 내역은 접기 안에.
+   용어: 기한 지난 일은 '기한 지남'(배지 '기한 지남 n'), 기간은 '오늘 / 7일 안에'.
+   제목 앞 '[10/26]' 같은 날짜 표시는 기한과 같으면 화면에서만 빼요 (shownTitle — 저장된 제목은 그대로).
+   지금 할 일 (10/26 가족 요청): 기한 지남 + 오늘부터 7일 안 마감을 한 묶음으로 (체크리스트 '🔥 지금 할 일' #/checklist/~focus 와 같은 범위),
+     중요 → 보통 → 여유 묶음, 묶음 안은 기한 순. 날짜 칸 제목('오늘 마감' 등)은 없고 줄마다 기한 칩으로 급한 정도를 보여요.
+     예전 '7일 안에'(~week) 로 가던 링크도 모두 ~focus 로.
+   펼침 상태: history(뒤로 가기 — 스크롤까지) + sessionStorage 'mv:dash-ui'(탭바로 돌아올 때 — 같은 날의 펼침만). 기기 전용.
+   주간 워크플랜: 주마다 이정표 + 중요 FLAG_LIMIT 개('지금 할 일'에 이미 보이는 항목은 빼고) + 파트 묶음 ROW_BUDGET 줄,
+     나머지는 '+n'·파트 칩으로 펼침.
    - 데이터는 MV.items / MV.parts / MV.inv / MV.calc.* 만 읽고, 체크는 MV.items.toggle 로.
    - 저장소 변경 시 스크롤·가로 스크롤·펼침 상태·포커스를 유지한 채 다시 그립니다.
      다시 그리기는 다음 프레임 뒤에, 내용이 바뀐 카드·줄·주 칸만 바꿔 끼웁니다 (patchNode — 태블릿 가로 화면 체크 속도).
@@ -41,6 +50,7 @@
     roadScroll: 0,            // 가로 스크롤 위치
     moreGroups: new Set(),    // '+n' / 파트 칩으로 펼친 (주|파트)
     partCols: 1,              // '파트별 진행' 칸 수 (너비로 정함)
+    moneyOpen: false,         // 폰: 돈 흐름 '계산 내역' 펼침
   };
   let sessionDone = new Map(); // 이 화면에서 방금 완료한 항목 id → 완료 시각 (최근 KEEP_DONE 개만 자리에 남김)
   let undoBatch = null;        // 연달아 체크할 때 되돌리기 토스트 하나로 묶기 {toast, entries}
@@ -54,6 +64,18 @@
   const clip = (s, n) => { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
   const itemHref = (i) => '#/checklist/' + encodeURIComponent(i.partId || '_') + '/' + encodeURIComponent(i.id);
   const partHref = (id) => '#/checklist/' + encodeURIComponent(id);
+  /* 화면에 쓰는 제목: 기본 할 일 제목 앞의 '[10/26]' 같은 날짜 표시가 기한과 같으면 빼요 (옆의 기한 칩·날짜와 같은 말이라).
+     기한이 바뀌어 날짜가 다르면 그대로 둬요 — 체크리스트 목록과 같은 기준. 저장된 제목은 그대로예요 */
+  const TITLE_TAG = /^\[(\d{1,2})\/(\d{1,2})\]\s*/;
+  function shownTitle(i) {
+    const t = String((i && i.title) || '');
+    const m = TITLE_TAG.exec(t);
+    if (!m) return t;
+    const d = D.valid(i.due) ? D.parse(i.due) : null;
+    const rest = t.slice(m[0].length);
+    if (!d || !rest.trim() || d.getMonth() + 1 !== +m[1] || d.getDate() !== +m[2]) return t;
+    return rest;
+  }
   function byDue(a, b) {
     const da = dueKey(a), dbb = dueKey(b);
     if (da !== dbb) return da < dbb ? -1 : 1;
@@ -112,6 +134,19 @@
       history.replaceState(Object.assign({}, base, { [HS_KEY]: v }), '');
     } catch (e) { /* 무시 */ }
   }
+  /* 펼침 상태(펼친 주·'+n'·돈 흐름 계산 내역)는 이 탭(sessionStorage)에도 적어 둬요 — 탭바로 다른 화면에 갔다가
+     홈으로 오면 새 기록이라 history 엔 상태가 없지만, 같은 날이면 펼침은 그대로 되살려요 (스크롤은 맨 위부터).
+     기기 편의값이라 공유 기록·백업에는 넣지 않고, 저장소가 막혀도 그냥 기본값으로 그려요. */
+  const SS_KEY = 'mv:dash-ui';
+  function readSS() {
+    try {
+      const v = JSON.parse(window.sessionStorage.getItem(SS_KEY) || 'null');
+      return v && typeof v === 'object' && !Array.isArray(v) ? v : null;
+    } catch (e) { return null; }
+  }
+  function writeSS(v) {
+    try { window.sessionStorage.setItem(SS_KEY, JSON.stringify(v)); } catch (e) { /* 무시 */ }
+  }
   function relWeek(ws, moveW) {
     if (!moveW) return '';
     const k = Math.round(D.diff(ws, moveW) / 7);
@@ -154,7 +189,9 @@
 .toast.db-toast { white-space:nowrap; max-width:calc(100vw - 24px); }
 .toast.db-toast > span { min-width:0; max-width:calc(100vw - 150px); overflow:hidden; text-overflow:ellipsis; }
 .toast.db-toast > button { flex:none; min-height:36px; }
+@media (pointer: coarse) { .toast.db-toast > button { min-height:40px; } }
 .db-sr { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+.db .badge { font-size:var(--fs-min, .75rem); }
 .db-err-more > summary { cursor:pointer; display:inline-flex; align-items:center; min-height:36px; font-size:.84rem; font-weight:700; color:var(--ink-2); }
 .db-err-more pre { margin:4px 0 0; max-height:220px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; color:var(--ink-2); }
 .db-grid { display:grid; gap:14px; grid-template-columns:repeat(12, minmax(0, 1fr)); align-items:stretch; }
@@ -166,7 +203,8 @@
 @media (max-width: 1100px) {
   .db-span-7, .db-span-5 { grid-column:1 / -1; }
   .db-side { grid-column:1 / -1; grid-template-columns:repeat(2, minmax(0, 1fr)); }
-  /* 한 줄로 쌓일 때 스펙 순서: 히어로 → 지금 할 일 → 주간 워크플랜 → 돈 흐름·견적 → 파트별 → 최근 활동 → 바로가기 */
+  /* 한 줄로 쌓일 때 순서: 히어로 → 지금 할 일 → 돈 흐름·견적 → 주간 워크플랜 → 파트별 → 최근 활동 → 바로가기
+     (매일 보는 '11/3 여유'가 폰 두 화면 안에 들어오게 돈 흐름을 워크플랜 위로 — db-late 는 워크플랜 뒤로 보낼 카드) */
   .db-grid > .db-late { order:2; }
 }
 @media (max-width: 680px) { .db-side { grid-template-columns:1fr; } .db-grid { gap:12px; } }
@@ -183,7 +221,7 @@
 .db-hero { padding:20px 22px; background:linear-gradient(135deg, var(--brand-bg) 0%, var(--bg-2) 64%); border-color:color-mix(in srgb, var(--brand) 22%, var(--line)); }
 .db-hero-grid { display:grid; grid-template-columns:minmax(0, 1.05fr) minmax(0, 1fr); gap:18px 32px; align-items:center; }
 @media (max-width: 760px) { .db-hero { padding:16px; } .db-hero-grid { grid-template-columns:1fr; } }
-.db-eyebrow { font-size:.82rem; font-weight:800; color:var(--brand); letter-spacing:.01em; }
+.db-eyebrow { font-size:.82rem; font-weight:800; color:var(--brand-ink, var(--brand)); letter-spacing:.01em; }
 .db-big { font-size:clamp(2.8rem, 10vw, 4.4rem); font-weight:900; line-height:1.02; letter-spacing:-.045em; color:var(--ink); font-variant-numeric:tabular-nums; margin:2px 0 4px; }
 .db-big small { font-size:.36em; font-weight:800; margin-left:6px; color:var(--ink-2); letter-spacing:0; }
 .db-big.is-today { font-size:clamp(2.2rem, 8vw, 3.4rem); color:var(--brand); }
@@ -199,16 +237,29 @@
 .db-counters { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
 .db-counter { display:inline-flex; align-items:center; gap:7px; min-height:36px; padding:4px 13px; border-radius:999px; text-decoration:none; font-weight:700; font-size:.86rem; background:var(--bg-2); color:var(--ink-2); border:1px solid var(--line); }
 .db-counter b { font-size:1.02rem; font-variant-numeric:tabular-nums; }
-.db-counter-note { font-size:.72rem; font-weight:650; opacity:.8; }
+.db-counter-note { font-size:var(--fs-min, .75rem); font-weight:650; }
 .db-counter:hover { border-color:var(--line-2); }
 .db-counter.is-bad { background:var(--bad-bg); color:var(--bad); border-color:color-mix(in srgb, var(--bad) 30%, transparent); }
-.db-counter.is-warn { background:var(--warn-bg); color:var(--warn); border-color:color-mix(in srgb, var(--warn) 30%, transparent); }
-.db-counter.is-brand { background:var(--brand-bg); color:var(--brand); border-color:color-mix(in srgb, var(--brand) 30%, transparent); }
+.db-counter.is-warn { background:var(--warn-bg); color:var(--warn-ink, var(--warn)); border-color:color-mix(in srgb, var(--warn) 30%, transparent); }
+.db-counter.is-brand { background:var(--brand-bg); color:var(--brand-ink, var(--brand)); border-color:color-mix(in srgb, var(--brand) 30%, transparent); }
 .db-next { margin-top:10px; font-size:.85rem; color:var(--ink-2); display:flex; flex-wrap:wrap; align-items:center; gap:2px 8px; }
 .db-next b { color:var(--ink); }
 .db-next-label { white-space:nowrap; }
 .db-next-what { display:inline-flex; align-items:center; flex-wrap:wrap; gap:2px 6px; min-width:0; }
-.db-dchip { display:inline-flex; align-items:center; padding:0 8px; border-radius:999px; background:var(--brand-bg); color:var(--brand); font-size:.76rem; font-weight:800; line-height:1.7; white-space:nowrap; font-variant-numeric:tabular-nums; }
+.db-dchip { display:inline-flex; align-items:center; padding:0 8px; border-radius:999px; background:var(--brand-bg); color:var(--brand-ink, var(--brand)); font-size:.76rem; font-weight:800; line-height:1.7; white-space:nowrap; font-variant-numeric:tabular-nums; }
+/* 폰 첫 화면: 히어로를 줄여 '지금 할 일'이 더 보이게 — 단지·층 줄은 숨기고, 큰 숫자는 '이사까지'·날짜와 한 줄에 */
+@media (max-width: 520px) {
+  .db-hero { padding:12px 14px; }
+  .db-hero-grid { gap:10px; }
+  .db-route { display:none; }
+  .db-hero-left { display:flex; align-items:baseline; flex-wrap:wrap; gap:0 10px; }
+  .db-big { font-size:2.4rem; margin:0; }
+  .db-big.is-today { font-size:1.9rem; }
+  .db-prog-num { font-size:1.45rem; }
+  .db-counters { margin-top:8px; gap:6px; }
+  .db-counter { padding:4px 11px; gap:6px; }
+  .db-next.is-after { display:none; }
+}
 
 /* 지금 할 일 */
 .db-tasks { display:flex; flex-direction:column; }
@@ -223,16 +274,22 @@
 .db-task.is-done .db-task-title { color:var(--ink-3); text-decoration:line-through; }
 .db-meta { display:flex; flex-wrap:wrap; gap:4px; margin-top:4px; }
 .db-meta .chip { max-width:100%; overflow:hidden; text-overflow:ellipsis; }
+/* 파트 칩: 폰에서는 이모지만 (이름은 title·화면 읽기용 글자로) — 칩이 한 줄에 들어가게 */
+@media (max-width: 520px) {
+  .db-pchip-name { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+  .db-pchip { padding:1px 7px; }
+}
 .db-empty { padding:14px 4px; color:var(--ink-3); font-size:.92rem; }
 .db-empty b { color:var(--ink); }
 .db-subhead { display:flex; align-items:center; gap:6px; font-size:.76rem; font-weight:800; color:var(--ink-3); margin:12px 0 2px; letter-spacing:.02em; }
 .db-subhead:first-child { margin-top:0; }
 .db-subhead::before { content:''; width:7px; height:7px; border-radius:50%; background:var(--ink-3); flex:none; }
-.db-subhead.is-today { color:var(--warn); }
-.db-subhead.is-today::before { background:var(--warn); }
-.db-subhead.is-overdue { color:var(--bad); }
-.db-subhead.is-overdue::before { background:var(--bad); }
-.db-subhead-n { font-variant-numeric:tabular-nums; font-weight:700; opacity:.85; }
+/* 중요도 묶음 제목 (중요 → 보통 → 여유) — 급한 정도는 줄마다의 기한 칩(오늘·n일 지남)으로 */
+.db-subhead.is-pri-high { color:var(--bad); }
+.db-subhead.is-pri-high::before { background:var(--bad); }
+.db-subhead.is-pri-mid { color:var(--warn-ink, var(--warn)); }
+.db-subhead.is-pri-mid::before { background:var(--warn); }
+.db-subhead-n { font-variant-numeric:tabular-nums; font-weight:700; }
 .db-subhead + .db-task { border-top:0; padding-top:0; }
 .db-more-rest { margin-left:0; margin-top:4px; }
 
@@ -241,41 +298,58 @@
 .db-lr { display:grid; grid-template-columns:minmax(0, 1fr) auto; gap:0 10px; padding:7px 0; border-top:1px dashed var(--line); align-items:baseline; }
 .db-lr:first-child { border-top:0; padding-top:0; }
 .db-lr-label { font-size:.88rem; font-weight:650; min-width:0; }
-.db-lr-sub { display:block; font-size:.74rem; color:var(--ink-3); font-weight:500; }
+.db-lr-sub { display:block; font-size:var(--fs-min, .75rem); color:var(--ink-3); font-weight:500; }
 .db-lr-amt { font-weight:800; font-variant-numeric:tabular-nums; white-space:nowrap; text-align:right; }
-.db-lr-amt.is-in { color:var(--good); }
-.db-lr-bal { display:block; font-size:.72rem; color:var(--ink-3); font-weight:600; }
+.db-lr-amt.is-in { color:var(--good-ink, var(--good)); }
+.db-lr-bal { display:block; font-size:var(--fs-min, .75rem); color:var(--ink-3); font-weight:600; }
 .db-lr.is-sum .db-lr-label { font-weight:800; }
 .db-lr-note { display:flex; align-items:flex-start; gap:6px; margin:0 0 6px; padding:5px 9px; border-radius:9px; background:var(--bg-3); color:var(--ink-2); font-size:.76rem; font-weight:600; line-height:1.45; }
 .db-lr-note b { color:var(--ink); font-variant-numeric:tabular-nums; }
-.db-total { display:flex; align-items:baseline; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-top:8px; padding:10px 12px; border-radius:12px; background:var(--good-bg); color:var(--good); }
+.db-total { display:flex; align-items:baseline; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-top:8px; padding:10px 12px; border-radius:12px; background:var(--good-bg); color:var(--good-ink, var(--good)); }
+.db-result:first-child > .db-total { margin-top:0; }
 .db-total.is-bad { background:var(--bad-bg); color:var(--bad); }
 .db-total span { font-weight:750; font-size:.88rem; }
 .db-total b { font-size:1.25rem; font-weight:900; font-variant-numeric:tabular-nums; letter-spacing:-.02em; }
 .db-rent-alt { display:flex; align-items:baseline; justify-content:space-between; gap:2px 10px; flex-wrap:wrap; margin-top:4px; padding:5px 12px; border-radius:10px; border:1px dashed var(--line-2); font-size:.84rem; color:var(--ink-2); }
 .db-rent-alt span { font-weight:650; min-width:0; }
 .db-rent-alt b { font-weight:800; font-variant-numeric:tabular-nums; white-space:nowrap; }
-.db-rent-alt b.is-good { color:var(--good); }
+.db-rent-alt b.is-good { color:var(--good-ink, var(--good)); }
 .db-rent-alt b.is-bad { color:var(--bad); }
 .db-alts { list-style:none; margin:6px 0 0; padding:0 2px; display:flex; flex-direction:column; gap:2px; }
 .db-alt { display:grid; grid-template-columns:minmax(0, 1fr) auto; align-items:baseline; gap:0 10px; padding:3px 2px; font-size:.84rem; color:var(--ink-2); }
 .db-alt-k { min-width:0; font-weight:650; }
-.db-alt-k small { display:block; font-size:.72rem; font-weight:500; color:var(--ink-3); line-height:1.35; }
+.db-alt-k small { display:block; font-size:var(--fs-min, .75rem); font-weight:500; color:var(--ink-3); line-height:1.35; }
 .db-alt b { font-weight:800; font-variant-numeric:tabular-nums; white-space:nowrap; text-align:right; }
 .db-alt b.is-bad { color:var(--bad); }
-.db-alt b.is-good { color:var(--good); }
+.db-alt b.is-good { color:var(--good-ink, var(--good)); }
 .db-hug { display:inline-flex; align-items:center; min-height:36px; margin-top:2px; padding:0 2px; font-size:.8rem; font-weight:700; text-decoration:none; }
 .db-hug:hover { text-decoration:underline; }
-.db-basis { margin-top:8px; font-size:.74rem; color:var(--ink-3); }
+.db-basis { margin-top:8px; font-size:var(--fs-min, .75rem); color:var(--ink-3); }
 .db-warns { margin-top:8px; display:flex; flex-direction:column; gap:6px; }
 .db-warns .callout { margin:0; padding:7px 10px; font-size:.8rem; line-height:1.45; }
+/* 주의사항은 누르면 자금 화면의 그 자리로 (자금 모듈이 준 href) */
+.db-warns a.callout { display:flex; align-items:flex-start; gap:8px; min-height:var(--tap, 36px); color:var(--ink); text-decoration:none; }
+.db-warns a.callout:hover .db-warn-go { text-decoration:underline; }
+.db-warn-t { flex:1; min-width:0; }
+.db-warn-go { flex:none; font-weight:800; color:var(--ink-2); white-space:nowrap; }
+/* 폰·태블릿 세로: 계산 내역(장부 줄·주의사항)은 접어 두고 결과 숫자를 먼저 */
+.db-fold { margin-top:8px; border-top:1px dashed var(--line); }
+.db-fold > summary { display:flex; align-items:center; gap:6px; min-height:36px; padding:4px 2px; cursor:pointer; list-style:none; font-size:.86rem; font-weight:750; color:var(--ink-2); }
+.db-fold > summary::-webkit-details-marker { display:none; }
+.db-fold > summary::after { content:'▼'; margin-left:auto; font-size:.75rem; color:var(--ink-3); transition:transform .15s; }
+.db-fold[open] > summary::after { transform:rotate(180deg); }
+.db-fold-hide, .db-fold[open] .db-fold-show { display:none; }
+.db-fold[open] .db-fold-hide { display:inline; }
+.db-fold-warn { color:var(--warn-ink, var(--warn)); }
+.db-fold-warn.is-bad { color:var(--bad); }
+.db-fold > .db-ledger { margin-top:4px; }
 
 /* 견적 */
 .db-est-label { font-size:.8rem; font-weight:700; color:var(--ink-3); }
 .db-est-head { display:flex; align-items:center; flex-wrap:wrap; gap:4px 8px; }
 .db-est-big { font-size:1.75rem; font-weight:900; letter-spacing:-.03em; line-height:1.15; font-variant-numeric:tabular-nums; }
-.db-vat { display:inline-flex; align-items:center; padding:1px 8px; border-radius:999px; background:var(--good-bg); color:var(--good); font-size:.72rem; font-weight:800; white-space:nowrap; }
-.db-vat.is-ex { background:var(--warn-bg); color:var(--warn); }
+.db-vat { display:inline-flex; align-items:center; padding:1px 8px; border-radius:999px; background:var(--good-bg); color:var(--good-ink, var(--good)); font-size:var(--fs-min, .75rem); font-weight:800; white-space:nowrap; }
+.db-vat.is-ex { background:var(--warn-bg); color:var(--warn-ink, var(--warn)); }
 .db-est-range { font-size:.85rem; color:var(--ink-2); font-variant-numeric:tabular-nums; }
 .db-est-ref { margin-top:4px; font-size:.78rem; color:var(--ink-3); line-height:1.45; font-variant-numeric:tabular-nums; }
 .db-est-lg { display:flex; align-items:flex-start; gap:6px; margin-top:8px; padding:7px 10px; border-radius:10px; background:var(--bg-3); font-size:.82rem; line-height:1.45; color:var(--ink-2); font-variant-numeric:tabular-nums; }
@@ -284,7 +358,7 @@
 .db-notes .db-note-tip { color:var(--ink-2); }
 .db-range { position:relative; height:8px; border-radius:999px; margin:10px 0 4px; background:linear-gradient(90deg, var(--good-bg), var(--warn-bg), var(--bad-bg)); border:1px solid var(--line); }
 .db-range i { position:absolute; top:50%; width:14px; height:14px; margin:-7px 0 0 -7px; border-radius:50%; background:var(--brand); border:2px solid var(--bg-2); box-shadow:var(--shadow); }
-.db-range-ends { display:flex; justify-content:space-between; font-size:.7rem; color:var(--ink-3); font-variant-numeric:tabular-nums; }
+.db-range-ends { display:flex; justify-content:space-between; font-size:var(--fs-min, .75rem); color:var(--ink-3); font-variant-numeric:tabular-nums; }
 .db-facts { display:flex; flex-wrap:wrap; gap:5px; margin-top:10px; }
 .db-notes { margin:8px 0 0; padding-left:1.1em; font-size:.78rem; color:var(--ink-3); }
 .db-notes li + li { margin-top:2px; }
@@ -313,26 +387,27 @@ button.db-wk-head:hover { background:var(--bg-3); }
 .db-wk-msline { display:flex; flex-wrap:wrap; gap:4px; margin-top:6px; }
 .db-wk-body { display:flex; flex-direction:column; gap:8px; padding:8px 10px 12px; }
 .db-days { display:grid; grid-template-columns:repeat(7, minmax(0, 1fr)); gap:3px; }
-.db-day { position:relative; text-align:center; padding:3px 0 4px; border-radius:8px; border:1px solid var(--line); background:var(--bg-2); font-size:.66rem; line-height:1.2; color:var(--ink-3); }
+.db-day { position:relative; text-align:center; padding:3px 0 4px; border-radius:8px; border:1px solid var(--line); background:var(--bg-2); font-size:var(--fs-min, .75rem); line-height:1.2; color:var(--ink-3); }
 .db-day b { display:block; font-size:.86rem; color:var(--ink-2); font-variant-numeric:tabular-nums; }
 .db-day.is-we b { color:var(--bad); }
 .db-day.is-past { opacity:.5; }
 .db-day.is-today { border-color:var(--brand); background:var(--brand-bg); opacity:1; }
-.db-day.is-today b, .db-day.is-today span { color:var(--brand); }
+.db-day.is-today b, .db-day.is-today span { color:var(--brand-ink, var(--brand)); }
 .db-day.is-ms { border-color:color-mix(in srgb, var(--brand) 55%, var(--line)); }
 .db-day.is-move { background:var(--brand); border-color:var(--brand); }
 .db-day.is-move b, .db-day.is-move span { color:var(--on-brand); }
-.db-day-flag { position:absolute; top:-8px; right:-4px; font-size:.72rem; }
+.db-day-flag { position:absolute; top:-8px; right:-4px; font-size:var(--fs-min, .75rem); }
 .db-dots { display:flex; justify-content:center; gap:2px; height:5px; margin-top:2px; }
 .db-dot { width:5px; height:5px; border-radius:50%; background:var(--ink-3); }
 .db-dot.is-late { background:var(--bad); }
 .db-dot.is-done { background:var(--good); }
 .db-day.is-move .db-dot { background:var(--on-brand); }
 .db-flags { display:flex; flex-direction:column; gap:4px; }
-.db-ms { display:flex; align-items:flex-start; gap:6px; padding:6px 9px; border-radius:9px; background:var(--brand-bg); color:var(--brand); font-size:.82rem; font-weight:750; line-height:1.35; }
+.db-ms { display:flex; align-items:flex-start; gap:6px; padding:6px 9px; border-radius:9px; background:var(--brand-bg); color:var(--brand-ink, var(--brand)); font-size:.82rem; font-weight:750; line-height:1.35; }
 .db-ms.is-main { background:var(--brand); color:var(--on-brand); }
 .db-ms-date { white-space:nowrap; font-variant-numeric:tabular-nums; }
-.db-mschip { display:inline-flex; align-items:center; gap:3px; padding:1px 8px; border-radius:999px; background:var(--brand-bg); color:var(--brand); font-size:.72rem; font-weight:750; white-space:nowrap; }
+/* 접힌 칸 머리줄의 이정표 칩: 긴 이름은 줄바꿈 (칸 오른쪽에서 잘리지 않게) */
+.db-mschip { display:inline-flex; align-items:center; gap:3px; max-width:100%; padding:1px 8px; border-radius:11px; background:var(--brand-bg); color:var(--brand-ink, var(--brand)); font-size:var(--fs-min, .75rem); font-weight:750; white-space:normal; line-height:1.45; }
 .db-mschip.is-main { background:var(--brand); color:var(--on-brand); }
 .db-wi { display:flex; align-items:flex-start; gap:6px; min-height:36px; padding:6px 7px; border-radius:8px; color:var(--ink); text-decoration:none; font-size:.84rem; line-height:1.4; }
 .db-wi:hover { background:var(--bg-3); }
@@ -340,7 +415,7 @@ button.db-wk-head:hover { background:var(--bg-3); }
 .db-wi-st { flex:none; width:16px; text-align:center; font-weight:900; color:var(--ink-3); }
 .db-wi-emo { flex:none; }
 .db-wi-t { flex:1; min-width:0; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
-.db-wi-d { flex:none; margin-left:2px; font-size:.7rem; color:var(--ink-3); white-space:nowrap; font-variant-numeric:tabular-nums; padding-top:2px; }
+.db-wi-d { flex:none; margin-left:2px; font-size:var(--fs-min, .75rem); color:var(--ink-3); white-space:nowrap; font-variant-numeric:tabular-nums; padding-top:2px; }
 .db-wi.is-done .db-wi-t { text-decoration:line-through; color:var(--ink-3); }
 .db-wi.is-done .db-wi-st { color:var(--good); }
 .db-wi.is-late .db-wi-st, .db-wi.is-late .db-wi-d { color:var(--bad); }
@@ -352,24 +427,24 @@ button.db-wk-head:hover { background:var(--bg-3); }
 .db-grp-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .db-grp-count { margin-left:auto; color:var(--ink-3); font-variant-numeric:tabular-nums; font-weight:700; }
 .db-grp-head.has-tog { min-height:36px; padding-bottom:0; }
-.db-grp-tog { flex:none; min-height:36px; min-width:44px; padding:0 9px; border:1px solid var(--line); border-radius:999px; background:var(--bg-2); color:var(--brand); font:inherit; font-size:.74rem; font-weight:800; cursor:pointer; white-space:nowrap; font-variant-numeric:tabular-nums; }
+.db-grp-tog { flex:none; min-height:36px; min-width:44px; padding:0 9px; border:1px solid var(--line); border-radius:999px; background:var(--bg-2); color:var(--brand-ink, var(--brand)); font:inherit; font-size:var(--fs-min, .75rem); font-weight:800; cursor:pointer; white-space:nowrap; font-variant-numeric:tabular-nums; }
 .db-grp-tog:hover { border-color:var(--brand); }
 .db-wi.is-pri .db-wi-st { color:var(--bad); }
-.db-flags-more { font-size:.72rem; color:var(--ink-3); padding:0 6px; }
+.db-flags-more { font-size:var(--fs-min, .75rem); color:var(--ink-3); padding:0 6px; }
 .db-pcs { display:flex; flex-direction:column; gap:5px; padding-top:2px; }
-.db-pcs-label { font-size:.72rem; font-weight:750; color:var(--ink-3); padding:0 4px; }
+.db-pcs-label { font-size:var(--fs-min, .75rem); font-weight:750; color:var(--ink-3); padding:0 4px; }
 .db-pcs-row { display:flex; flex-wrap:wrap; gap:5px; }
 .db-pc { display:inline-flex; align-items:center; gap:4px; min-height:36px; max-width:100%; padding:0 10px; border-radius:999px; border:1px solid var(--line); background:var(--bg-2); color:var(--ink-2); font:inherit; font-size:.76rem; font-weight:700; cursor:pointer; }
 .db-pc:hover { border-color:var(--brand); color:var(--ink); }
 .db-pc-name { min-width:0; max-width:7.5em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .db-pc b { font-variant-numeric:tabular-nums; color:var(--ink-3); font-weight:700; }
-.db-pc-hi { color:var(--bad); font-weight:800; font-size:.72rem; }
+.db-pc-hi { color:var(--bad); font-weight:800; font-size:var(--fs-min, .75rem); }
 .db-pc.is-late { border-color:color-mix(in srgb, var(--bad) 45%, var(--line)); }
-.db-pc.is-done b { color:var(--good); }
-.db-chip-cur { background:var(--brand-bg); color:var(--brand); }
+.db-pc.is-done b { color:var(--good-ink, var(--good)); }
+.db-chip-cur { background:var(--brand-bg); color:var(--brand-ink, var(--brand)); }
 .db-wk-empty { font-size:.8rem; color:var(--ink-3); padding:4px 4px 0; }
-.db-gap { flex:0 0 56px; display:flex; align-items:center; justify-content:center; text-align:center; color:var(--ink-3); font-size:.74rem; font-weight:700; border:1px dashed var(--line-2); border-radius:14px; writing-mode:vertical-rl; letter-spacing:.1em; }
-.db-legend { display:flex; flex-wrap:wrap; gap:4px 14px; font-size:.74rem; color:var(--ink-3); margin-top:4px; align-items:center; }
+.db-gap { flex:0 0 56px; display:flex; align-items:center; justify-content:center; text-align:center; color:var(--ink-3); font-size:var(--fs-min, .75rem); font-weight:700; border:1px dashed var(--line-2); border-radius:14px; writing-mode:vertical-rl; letter-spacing:.1em; }
+.db-legend { display:flex; flex-wrap:wrap; gap:4px 14px; font-size:var(--fs-min, .75rem); color:var(--ink-3); margin-top:4px; align-items:center; }
 .db-legend a { font-weight:700; display:inline-flex; align-items:center; min-height:36px; }
 .db-road.is-cols .db-road-scroll { align-items:flex-start; }
 .db-road.is-cols .db-wk { max-height:min(720px, calc(100vh - 150px)); }
@@ -385,7 +460,12 @@ button.db-wk-head:hover { background:var(--bg-3); }
 .db-pgroups { display:grid; grid-template-columns:repeat(var(--db-pcols, 1), minmax(0, 1fr)); gap:0 14px; align-items:start; }
 .db-pcol { display:flex; flex-direction:column; gap:14px; min-width:0; }
 .db-pg { min-width:0; }
-.db-pg-title { font-size:.74rem; font-weight:800; color:var(--ink-3); margin:0 0 6px 2px; letter-spacing:.02em; }
+.db-pg-title { font-size:var(--fs-min, .75rem); font-weight:800; color:var(--ink-3); margin:0 0 6px 2px; letter-spacing:.02em; }
+/* 다 끝난 파트는 타일 대신 카드 끝에 한 줄로 */
+.db-pdone { display:flex; flex-wrap:wrap; align-items:center; gap:2px 4px; margin-top:12px; padding-top:8px; border-top:1px dashed var(--line); font-size:.82rem; color:var(--good-ink, var(--good)); font-weight:750; }
+.db-pdone-label { margin-right:2px; }
+.db-pdone a { display:inline-flex; align-items:center; min-height:32px; padding:0 9px; border-radius:999px; border:1px solid var(--line); background:var(--bg); color:var(--ink-2); font-weight:650; text-decoration:none; }
+.db-pdone a:hover { border-color:var(--brand); color:var(--ink); }
 .db-tiles { display:flex; flex-direction:column; gap:6px; }
 .db-tile { display:flex; flex-direction:column; gap:5px; min-width:0; padding:9px 12px; border:1px solid var(--line); border-radius:12px; background:var(--bg); color:var(--ink); text-decoration:none; transition:border-color .12s, background .12s; }
 .db-tile:hover { border-color:var(--brand); background:var(--bg-2); }
@@ -395,10 +475,10 @@ button.db-wk-head:hover { background:var(--bg-3); }
 .db-tile-count { margin-left:auto; flex:none; font-size:.8rem; color:var(--ink-3); font-variant-numeric:tabular-nums; font-weight:700; }
 .db-tile .progress { height:6px; flex:1; min-width:0; }
 .db-tile-bar { display:flex; align-items:center; gap:6px; }
-.db-tile-count2 { display:none; font-size:.72rem; color:var(--ink-3); font-variant-numeric:tabular-nums; font-weight:700; }
+.db-tile-count2 { display:none; font-size:var(--fs-min, .75rem); color:var(--ink-3); font-variant-numeric:tabular-nums; font-weight:700; }
 .db-tile-next { font-size:.78rem; color:var(--ink-3); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .db-tile-next.is-late { color:var(--bad); }
-.db-tile.is-complete .db-tile-next { color:var(--good); font-weight:700; }
+.db-tile.is-complete .db-tile-next { color:var(--good-ink, var(--good)); font-weight:700; }
 @media (max-width: 520px) {
   .db-tiles { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:6px; }
   .db-tile { padding:8px 10px; gap:4px; }
@@ -409,7 +489,7 @@ button.db-wk-head:hover { background:var(--bg-3); }
   .db-tile-count { display:none; }
   .db-tile-count2 { display:inline; }
   .db-tile .badge { height:18px; min-width:18px; padding:0 5px; margin-left:auto; flex:none; }
-  .db-tile-next { font-size:.72rem; line-height:1.35; white-space:normal; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
+  .db-tile-next { font-size:var(--fs-min, .75rem); line-height:1.35; white-space:normal; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
 }
 
 /* 최근 활동 · 바로가기 */
@@ -424,12 +504,25 @@ button.db-wk-head:hover { background:var(--bg-3); }
 .db-qlink:hover { border-color:var(--brand); background:var(--bg-2); }
 .db-qlink-ico { font-size:1.3rem; flex:none; }
 .db-qlink b { display:block; font-size:.9rem; }
-.db-qlink small { display:block; font-size:.74rem; color:var(--ink-3); line-height:1.3; }
+.db-qlink small { display:block; font-size:var(--fs-min, .75rem); color:var(--ink-3); line-height:1.3; }
 @media (max-width: 520px) {
+  /* 폰: 최근 활동은 3줄만 ('전체 기록 →'으로 더 보기), 바로가기는 탭바와 같은 것(도면·가이드)을 빼고 한 줄 */
+  .db-act:nth-child(n+4) { display:none; }
+  .db-qlink.is-dup { display:none; }
   .db-qlinks { grid-template-columns:repeat(3, minmax(0, 1fr)); gap:6px; }
   .db-qlink { flex-direction:column; justify-content:center; gap:4px; min-height:76px; padding:8px 4px; text-align:center; }
   .db-qlink b { font-size:.8rem; line-height:1.3; }
   .db-qlink small { display:none; }
+}
+
+/* 터치 기기: 누르는 곳은 공통 --tap(44px) 높이로 (위 규칙들보다 뒤에 있어야 이겨요).
+   공통 글자·색 값(--tap, --fs-min, --*-ink)은 app.css 에 없을 때를 대비해 기본값을 같이 적어 둬요 (없으면 누르는 곳이 오히려 작아져요) */
+@media (pointer: coarse) {
+  .db-counter, .db-more, .db-hug, .db-grp-tog, .db-pc, .db-fold > summary, .db-pdone a { min-height:var(--tap, 44px); }
+  /* 펼친 주 칸의 할 일 줄: 한 줄짜리도 누르기 쉽게, 글자는 가운데로 */
+  .db-wi { min-height:var(--tap, 44px); align-items:center; }
+  .db-road-ctrl .btn { min-height:var(--tap, 44px); }
+  .db-road-ctrl .btn-icon { width:var(--tap, 44px); }
 }
 `);
 
@@ -442,8 +535,8 @@ button.db-wk-head:hover { background:var(--bg-3); }
     const move = moveDay();
     const dd = D.dday(move);
     const st = MV.parts.stats();
-    // 7일 이내 = 오늘부터 앞으로 7일 안에 마감인 열린 일 (지난 일은 '지연'에서 따로 셈.
-    //   눌러서 가는 체크리스트 '7일 이내' 목록에는 지연 항목도 맨 위에 함께 보여요)
+    // 7일 안에 = 오늘부터 앞으로 7일 안에 마감인 열린 일 (지난 일은 '기한 지남'에서 따로 셈).
+    //   세 숫자 모두 체크리스트 '🔥 지금 할 일'(~focus)로 가요 — 기한 지남 + 7일 안을 한 목록에 중요도 순(중요 → 보통 → 여유)으로 보여 줘요
     let nOver = 0, nToday = 0, n7 = 0;
     MV.items.list().forEach((i) => {
       const s = MV.items.status(i);
@@ -465,7 +558,12 @@ button.db-wk-head:hover { background:var(--bg-3); }
       eyebrow = '이사한 지'; big = el('div', { class: 'db-big' }, String(-dd.n), el('small', '일 지났어요'));
     }
     const today = D.today();
-    const next = milestones().filter((m) => D.diff(today, m.date) >= 0)[0];
+    /* 다음 이정표: 맨 앞이 이사 자체(큰 숫자와 같은 말)면 그다음 이정표(이사 다음 날 에어컨 설치 등)를 '이사 다음 이정표'로.
+       이사 전에는 폰 첫 화면에서 숨겨요(is-after) — 이사 당일·이사 뒤에는 정말 '다음' 일이라 보여 줘요 */
+    const upcoming = milestones().filter((m) => D.diff(today, m.date) >= 0);
+    const skipMain = !!(upcoming[0] && upcoming[0].main);
+    const next = skipMain ? upcoming[1] : upcoming[0];
+    const nextAfter = skipMain && dd.n != null && dd.n > 0;
     const whenText = move ? D.fmtLong(move) : '이사일 정보가 올바르지 않아요 (백업 데이터 확인)';
 
     return el('section', { class: 'card db-hero db-span-12', 'aria-label': '이사 개요', dataset: { dbDeep: '1' } },
@@ -473,7 +571,8 @@ button.db-wk-head:hover { background:var(--bg-3); }
         el('div', { class: 'db-hero-left', dataset: { dbKey: 'hero-l' } },
           el('div', { class: 'db-eyebrow' }, eyebrow),
           big,
-          el('div', { class: 'db-when' }, whenText, dd.n > 0 ? el('span', { class: 'nowrap' }, ' · ' + dd.label) : null),
+          // 'D-n'은 상단바와 큰 숫자에 이미 있어서 날짜 줄에는 다시 쓰지 않아요
+          el('div', { class: 'db-when' }, whenText),
           el('div', { class: 'db-route' },
             el('span', '등촌우성 2층'), el('span', { class: 'db-route-arrow', 'aria-hidden': 'true' }, '→'), el('span', '서광등촌마을 14층'),
             aOld && aNew ? el('span', { class: 'db-route-area' }, '전용 ' + aOld + ' → ' + aNew) : null)),
@@ -484,30 +583,34 @@ button.db-wk-head:hover { background:var(--bg-3); }
             el('span', { class: 'db-prog-sub' }, st.done + ' / ' + st.total + ' 완료')),
           MV.ui.progress(st.pct),
           el('div', { class: 'db-counters' },
-            counter('지연', nOver, 'bad', '#/checklist/~focus'),
+            counter('기한 지남', nOver, 'bad', '#/checklist/~focus'),
             counter('오늘', nToday, 'warn', '#/checklist/~focus'),
-            counter('7일 이내', n7, 'brand', '#/checklist/~week', null,
-              '오늘부터 7일 안에 마감인 일' + (nOver ? ' (목록에는 지연 ' + nOver + '개도 함께 보여요)' : ''))),
-          next ? el('div', { class: 'db-next' },
-            el('span', { class: 'db-next-label' }, '🚩 다음 이정표'),
+            counter('7일 안에', n7, 'brand', '#/checklist/~focus', null,
+              '오늘부터 7일 안에 마감인 일' + (nOver ? ' (목록에는 기한 지남 ' + nOver + '개도 함께 보여요)' : ''))),
+          next ? el('div', { class: 'db-next' + (nextAfter ? ' is-after' : '') },
+            el('span', { class: 'db-next-label' }, skipMain ? '🚩 이사 다음 이정표' : '🚩 다음 이정표'),
             el('span', { class: 'db-next-what' }, el('b', D.fmt(next.date) + ' ' + next.label),
               el('span', { class: 'db-dchip' }, D.dday(next.date).label))) : null)));
   }
 
   /* ======================= 섹션: 지금 할 일 ======================= */
-  function taskRow(i, pm) {
+  // grouped: 중요도 묶음 안의 줄 (묶음 제목이 '중요'라서 줄의 '중요' 칩은 빼요). 기한 칩은 늘 보여 줘요 (오늘·내일·D-n·n일 지남)
+  function taskRow(i, pm, grouped) {
     const p = partOf(pm, i.partId);
-    const cb = el('input', { type: 'checkbox', checked: !!i.done, 'aria-label': (i.done ? '다시 열기: ' : '완료: ') + i.title, dataset: { id: i.id } });
+    const t = shownTitle(i);
+    const cb = el('input', { type: 'checkbox', checked: !!i.done, 'aria-label': (i.done ? '다시 열기: ' : '완료: ') + t, dataset: { id: i.id } });
     cb.addEventListener('change', () => onToggle(i.id, cb));
     return el('div', { class: 'db-task' + (i.done ? ' is-done' : ''), dataset: { dbKey: 'row-' + i.id } },
       el('label', { class: 'db-check', title: i.done ? '다시 열기' : '완료로 표시' }, cb),
       el('div', { class: 'db-task-main' },
-        el('a', { class: 'db-task-title', href: itemHref(i) }, i.title || '(제목 없음)'),
+        el('a', { class: 'db-task-title', href: itemHref(i) }, t || '(제목 없음)'),
         el('div', { class: 'db-meta' },
-          // 파트 칩은 표시만 (작은 누름 대상이 제목 링크 바로 밑에 겹치지 않게 — 파트 이동은 '파트별 진행' 타일로)
-          el('span', { class: 'chip', title: p.name }, (p.emoji || '📌') + ' ' + clip(p.name, 10)),
+          // 파트 칩은 표시만 (작은 누름 대상이 제목 링크 바로 밑에 겹치지 않게 — 파트 이동은 '파트별 진행' 타일로).
+          // 폰에서는 이모지만 보이고 이름은 title·화면 읽기용 글자로 (CSS .db-pchip-name)
+          el('span', { class: 'chip db-pchip', title: p.name },
+            el('span', { 'aria-hidden': 'true' }, p.emoji || '📌'), el('span', { class: 'db-pchip-name' }, clip(p.name, 10))),
           MV.ui.dueChip(i.due, i.done),
-          i.priority === 'high' && !i.done ? el('span', { class: 'chip bad' }, '중요') : null)));
+          !grouped && i.priority === 'high' && !i.done ? el('span', { class: 'chip bad' }, '중요') : null)));
   }
   function onToggle(id, cb) {
     const it = MV.items.get(id);
@@ -516,7 +619,7 @@ button.db-wk-head:hover { background:var(--bg-3); }
     // 바로 보이는 반응: 다시 그리기(다음 프레임 뒤)를 기다리지 않고 이 줄에 먼저 줄을 긋거나 지움
     const row = cb && cb.closest ? cb.closest('.db-task') : null;
     if (row) row.classList.toggle('is-done', willDone);
-    if (cb) cb.setAttribute('aria-label', (willDone ? '다시 열기: ' : '완료: ') + (it.title || ''));
+    if (cb) cb.setAttribute('aria-label', (willDone ? '다시 열기: ' : '완료: ') + shownTitle(it));
     if (willDone) sessionDone.set(id, Date.now()); else sessionDone.delete(id);
     MV.items.toggle(id);
     // 되돌리기 토스트는 하나만: 앞 토스트가 아직 떠 있으면 거기에 이어 붙여 'n개 완료 · 모두 되돌리기' 로
@@ -525,7 +628,7 @@ button.db-wk-head:hover { background:var(--bg-3); }
     if (live) undoBatch.toast.remove();
     const k = entries.findIndex((e) => e.id === id);
     if (k >= 0) entries.splice(k, 1);                      // 같은 항목을 다시 누름 = 원래대로
-    else entries.push({ id, willDone, title: it.title || '' });
+    else entries.push({ id, willDone, title: shownTitle(it) });
     if (!entries.length) { undoBatch = null; return; }
     const nDone = entries.filter((e) => e.willDone).length;
     const nOpen = entries.length - nDone;
@@ -551,73 +654,73 @@ button.db-wk-head:hover { background:var(--bg-3); }
     if (batch.toast && batch.toast.classList) batch.toast.classList.add('db-toast');
     undoBatch = batch;
   }
-  const NOW_MAX = 8;
-  // 화면에 보이는 묶음 순서: 오늘 마감(이사 당일 일 포함) → 기한 지남 → 3일 안 → 7일 안
-  const NOW_SLOTS = [
-    { id: 'today', label: '오늘 마감', cls: 'is-today' },
-    { id: 'overdue', label: '기한 지남', cls: 'is-overdue' },
-    { id: 'soon', label: '3일 안에', cls: '' },
-    { id: 'week', label: '7일 안에', cls: '' },
-  ];
-  // 방금 완료해서 status 가 'done' 이 된 항목도 원래 자리에 남도록 기한으로 칸을 정합니다
-  function nowSlot(i, today) {
-    if (!D.valid(i.due)) return 'later';
-    const n = D.diff(today, normDate(i.due));
-    return n < 0 ? 'overdue' : n === 0 ? 'today' : n <= 3 ? 'soon' : n <= 7 ? 'week' : 'later';
-  }
-  function nowCard(pm) {
+  // '지금 할 일'에 보여 줄 열린 일 수: 넓은 화면(옆에 돈 흐름·견적 카드가 있어 카드가 길어짐)은 14개, 그 밖은 8개
+  const NOW_MAX = 8, NOW_MAX_WIDE = 14;
+  const WIDE_MQ = '(min-width: 1101px)';
+  const nowMax = () => { try { return window.matchMedia && window.matchMedia(WIDE_MQ).matches ? NOW_MAX_WIDE : NOW_MAX; } catch (e) { return NOW_MAX; } };
+  /* 고르는 범위 (10/26 가족 요청 — 체크리스트 '🔥 지금 할 일'과 같은 묶음): 기한이 지났거나 오늘부터 NOW_DAYS 일 안에 마감인 열린 일.
+     이사(11/3) 일주일 전부터는 이사 전날까지가 모두 들어와요. 날짜는 늘 오늘에서 계산해요 (박아 두지 않음) */
+  const NOW_DAYS = 7;
+  // 보여 주는 순서: 중요 → 보통 → 여유 (MV.items.PRIORITY 이름), 같은 묶음 안에서는 기한 순 (기한 지남 → 오늘 → 그 뒤) → 원래 순서
+  const PRI_KEYS = ['high', 'mid', 'low'];
+  const priKey = (i) => (PRI[i.priority] != null ? i.priority : 'mid');
+  const PRI_FALLBACK = { high: '중요', mid: '보통', low: '여유' };
+  const priLabel = (k) => { const P = (MV.items && MV.items.PRIORITY) || {}; return (P[k] && P[k].label) || PRI_FALLBACK[k]; };
+  const byPri = (a, b) => (PRI[priKey(a)] - PRI[priKey(b)]) || byDue(a, b);
+  // 방금 완료해서 status 가 'done' 이 된 항목도 제자리에 남도록, 완료 여부와 상관없이 기한으로만 정해요
+  const inNow = (i, today) => D.valid(i.due) && D.diff(today, normDate(i.due)) <= NOW_DAYS;
+  /* '지금 할 일'에 고를 항목 (nowCard 와, 주간 칸 '중요' 깃발에서 같은 항목을 빼는 데 같이 씀) */
+  function nowPick(max) {
     const today = D.today();
     const all = MV.items.list();
     const open = all.filter((i) => !i.done);
-    const slot = new Map(all.map((i) => [i.id, nowSlot(i, today)]));
-    const urgent = open.filter((i) => ['overdue', 'today', 'soon'].includes(slot.get(i.id)));
-    const weekOpen = open.filter((i) => slot.get(i.id) === 'week');
-    const topped = urgent.length < 5 && weekOpen.length > 0;     // 급한 일이 적으면 7일 안 일로 채움
-    const pick = topped ? urgent.concat(weekOpen) : urgent;
-    // 고르는 순서: 오늘 마감 → 중요한 지연 → 중요한 3일 안 → 나머지 지연 → 3일 안 → 7일 안 (같은 칸 안에서는 기한·중요도 순)
-    const rank = (i) => {
-      const sl = slot.get(i.id), hi = i.priority === 'high';
-      if (sl === 'today') return 0;
-      if (sl === 'overdue') return hi ? 1 : 3;
-      if (sl === 'soon') return hi ? 2 : 4;
-      return 5;
-    };
-    // 열린 일이 언제나 NOW_MAX 칸을 채우고, 방금 끝낸 일은 가장 최근 KEEP_DONE 개만 제자리에 줄 그어 남깁니다
-    const chosenOpen = pick.slice().sort((a, b) => (rank(a) - rank(b)) || byDue(a, b)).slice(0, NOW_MAX);
-    const kept = all.filter((i) => i.done && sessionDone.has(i.id) && slot.get(i.id) !== 'later' && (topped || slot.get(i.id) !== 'week'))
+    const inSet = new Set(all.filter((i) => inNow(i, today)).map((i) => i.id));
+    const pick = open.filter((i) => inSet.has(i.id)).sort(byPri);
+    // 열린 일이 언제나 max 칸을 채우고, 방금 끝낸 일은 가장 최근 KEEP_DONE 개만 제자리에 줄 그어 남깁니다
+    const chosenOpen = pick.slice(0, max || NOW_MAX);
+    return { today, all, open, inSet, pick, chosenOpen };
+  }
+  const nowIdsOf = (np) => new Set(np.chosenOpen.map((i) => i.id));
+  function nowCard(pm, np) {
+    const { today, all, open, inSet, pick, chosenOpen } = np;
+    const kept = all.filter((i) => i.done && sessionDone.has(i.id) && inSet.has(i.id))
       .sort((a, b) => sessionDone.get(b.id) - sessionDone.get(a.id)).slice(0, KEEP_DONE);
     const chosen = chosenOpen.concat(kept);
-    const nLate = urgent.filter((i) => slot.get(i.id) === 'overdue').length;
-    const nToday = urgent.filter((i) => slot.get(i.id) === 'today').length;
-    const showsWeek = chosen.some((i) => slot.get(i.id) === 'week');
-    // '전체 보기' 는 카드에 보이는 항목이 모두 들어 있는 목록으로
-    const allHref = !pick.length && open.length ? '#/checklist/~all' : showsWeek ? '#/checklist/~week' : '#/checklist/~focus';
+    const dn = (i) => D.diff(today, normDate(i.due));
+    const nLate = pick.filter((i) => dn(i) < 0).length;
+    const nToday = pick.filter((i) => dn(i) === 0).length;
+    // '전체 보기' 는 카드와 같은 묶음(체크리스트 '🔥 지금 할 일')으로 — 7일 안에 마감인 일이 없으면 전체 목록으로
+    const allHref = !pick.length && open.length ? '#/checklist/~all' : '#/checklist/~focus';
     const subBits = [];
     if (nToday) subBits.push('오늘 ' + nToday);
-    if (nLate) subBits.push('지연 ' + nLate);
-    const sub = pick.length ? (subBits.length ? subBits.join(' · ') : (topped ? '7일 안에 마감' : '3일 안에 마감')) : '';
+    if (nLate) subBits.push('기한 지남 ' + nLate);
+    const sub = pick.length ? (subBits.length ? subBits.join(' · ') : '7일 안에 마감') : '';
     const body = el('div', { class: 'db-tasks', dataset: { dbKey: 'now-list', dbDeep: '1' } });
     if (chosen.length) {
-      NOW_SLOTS.forEach((g) => {
-        const rows = chosen.filter((i) => slot.get(i.id) === g.id).sort(byDue);
+      PRI_KEYS.forEach((k) => {
+        const rows = chosen.filter((i) => priKey(i) === k).sort(byDue);
         if (!rows.length) return;
-        const left = pick.filter((i) => slot.get(i.id) === g.id).length;   // 이 칸의 열린 일 전체 (카드에 안 보이는 것 포함)
-        body.appendChild(el('div', { class: 'db-subhead ' + g.cls, dataset: { dbKey: 'sh-' + g.id } }, g.label,
+        const left = pick.filter((i) => priKey(i) === k).length;   // 이 묶음의 열린 일 전체 (카드에 안 보이는 것 포함)
+        const shown = rows.filter((i) => !i.done).length;
+        body.appendChild(el('div', {
+          class: 'db-subhead is-pri-' + k, dataset: { dbKey: 'sh-' + k },
+          title: left ? priLabel(k) + ' 일 ' + left + '개' + (left > shown ? ' — 여기에는 ' + shown + '개만, 나머지는 아래 \'더 보기\'에서' : '') : null,
+        }, priLabel(k),
           el('span', { class: 'db-subhead-n', 'aria-label': left ? '남은 일 ' + left + '개' : '모두 완료' }, left ? String(left) : '✓')));
-        rows.forEach((i) => body.appendChild(taskRow(i, pm)));
+        rows.forEach((i) => body.appendChild(taskRow(i, pm, true)));
       });
       const rest = pick.length - chosenOpen.length;
       if (rest > 0) body.appendChild(el('a', { class: 'db-more db-more-rest', href: allHref, dataset: { dbKey: 'more' } }, '그 외 ' + rest + '개 더 보기 →'));
     }
     if (!chosenOpen.length) {
-      // 급한 일이 없거나 방금 다 끝낸 경우 (끝낸 줄은 위에 남아 있음)
+      // 7일 안에 마감인 일이 없거나 방금 다 끝낸 경우 (끝낸 줄은 위에 남아 있음)
       if (!all.length) {
         body.appendChild(el('div', { class: 'db-empty', dataset: { dbKey: 'empty' } }, '아직 체크 항목이 없어요. ', el('a', { href: '#/checklist' }, '체크리스트에서 추가하기 →')));
       } else if (!open.length) {
         body.appendChild(el('div', { class: 'db-empty', dataset: { dbKey: 'empty' } }, el('b', '🎉 모든 할 일을 끝냈어요!'), ' 이사 준비 완료.'));
       } else {
         const upcoming = open.slice().sort(byDue).slice(0, 3);
-        body.appendChild(el('div', { class: 'db-empty', dataset: { dbKey: 'empty' } }, el('b', kept.length ? '급한 일은 다 끝냈어요 🙌' : '일주일 안에 급한 일은 없어요 🙌'), ' 미리 해 두면 좋은 일:'));
+        body.appendChild(el('div', { class: 'db-empty', dataset: { dbKey: 'empty' } }, el('b', kept.length ? '7일 안에 할 일은 다 끝냈어요 🙌' : '7일 안에 마감인 일은 없어요 🙌'), ' 미리 해 두면 좋은 일:'));
         upcoming.forEach((i) => body.appendChild(taskRow(i, pm)));
       }
     }
@@ -777,13 +880,34 @@ button.db-wk-head:hover { background:var(--bg-3); }
     box.appendChild(el('a', { class: 'db-hug', href: HUG_HREF }, '🛡 HUG 보증: 가입할 때와 안 할 때 비교 →'));
     return box;
   }
-  function moneyCard(est) {
+  // 주의사항 링크: 자금 모듈이 준 href('#/money/flow' 등 — 나중에 앵커가 붙어도 그대로), 없으면 자금 화면
+  const warnHref = (w) => (w && typeof w === 'object' && typeof w.href === 'string' && w.href.indexOf('#/') === 0 ? w.href : '#/money');
+  /* 카드 안 순서: 넓은 화면은 계산 내역(장부) → 결과 숫자 → 주의사항 → 기준 글.
+     폰·태블릿 세로(acc)는 결과 숫자를 먼저 보이고, 장부 줄·주의사항·기준 글은 '계산 내역' 접기 안에 (펼침은 ui.moneyOpen) */
+  function moneyBody(acc, p) {
+    const body = el('div');
+    if (!acc) {
+      [p.ledger, p.result, p.warns, p.basis].forEach((x) => { if (x) body.appendChild(x); });
+      return body;
+    }
+    if (p.result) body.appendChild(p.result);
+    const inner = [p.ledger, p.warns, p.basis].filter(Boolean);
+    if (!inner.length) return body;
+    const sum = el('summary', el('span', '계산 내역 ', el('span', { class: 'db-fold-show' }, '보기'), el('span', { class: 'db-fold-hide' }, '접기')),
+      p.nWarn ? el('span', { class: 'db-fold-warn' + (p.badWarn ? ' is-bad' : '') }, '· 주의 ' + p.nWarn + '개') : null);
+    body.appendChild(el('details', {
+      class: 'db-fold', open: !!ui.moneyOpen,
+      ontoggle: (e) => { const d = e.currentTarget; if (!!ui.moneyOpen !== d.open) { ui.moneyOpen = d.open; persistUi(); } },
+    }, sum, inner));
+    return body;
+  }
+  function moneyCard(est, acc) {
     let fs = null;
     try {
       if (MV.calc && typeof MV.calc.financeSummary === 'function') fs = MV.calc.financeSummary(MV.store.get());
     } catch (e) { console.warn('[dashboard] financeSummary 실패', e); fs = null; }
     const ok = fs && typeof fs === 'object' && ['inflow', 'outflow', 'leftover', 'net', 'netEssential'].some((k) => isNum(fs[k]));
-    const body = el('div');
+    const parts = { ledger: null, result: null, warns: null, basis: null, nWarn: 0, badWarn: false };
     if (ok) {
       const inflow = isNum(fs.inflow) ? fs.inflow : null;
       const outflow = isNum(fs.outflow) ? fs.outflow : null;
@@ -826,18 +950,18 @@ button.db-wk-head:hover { background:var(--bg-3); }
             led.appendChild(beforeNote(before, labels.length ? labels.join(', ') : null));
           }
         }
-        body.appendChild(led);
-        body.appendChild(cashResult({ netEssential: fs.netEssential, netWithPurchases: nwp, net, purchase, optional, rentPart: rent }));
+        parts.ledger = led;
+        parts.result = cashResult({ netEssential: fs.netEssential, netWithPurchases: nwp, net, purchase, optional, rentPart: rent });
       } else {
         // 예전 요약 (묶음 없음): 최종 여유 = 남는 돈 − 아직 낼 이사 비용 전부
         const net = isNum(fs.net) ? fs.net : (leftover != null && exp != null ? leftover - exp : null);
         if (leftover != null && net != null) led.appendChild(ledgerRow('남는 돈', null, minus(leftover), 'sum', null, MV.fmt.won(leftover)));
         if (exp != null) led.appendChild(ledgerRow('이사 비용', '이사업체 · 가전 이전 · 살림 구입 등', signed(exp, -1), '', null, MV.fmt.won(exp)));
-        body.appendChild(led);
+        parts.ledger = led;
         const fin = net != null ? net : leftover;
         if (fin != null) {
           const label = net != null ? '이사 비용까지 모두 내면' : '남는 돈';
-          body.appendChild(el('div', { class: 'db-total' + (fin < 0 ? ' is-bad' : '') },
+          parts.result = el('div', { class: 'db-result' }, el('div', { class: 'db-total' + (fin < 0 ? ' is-bad' : '') },
             el('span', label), el('b', { title: MV.fmt.won(fin) }, (fin < 0 ? '⚠ ' : '') + verdict(fin))));
         }
       }
@@ -847,12 +971,16 @@ button.db-wk-head:hover { background:var(--bg-3); }
         .map((w) => ({ t: warnText(w), lv: warnLevel(w), w }))
         .filter((x) => x.t && x.lv !== 'info' && !(headline && warnDup(x.w, x.t)));
       if (warns.length) {
+        // 누르면 자금 화면의 그 탭으로 (자금 모듈의 href)
         const box = el('div', { class: 'db-warns' });
-        warns.slice(0, 3).forEach((x) => box.appendChild(el('div', { class: 'callout ' + (x.lv === 'bad' ? 'bad' : 'warn') }, x.t)));
+        warns.slice(0, 3).forEach((x) => box.appendChild(el('a', { class: 'callout ' + (x.lv === 'bad' ? 'bad' : 'warn'), href: warnHref(x.w) },
+          el('span', { class: 'db-warn-t' }, x.t), el('span', { class: 'db-warn-go', 'aria-hidden': 'true' }, '→'))));
         if (warns.length > 3) box.appendChild(el('a', { class: 'db-more db-more-rest', href: '#/money' }, '주의사항 ' + (warns.length - 3) + '개 더 →'));
-        body.appendChild(box);
+        parts.warns = box;
+        parts.nWarn = warns.length;
+        parts.badWarn = warns.some((x) => x.lv === 'bad');
       }
-      body.appendChild(el('div', { class: 'db-basis' }, '자금흐름 화면에 입력한 값 기준 · 꼭 필요한 현금 = 남는 돈 − 꼭 드는 이사 비용'));
+      parts.basis = el('div', { class: 'db-basis' }, '자금흐름 화면에 입력한 값 기준 · 꼭 필요한 현금 = 남는 돈 − 꼭 드는 이사 비용');
     } else {
       // 계획값 (자금흐름 화면이 없을 때): 11/3 흐름 → 남는 돈 → 가족이 정한 이사 비용 묶음
       let bal = 0;
@@ -867,15 +995,15 @@ button.db-wk-head:hover { background:var(--bg-3); }
         signed(pc.essential, -1), '', null, MV.fmt.won(pc.essential)));
       const mvn = moverNote(pc.mover, moveDay() ? md(moveDay()) : null);
       if (mvn) led.appendChild(mvn);
-      body.appendChild(led);
+      parts.ledger = led;
       const nE = bal - pc.essential;
       const planRent = PLAN_FLOW.filter((s) => s.rent).reduce((a, s) => a + s.amt, 0);
-      body.appendChild(cashResult({ netEssential: nE, netWithPurchases: nE - pc.purchase, net: nE - pc.purchase - pc.optional, purchase: pc.purchase, optional: pc.optional, rentPart: planRent }));
-      body.appendChild(el('div', { class: 'db-basis' }, '계획값 기준 (약) · 이사업체는 계약 금액, 에어컨 설치는 따로 부른 기사(약 40만원 추정) · 옷장은 이사 뒤 간이 옷장(선택·나중에), 커튼·소품은 지금 것, 입주청소는 직접, 예비비는 없어요. 월세는 후불이라 12/3부터예요(11/3엔 안 내요). 자금흐름 화면에서 실제 금액을 넣으면 자동으로 바뀝니다.'));
+      parts.result = cashResult({ netEssential: nE, netWithPurchases: nE - pc.purchase, net: nE - pc.purchase - pc.optional, purchase: pc.purchase, optional: pc.optional, rentPart: planRent });
+      parts.basis = el('div', { class: 'db-basis' }, '계획값 기준 (약) · 이사업체는 계약 금액, 에어컨 설치는 따로 부른 기사(약 40만원 추정) · 옷장은 이사 뒤 간이 옷장(선택·나중에), 커튼·소품은 지금 것, 입주청소는 직접, 예비비는 없어요. 월세는 후불이라 12/3부터예요(11/3엔 안 내요). 자금흐름 화면에서 실제 금액을 넣으면 자동으로 바뀌어요.');
     }
     return el('section', { class: 'card db-money', 'aria-label': '11월 3일 돈 흐름' },
       head('💸', (moveDay() ? md(moveDay()) : '이사일') + ' 돈 흐름', null, moreLink('자금흐름 자세히 →', '#/money')),
-      body);
+      moneyBody(acc, parts));
   }
 
   /* ======================= 섹션: 이사 견적 ======================= */
@@ -978,7 +1106,8 @@ button.db-wk-head:hover { background:var(--bg-3); }
   }
 
   /* ======================= 섹션: 주간 워크플랜 ======================= */
-  function roadModel() {
+  // nowIds: '지금 할 일'에 이미 보이는 항목 id (주간 칸 '중요' 깃발에서 빼서 같은 줄이 두 번 나오지 않게)
+  function roadModel(nowIds) {
     const today = D.today();
     const curW = D.weekStart(today);
     const move = moveDay();                              // 깨진 값이면 null → 오늘 기준으로 그림
@@ -1001,7 +1130,7 @@ button.db-wk-head:hover { background:var(--bg-3); }
     milestones().forEach((m) => { const ws = D.weekStart(m.date); if (D.diff(curW, ws) >= 0) mk(ws).ms.push(m); });
     const list = Array.from(weeks.values()).sort((a, b) => (a.start < b.start ? -1 : 1));
     const nodate = MV.items.list((i) => !i.done && !D.valid(i.due)).length;
-    return { today, curW, move, moveW, endW, weeks: list, past: past.sort(byDue), nodate };
+    return { today, curW, move, moveW, endW, weeks: list, past: past.sort(byDue), nodate, nowIds: nowIds instanceof Set ? nowIds : new Set() };
   }
   // 주간 칸 정렬: 열린 일 먼저 → 기한 → 중요도
   const byOpen = (a, b) => ((a.done ? 1 : 0) - (b.done ? 1 : 0)) || byDue(a, b);
@@ -1013,14 +1142,15 @@ button.db-wk-head:hover { background:var(--bg-3); }
     const hi = i.priority === 'high' && !i.done;
     const glyph = i.done ? '✓' : late ? '!' : hi ? '⚑' : '○';
     const p = partOf(pm, i.partId);
+    const t = shownTitle(i);   // 옆에 날짜가 있어서 같은 '[M/D]' 표시는 빼요
     return el('a', {
       class: 'db-wi' + (i.done ? ' is-done' : '') + (late ? ' is-late' : '') + (flag ? ' is-hi' : hi ? ' is-pri' : ''),
       href: itemHref(i), title: p.name + ' · ' + i.title,
-      'aria-label': (hi ? '중요 · ' : '') + i.title + ' · ' + D.fmt(i.due) + (i.done ? ' · 완료' : late ? ' · 기한 지남' : ''),
+      'aria-label': (hi ? '중요 · ' : '') + t + ' · ' + D.fmt(i.due) + (i.done ? ' · 완료' : late ? ' · 기한 지남' : ''),
     },
     el('span', { class: 'db-wi-st', 'aria-hidden': 'true' }, glyph),
     flag ? el('span', { class: 'db-wi-emo', 'aria-hidden': 'true' }, p.emoji || '📌') : null,
-    el('span', { class: 'db-wi-t' }, i.title || '(제목 없음)'),
+    el('span', { class: 'db-wi-t' }, t || '(제목 없음)'),
     el('span', { class: 'db-wi-d', 'aria-hidden': 'true' }, D.fmt(i.due)));
   }
   /* 한 주(또는 '지난 주까지')의 항목을 파트별로 묶습니다.
@@ -1172,7 +1302,7 @@ button.db-wk-head:hover { background:var(--bg-3); }
         w.multi ? el('span', { class: 'chip', title: w.multi + '개 주에 흩어진 후속 일정' }, '후속 일정') : null,
         isCur ? el('span', { class: 'chip db-chip-cur' }, '이번 주') : null,
         isMove ? el('span', { class: 'chip bad' }, '이사 주간') : null,
-        late ? el('span', { class: 'badge', title: '기한이 지났는데 아직 못 한 일' }, '밀린 ' + late + '개') : null),
+        late ? el('span', { class: 'badge', title: '기한이 지났는데 아직 못 한 일 ' + late + '개' }, '기한 지남 ' + late) : null),
       el('div', { class: 'db-wk-sub' },
         el('span', relWeek(w.start, m.moveW) + (w.multi ? ' ~' : '')),
         el('span', items.length ? done + '/' + items.length + ' 완료' : '할 일 없음')),
@@ -1196,8 +1326,9 @@ button.db-wk-head:hover { background:var(--bg-3); }
     }
     if (open) {
       // 맨 위: 이정표 깃발 + 이번 주 '중요' 열린 일 FLAG_LIMIT 개 (기한 순). 나머지 중요 항목은 파트 묶음·칩에 ⚑ 로.
+      // '지금 할 일' 카드에 이미 보이는 항목은 깃발에서 빼고 그다음 중요 항목을 올려요 (빠진 항목은 파트 묶음에 ⚑ 로 남음)
       const hiOpen = items.filter((i) => i.priority === 'high' && !i.done);
-      const flagged = hiOpen.slice(0, FLAG_LIMIT);
+      const flagged = hiOpen.filter((i) => !m.nowIds.has(i.id)).slice(0, FLAG_LIMIT);
       const fset = new Set(flagged.map((i) => i.id));
       const rest = items.filter((i) => !fset.has(i.id));
       const moreHi = hiOpen.length - flagged.length;
@@ -1218,7 +1349,7 @@ button.db-wk-head:hover { background:var(--bg-3); }
     const headKids = [
       el('div', { class: 'db-wk-top' },
         el('span', { class: 'db-wk-label' }, '⚠ 지난 주까지'),
-        el('span', { class: 'badge' }, '밀린 ' + m.past.length + '개')),
+        el('span', { class: 'badge', title: '기한이 지났는데 아직 못 한 일 ' + m.past.length + '개' }, '기한 지남 ' + m.past.length)),
       el('div', { class: 'db-wk-sub' }, el('span', '기한이 지났는데 아직 열려 있는 일'), el('span', '')),
     ];
     if (acc) {
@@ -1250,18 +1381,18 @@ button.db-wk-head:hover { background:var(--bg-3); }
   }
   // 칸 하나를 지금 데이터로 새로 만들기 (펼치기·접기) — 다시 그릴 때 그대로 둔 칸이 옛 데이터로 그려지지 않게
   function freshCol(key, acc) {
-    const m = roadModel();
+    const m = roadModel(nowIdsOf(nowPick(nowMax())));
     const pm = partMap();
     if (key === 'past') return m.past.length ? pastCol(m, acc, pm) : null;
     const w = roadWeeks(m, acc).find((x) => x.key === key);
     return w ? weekCol(w, m, acc, pm) : null;
   }
-  function roadCard(acc, pm) {
-    const m = roadModel();
-    if (!ui.openWeeks) {
-      ui.openWeeks = new Set([m.curW]);
-      if (m.past.length) ui.openWeeks.add('past');
-    }
+  function roadCard(acc, pm, nowIds) {
+    const m = roadModel(nowIds);
+    // 폰·태블릿 세로(아코디언): 처음엔 모두 접힘 — 머리줄(진행 막대·이정표 칩)만 보이고 눌러서 펼침 (펼친 칸은 기억해요).
+    //   첫 화면을 짧게 해서 돈 흐름·파트별 진행까지 빨리 닿게 하려는 것. 이번 주 급한 일은 위 '지금 할 일'(중요도 순, 몇 줄만)과
+    //   그 '더 보기' 체크리스트 '🔥 지금 할 일'에서 모두 보고, 날짜별로 보고 싶을 때 칸을 펼쳐요. 넓은 화면은 칸이 늘 펼쳐져 있어요.
+    if (!ui.openWeeks && acc) ui.openWeeks = new Set();
     const scroller = el('div', { class: 'db-road-scroll', role: 'list', 'aria-label': '주별 일정', dataset: { dbKey: 'road-scroll', dbDeep: '1' } });
     if (m.past.length) scroller.appendChild(pastCol(m, acc, pm));
     let prev = null;
@@ -1360,34 +1491,49 @@ button.db-wk-head:hover { background:var(--bg-3); }
       let nextEl;
       if (next) {
         const late = MV.items.status(next) === 'overdue';
+        // 날짜를 앞에 보여 줄 때는 제목 앞 '[10/26]' 같은 날짜 표시가 기한과 같으면 빼서 같은 날짜가 두 번 나오지 않게 (shownTitle)
+        const dated = D.valid(next.due);
+        const t = shownTitle(next);
         nextEl = el('div', { class: 'db-tile-next' + (late ? ' is-late' : ''), title: next.title },
-          '다음: ' + (D.valid(next.due) ? D.fmt(next.due) + ' ' : '') + next.title);
+          '다음: ' + (dated ? D.fmt(next.due) + ' ' : '') + t);
       } else nextEl = el('div', { class: 'db-tile-next' }, complete ? '모두 완료 ✓' : '아직 항목이 없어요');
-      return el('a', { class: 'db-tile' + (complete ? ' is-complete' : ''), href: partHref(p.id), dataset: { dbKey: 'tile-' + p.id }, 'aria-label': p.name + ' · ' + st.total + '개 중 ' + st.done + '개 완료' + (st.overdue ? ' · 지연 ' + st.overdue + '개' : '') },
+      return el('a', { class: 'db-tile' + (complete ? ' is-complete' : ''), href: partHref(p.id), dataset: { dbKey: 'tile-' + p.id }, 'aria-label': p.name + ' · ' + st.total + '개 중 ' + st.done + '개 완료' + (st.overdue ? ' · 기한 지남 ' + st.overdue + '개' : '') },
         el('div', { class: 'db-tile-top' },
           el('span', { class: 'db-tile-emo', 'aria-hidden': 'true' }, p.emoji || '📌'),
           el('span', { class: 'db-tile-name' }, p.name),
-          st.overdue ? el('span', { class: 'badge', title: '기한 지난 항목' }, String(st.overdue)) : null,
+          st.overdue ? el('span', { class: 'badge', title: '기한 지남 ' + st.overdue + '개' }, String(st.overdue)) : null,
           el('span', { class: 'db-tile-count' }, st.done + '/' + st.total)),
         el('div', { class: 'db-tile-bar' }, MV.ui.progress(st.pct), el('span', { class: 'db-tile-count2', 'aria-hidden': 'true' }, st.done + '/' + st.total)),
         nextEl);
     };
+    /* 다 끝난 파트(항목이 있고 모두 완료)는 타일 대신 카드 끝에 '✓ 모두 끝난 파트: 이름 · 이름' 한 줄로 모아요
+       (이름은 그 파트 체크리스트 링크). 끝난 파트만 있던 묶음은 묶음 제목도 빠져요. */
+    const isComplete = (p) => { const st = MV.parts.stats(p.id); return st.total > 0 && st.done === st.total; };
+    const doneParts = parts.filter(isComplete);
+    const doneSet = new Set(doneParts.map((p) => p.id));
+    const shownGroups = groups.filter((g) => gmap.get(g).some((p) => !doneSet.has(p.id)));
     let body;
     if (parts.length) {
-      const n = Math.max(1, Math.min(isNum(cols) ? cols : 1, groups.length));
+      const n = Math.max(1, Math.min(isNum(cols) ? cols : 1, shownGroups.length || 1));
+      const openOf = (g) => gmap.get(g).filter((p) => !doneSet.has(p.id));
       const pg = (g) => el('div', { class: 'db-pg', dataset: { dbKey: 'pg-' + g, dbDeep: '1' } },
         el('div', { class: 'db-pg-title', dataset: { dbKey: 'pgt' } }, g),
-        el('div', { class: 'db-tiles', dataset: { dbKey: 'tiles', dbDeep: '1' } }, gmap.get(g).map(tile)));
+        el('div', { class: 'db-tiles', dataset: { dbKey: 'tiles', dbDeep: '1' } }, openOf(g).map(tile)));
       // 높이 어림: 묶음 제목 ≈ 타일 0.6개
-      const ranges = splitCols(groups.map((g) => 0.6 + gmap.get(g).length), n);
+      const ranges = splitCols(shownGroups.map((g) => 0.6 + openOf(g).length), n);
       body = el('div', { class: 'db-pgroups', style: { '--db-pcols': String(ranges.length) }, dataset: { dbKey: 'pgroups', dbDeep: '1' } },
-        ranges.map(([a, b], ci) => el('div', { class: 'db-pcol', dataset: { dbKey: 'pcol-' + ci, dbDeep: '1' } }, groups.slice(a, b).map(pg))));
+        ranges.map(([a, b], ci) => el('div', { class: 'db-pcol', dataset: { dbKey: 'pcol-' + ci, dbDeep: '1' } }, shownGroups.slice(a, b).map(pg))));
     } else {
       body = el('div', { class: 'db-empty', dataset: { dbKey: 'parts-empty' } }, '파트가 없어요. ', el('a', { href: '#/checklist' }, '체크리스트에서 만들기 →'));
     }
+    const doneLine = doneParts.length
+      ? el('div', { class: 'db-pdone', dataset: { dbKey: 'pdone' } },
+        el('span', { class: 'db-pdone-label' }, '✓ 모두 끝난 파트 ' + doneParts.length + '곳:'),
+        doneParts.map((p) => el('a', { href: partHref(p.id), title: p.name + ' · ' + MV.parts.stats(p.id).total + '개 모두 완료' }, (p.emoji ? p.emoji + ' ' : '') + p.name)))
+      : null;
     return el('section', { class: 'card db-parts db-span-12', 'aria-label': '파트별 진행', dataset: { dbDeep: '1' } },
       head('🗂️', '파트별 진행', parts.length + '개 파트', moreLink('체크리스트 →', '#/checklist'), 'parts-head'),
-      body);
+      body, doneLine);
   }
 
   /* ======================= 섹션: 최근 활동 · 바로가기 ======================= */
@@ -1403,20 +1549,22 @@ button.db-wk-head:hover { background:var(--bg-3); }
   function linksCard() {
     const mover = guideLink('mover');
     const appl = guideLink('appliance');
+    // dup: 폰 탭바에 같은 곳(도면·가이드)이 있어서 폰에서는 숨김 (CSS .db-qlink.is-dup)
     const items = [
-      { ico: '📐', label: '도면 배치', sub: '두 집 도면에 가구 놓아보기', href: '#/plan' },
+      { ico: '📐', label: '도면 배치', sub: '두 집 도면에 가구 놓아보기', href: '#/plan', dup: true },
       { ico: '🚚', label: '이사업체 가이드', sub: mover.guide ? '계약 확정 뒤 챙길 것 · 잔금·파손 점검' : '체크리스트 (가이드 준비 중)', href: mover.href },
       { ico: '🔌', label: '가전이사', sub: appl.guide ? '에어컨 운반·설치 기사 · 냉장고 운반' : '체크리스트 (가이드 준비 중)', href: appl.href },
-      { ico: '📖', label: '모든 가이드', sub: '파트별 정리 노트', href: '#/guide' },
+      { ico: '📖', label: '모든 가이드', sub: '파트별 정리 노트', href: '#/guide', dup: true },
       { ico: '💾', label: '백업', sub: '파일로 저장·복원', onClick: () => { const b = document.getElementById('topbar-menu'); if (b) b.click(); } },
     ];
     return el('section', { class: 'card db-links db-span-5', 'aria-label': '바로가기' },
       head('🧭', '바로가기'),
       el('div', { class: 'db-qlinks' }, items.map((x) => {
         const kids = [el('span', { class: 'db-qlink-ico', 'aria-hidden': 'true' }, x.ico), el('span', el('b', x.label), el('small', x.sub))];
+        const cls = 'db-qlink' + (x.dup ? ' is-dup' : '');
         return x.href
-          ? el('a', { class: 'db-qlink', href: x.href }, kids)
-          : el('button', { type: 'button', class: 'db-qlink', onclick: x.onClick }, kids);
+          ? el('a', { class: cls, href: x.href }, kids)
+          : el('button', { type: 'button', class: cls, onclick: x.onClick }, kids);
       })));
   }
 
@@ -1482,13 +1630,15 @@ button.db-wk-head:hover { background:var(--bg-3); }
   function build(acc, cols) {
     const pm = partMap();
     const est = calcEst();                       // 돈 흐름·견적 카드가 같은 견적 계산을 한 번만 씀
+    const np = nowPick(nowMax());                // '지금 할 일' 고르기 — 주간 칸 깃발에서 같은 항목을 빼는 데도 씀
     return sealTree(el('div', { class: 'db', dataset: { dbKey: 'db', dbDeep: '1' } },
       el('h1', { class: 'db-sr', dataset: { dbKey: 'title' } }, '대시보드'),
       el('div', { class: 'db-grid', dataset: { dbKey: 'grid', dbDeep: '1' } },
         keyed('hero', safe('db-span-12', heroCard)),
-        keyed('now', safe('db-span-7', () => nowCard(pm))),
-        late(el('div', { class: 'db-side', dataset: { dbKey: 'side', dbDeep: '1' } }, keyed('money', safe('', () => moneyCard(est))), keyed('est', safe('', () => estimateCard(est))))),
-        keyed('road', safe('db-span-12', () => roadCard(acc, pm))),
+        keyed('now', safe('db-span-7', () => nowCard(pm, np))),
+        // 돈 흐름·견적: 넓은 화면은 '지금 할 일' 옆, 한 줄로 쌓이면 '지금 할 일' 바로 아래 (워크플랜 위)
+        el('div', { class: 'db-side', dataset: { dbKey: 'side', dbDeep: '1' } }, keyed('money', safe('', () => moneyCard(est, acc))), keyed('est', safe('', () => estimateCard(est)))),
+        keyed('road', safe('db-span-12', () => roadCard(acc, pm, nowIdsOf(np)))),
         partsSection(cols),
         keyed('activity', late(safe('db-span-7', activityCard))),
         keyed('links', late(safe('db-span-5', linksCard))),
@@ -1512,10 +1662,14 @@ button.db-wk-head:hover { background:var(--bg-3); }
     let alive = true;
     sessionDone = new Map();
     // 뒤로 가기·새로고침으로 같은 기록에 돌아온 경우: 펼친 주·가로 스크롤·세로 스크롤을 되살림 (날짜가 바뀌었으면 처음부터)
+    // 새 기록(탭바·링크로 들어옴)이면 이 탭에 적어 둔 펼침 상태만 되살림 (같은 날일 때, 스크롤은 맨 위)
     const saved = readHS();
     const restore = saved && saved.today === D.today() ? saved : null;
-    ui.openWeeks = restore && Array.isArray(restore.open) ? new Set(restore.open.map(String)) : null;
-    ui.moreGroups = restore && Array.isArray(restore.more) ? new Set(restore.more.map(String)) : new Set();
+    const ss = saved ? null : readSS();
+    const uiSaved = restore || (ss && ss.today === D.today() ? ss : null);
+    ui.openWeeks = uiSaved && Array.isArray(uiSaved.open) ? new Set(uiSaved.open.map(String)) : null;
+    ui.moreGroups = uiSaved && Array.isArray(uiSaved.more) ? new Set(uiSaved.more.map(String)) : new Set();
+    ui.moneyOpen = !!(uiSaved && uiSaved.money);
     ui.roadScroll = restore && isNum(restore.left) ? restore.left : 0;
     const mq = window.matchMedia ? window.matchMedia(ACC_MQ) : null;
     const isAcc = () => !!(mq && mq.matches);
@@ -1526,13 +1680,12 @@ button.db-wk-head:hover { background:var(--bg-3); }
       if (!onDashboard()) return;
       const sc = root.querySelector('.db-road-scroll');
       if (sc && !isAcc()) ui.roadScroll = sc.scrollLeft;
-      writeHS({
-        today: D.today(),
-        y: Math.round(window.scrollY),
-        left: Math.round(ui.roadScroll || 0),
-        open: ui.openWeeks ? Array.from(ui.openWeeks) : null,
-        more: Array.from(ui.moreGroups),
-      });
+      const today = D.today();
+      const open = ui.openWeeks ? Array.from(ui.openWeeks) : null;
+      const more = Array.from(ui.moreGroups);
+      const money = !!ui.moneyOpen;
+      writeHS({ today, y: Math.round(window.scrollY), left: Math.round(ui.roadScroll || 0), open, more, money });
+      writeSS({ today, open, more, money });
     };
     let saveT = 0;
     const saveSoon = () => { clearTimeout(saveT); saveT = setTimeout(saveNow, 180); };
@@ -1605,6 +1758,13 @@ button.db-wk-head:hover { background:var(--bg-3); }
       const onMq = () => { ui.roadScroll = 0; schedule(); saveSoon(); };
       if (mq.addEventListener) mq.addEventListener('change', onMq); else if (mq.addListener) mq.addListener(onMq);
       ctx.onCleanup(() => { if (mq.removeEventListener) mq.removeEventListener('change', onMq); else if (mq.removeListener) mq.removeListener(onMq); });
+    }
+    // 넓은 화면 경계(1101px)를 넘나들면 '지금 할 일' 개수(8 ↔ 14)가 바뀌므로 다시 그림
+    const wmq = window.matchMedia ? window.matchMedia(WIDE_MQ) : null;
+    if (wmq) {
+      const onWide = () => schedule();
+      if (wmq.addEventListener) wmq.addEventListener('change', onWide); else if (wmq.addListener) wmq.addListener(onWide);
+      ctx.onCleanup(() => { if (wmq.removeEventListener) wmq.removeEventListener('change', onWide); else if (wmq.removeListener) wmq.removeListener(onWide); });
     }
     ctx.onCleanup(() => { alive = false; });
     ui.partCols = measurePartCols(root);         // 아직 빈 화면 → 여백으로 어림
