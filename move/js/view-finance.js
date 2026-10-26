@@ -2,14 +2,17 @@
    우리집 이사 관리 — 자금흐름 (11/3 잔금일 돈 흐름 · 예산 · 세금 · 보증금 지키기)
 
    라우트
-     #/money              마지막으로 본 탭 (처음엔 11/3 돈 흐름)
+     #/money              마지막으로 본 탭 (처음엔 11/3 돈 흐름 — 이 기기 localStorage 'mv:money:tab' 에 기억)
      #/money/flow         11/3 시간순 돈 흐름 (단계·잔액·이체한도·비상계획·당일 시트)
-     #/money/sources      돈의 출처와 쓰임 (검산, 아버지 돈이 지금 어디 있는지)
      #/money/budget       이사 비용 예산 (자동/직접 항목, 부족분과 대응)
-     #/money/father       아버지 차용금 · 증여세 계산기
-     #/money/tax          중개보수 · 월세 세액공제 · 주택자금 소득공제
      #/money/protect      보증금 지키기 (체크리스트 항목과 연결)
-   탭 이동은 history.pushState 로 처리해 위쪽 요약은 그대로 둡니다.
+     #/money/tax          중개보수 · 월세 세액공제 · 주택자금 소득공제
+     #/money/father       아버지 차용금 · 증여세 계산기
+     #/money/sources      돈의 출처와 쓰임 (검산, 아버지 돈이 지금 어디 있는지)
+     #/money/<탭>/<카드 id>  그 탭을 열고 카드(예: fn-lien, fn-p-tax)까지 내려감 — 주소는 '#/money/<탭>'으로 고쳐 둠
+                          (대시보드 주의사항 href = financeSummary().warnings[].href)
+   탭 이동은 history.pushState 로 처리해 위쪽 요약은 그대로 둡니다. 탭마다 보던 스크롤 자리를 기억해요(이 화면을 새로 열면 지움).
+   폰 머리 숫자 펼침은 localStorage 'mv:money:heroOpen' (기기마다 따로, 공유 기록 아님).
 
    상태   MV.store.ensure('finance', defaults) — 화면의 모든 숫자는 고칠 수 있고 '기본값으로 되돌리기' 가능
           finance.links { 'prot-키' | 'prep-키' | 'doc-키': 체크리스트 항목 id } — 한 줄은 늘 항목 하나에만 연결
@@ -1220,51 +1223,105 @@
     c.flow.doneCount = c.flow.steps.filter((s) => s.done).length;
   }
 
-  function computeAlerts(c, today) {
+  /* 위 '확인할 것'과 같은 일을 하는 체크리스트 항목 (기한·완료를 알림에 씀 — 연결 id 는 따로 저장하지 않음).
+     OTP·이체한도는 '11/3 전에 준비할 것'의 OTP 줄과 같은 항목(저장된 'prep-otp' 연결이 있으면 그것) */
+  const OTP_RE = /OTP|이체\s*한도/;
+  const OTP_ITEM = { key: 'otp', part: 'money', re: [OTP_RE] };
+  const LIEN_ITEM = { key: 'lien', part: 'money', re: [/질권/] };
+  /* 알림 순서: 🚨 → ⚠ → ℹ, 같은 단계에서는 기한이 이른 것부터 (기한이 없으면 뒤로, 그다음은 넣은 순서) */
+  const ALERT_RANK = { bad: 0, warn: 1, info: 2 };
+  const dueKey = (d) => (d && D.valid(d) ? D.str(D.parse(d)) : '9999-12-31');
+  function sortAlerts(A) {
+    return A.map((a, i) => ({ a, i }))
+      .sort((x, y) => (ALERT_RANK[x.a.level] - ALERT_RANK[y.a.level]) || dueKey(x.a.due).localeCompare(dueKey(y.a.due)) || (x.i - y.i))
+      .map((x) => x.a);
+  }
+  function computeAlerts(c, today, state) {
     const f = c.f, A = [];
+    const items = state && Array.isArray(state.items) ? state.items : [];
+    const itemDue = (it) => (it && D.valid(it.due) ? it.due : null);
+    const daysLate = (d) => (d ? D.diff(d, today) : 0); // 기한이 지난 날 수 (지나지 않았으면 0 이하)
     const rep = c.protect.byKey.report;
     if (rep && !rep.done) {
       const dl = D.add(D.valid(f.newHome.contractDate) ? f.newHome.contractDate : '2026-07-13', 30);
       const over = D.diff(dl, today);
-      A.push({ id: 'report', level: over > 0 ? 'bad' : 'warn', overdue: over > 0, tab: 'protect', anchor: 'fn-p-report',
+      A.push({ id: 'report', level: over > 0 ? 'bad' : 'warn', overdue: over > 0, tab: 'protect', anchor: 'fn-p-report', due: dl,
         text: '새 계약 임대차 신고 기한(' + D.fmt(dl) + ')' + (over > 0 ? '이 ' + over + '일 지났을 수 있어요 — 국토부 실거래에 이미 보여 신고됐을 가능성이 높아요. 실거래가 공개시스템·중개사 신고필증으로 확인하고, 안 됐으면 바로 신고하세요.' : '까지 신고 여부를 확인하세요 (국토부 실거래가 공개시스템·신고필증).') });
     } else if (rep && rep.reportState === 'checked') {
       A.push({ id: 'reportResult', level: 'info', tab: 'protect', anchor: 'fn-p-report',
         text: '임대차 신고를 확인했다면 결과(신고돼 있음 / 안 돼 있어서 지금 신고함)도 골라 주세요 — 안 돼 있었다면 바로 신고해야 해요.' });
     }
     if (c.broker.verdict === 'over') {
-      A.push({ id: 'brokerOver', level: 'bad', tab: 'tax', anchor: 'fn-broker',
+      A.push({ id: 'brokerOver', level: 'bad', tab: 'tax', anchor: 'fn-broker', due: c.move,
         text: '중개보수 계획 ' + won(c.broker.planned) + '이 법정 상한(' + c.broker.vat.label.replace(/ \(.+\)/, '') + ' 기준 ' + won(c.broker.maxWithVat) + ')보다 많아요.' });
     }
     /* 잔액 부족·1일 한도 초과는 🚨, 1회 한도 초과(나눠 보내면 되는 일)는 단계 카드에선 빨강이지만 위 목록에선 ⚠ */
     const badStep = c.flow.steps.find((s) => s.warnings.some((w) => w.level === 'bad' && !w.split));
     if (badStep) {
       const w = badStep.warnings.find((x) => x.level === 'bad' && !x.split);
-      A.push({ id: 'flowBad', level: 'bad', tab: 'flow', anchor: 'fn-step-' + badStep.id, text: D.fmt(c.move) + ' 돈 흐름: ' + w.text });
+      A.push({ id: 'flowBad', level: 'bad', tab: 'flow', anchor: 'fn-step-' + badStep.id, due: c.move, text: D.fmt(c.move) + ' 돈 흐름: ' + w.text });
     }
     const splitSteps = c.flow.steps.filter((s) => s.warnings.some((w) => w.split));
     if (splitSteps.length) {
-      A.push({ id: 'flowSplit', level: 'warn', tab: 'flow', anchor: 'fn-step-' + splitSteps[0].id,
+      A.push({ id: 'flowSplit', level: 'warn', tab: 'flow', anchor: 'fn-step-' + splitSteps[0].id, due: c.move,
         text: '1회 이체한도(' + krw(c.flow.perTx) + ')보다 큰 이체가 있어요: ' + splitSteps.map((s) => stepWho(s.id).replace('나 → ', '') + ' ' + timesTxt(s.splitN)).join(', ') + ' 나눠 보내야 해요.' });
     }
-    if (f.loan.lien === 'unknown') {
-      A.push({ id: 'lien', level: 'warn', tab: 'flow', anchor: 'fn-lien', text: '우리은행에 질권·채권양도 여부와 11/3 기준 완제금액을 확인하세요 (상환 순서가 달라져요).' });
+    /* 질권·이체한도·미납 세금 열람은 이사 날까지의 일 — 이사 날이 지나면 더는 알리지 않아요 (지난 일을 '하세요'로 남기지 않게).
+       체크리스트 항목이 기한을 넘기면 🚨 로 올리지만 자금 탭 배지(overdue)에는 세지 않아요 — 그 항목은 체크 탭 '기한 지남'에 이미 세어져요 */
+    const beforeMoveEnd = !(D.diff(c.move, today) > 0); // 날짜를 못 읽으면 알림을 그대로 둠
+    /* 질권: 체크리스트 '질권·상환 방법 확인' 항목의 기한을 따르고, 그 항목을 끝냈는데 결과(없음/있음)를 아직 안 골랐으면 안내만 (ℹ),
+       안 끝났는데 기한이 지났으면 🚨. 폰에서는 두 줄로 잘리니 날짜와 할 일을 앞에 */
+    if (f.loan.lien === 'unknown' && beforeMoveEnd) {
+      const it = findLinked(LIEN_ITEM, items, f.links, 'alert-').item;
+      const due = itemDue(it);
+      if (it && it.done) {
+        A.push({ id: 'lien', level: 'info', tab: 'flow', anchor: 'fn-lien', due,
+          text: '체크리스트에서 질권 확인을 끝냈어요 — 아래 "대출 상환 방식"에서 결과(없음/있음)를 눌러 주세요.' });
+      } else {
+        const late = daysLate(due);
+        A.push({ id: 'lien', level: late > 0 ? 'bad' : 'warn', tab: 'flow', anchor: 'fn-lien', due,
+          text: late > 0
+            ? '지금 우리은행에 질권·채권양도 여부와 완제금액을 확인하세요 — 기한(' + D.fmt(due) + ')이 ' + late + '일 지났어요 (11/3 기준 · 상환 순서가 달라져요).'
+            : (due ? D.fmt(due) + '까지 ' : '') + '우리은행에 질권·채권양도 여부와 완제금액을 확인하세요 (11/3 기준 · 상환 순서가 달라져요).' });
+      }
     }
-    if (!c.flow.perTx || !c.flow.daily) {
-      A.push({ id: 'limits', level: 'warn', tab: 'flow', anchor: 'fn-limits', text: '이체한도 확인: ' + D.fmt(c.move) + ' 내 통장에서 ' + krw(c.flow.outflow + c.flow.payMover) + '이 나가요' + (c.flow.payMover ? '(이사업체 잔금 ' + krw(c.flow.payMover) + ' 포함)' : '') + ' → OTP 보안1등급(보통 1회 1억·1일 5억) 준비.' });
+    /* 이체한도: 체크리스트 OTP 항목의 기한을 따르고, 끝냈으면 한도만 적어 달라는 안내 (ℹ).
+       글은 날짜·할 일을 먼저, 그날 나갈 돈(보낼 돈 + 이사업체 잔금)은 뒤에 (숫자는 한도 카드와 같아요) */
+    if ((!c.flow.perTx || !c.flow.daily) && beforeMoveEnd) {
+      const it = findLinked(OTP_ITEM, items, f.links, 'prep-').item;
+      const due = itemDue(it);
+      const dayOut = D.fmt(c.move) + ' 내 통장에서 ' + krw(c.flow.outflow + c.flow.payMover) + '이 나가요' +
+        (c.flow.payMover ? ' (보낼 돈 ' + krw(c.flow.outflow) + ' + 이사업체 잔금 ' + krw(c.flow.payMover) + ')' : '') + '.';
+      if (it && it.done) {
+        A.push({ id: 'limits', level: 'info', tab: 'flow', anchor: 'fn-limits', due,
+          text: '체크리스트에서 OTP·이체한도를 끝냈어요 — 올린 1회·1일 한도를 "내 이체한도"에 적어 주세요. ' + dayOut });
+      } else {
+        const late = daysLate(due);
+        A.push({ id: 'limits', level: late > 0 ? 'bad' : 'warn', tab: 'flow', anchor: 'fn-limits', due,
+          text: late > 0
+            ? '지금 OTP로 이체한도를 올리세요 — 기한(' + D.fmt(due) + ')이 ' + late + '일 지났어요. OTP 보안1등급이면 보통 1회 1억·1일 5억이에요. ' + dayOut
+            : (due ? D.fmt(due) + '까지 ' : '') + 'OTP 보안1등급으로 이체한도를 올리세요 (보통 1회 1억·1일 5억) — ' + dayOut });
+      }
     }
+    /* 미납 세금 열람: 법정 기한은 이사일(임대차 시작일)이지만, 체크리스트는 그보다 이르게 잡아 둠 → 그 날짜를 앞에 */
     const tx = c.protect.byKey.tax;
-    if (tx && !tx.done) {
+    if (tx && !tx.done && beforeMoveEnd) {
       const dd = D.dday(c.move);
-      A.push({ id: 'taxView', level: 'warn', tab: 'protect', anchor: 'fn-p-tax',
-        text: '집주인 C 미납 국세·지방세 단독 열람은 ' + D.fmt(c.move) + '까지예요' + (dd.n != null && dd.n >= 0 ? ' (' + dd.label + ')' : '') + ' — 세무서·구청 방문, 또는 C에게 납세증명서를 요청하세요.' });
+      const plan = tx.linked && D.valid(tx.linked.due) && D.diff(tx.linked.due, c.move) > 0 ? tx.linked.due : null;
+      const legal = D.fmt(c.move) + (dd.n != null && dd.n >= 0 ? ' · ' + dd.label : '');
+      let text;
+      if (!plan) text = '집주인 C 미납 국세·지방세 단독 열람은 ' + D.fmt(c.move) + '까지예요' + (dd.n != null && dd.n >= 0 ? ' (' + dd.label + ')' : '') + ' — 세무서·구청 방문, 또는 C에게 납세증명서를 요청하세요.';
+      else if (daysLate(plan) <= 0) text = '집주인 C 미납 국세·지방세 열람은 ' + D.fmt(plan) + '까지 해 두세요 (법정 기한 ' + legal + ') — 세무서·구청 방문, 또는 C에게 납세증명서를 요청하세요.';
+      /* 계획한 날이 지나면 법정 기한(이사 날 — 이사 뒤에는 이 알림이 없어요)을 앞에 */
+      else text = '법정 기한(' + legal + ')까지 집주인 C 미납 국세·지방세를 열람하세요 — 계획한 날(' + D.fmt(plan) + ')이 지났어요. 세무서·구청에 가거나 C에게 납세증명서를 요청하세요.';
+      A.push({ id: 'taxView', level: 'warn', tab: 'protect', anchor: 'fn-p-tax', due: plan || c.move, text });
     }
     if (!f.newHome.rentConfirmed) {
-      A.push({ id: 'rent', level: 'warn', tab: 'flow', anchor: 'fn-rent',
+      A.push({ id: 'rent', level: 'warn', tab: 'flow', anchor: 'fn-rent', due: c.move,
         text: '계약서는 "월세 매월 3일 후불" — 그러면 첫 월세는 ' + D.fmt(addMonths(c.move, 1)) + '예요. ' + D.fmt(c.move) + '에 ' + krw(nn(f.newHome.rent)) + '을 줄지 중개사·C와 확정하세요.' });
     }
     if (c.flow.memoOpen) {
-      A.push({ id: 'memo', level: 'warn', tab: 'flow', anchor: 'fn-memo',
+      A.push({ id: 'memo', level: 'warn', tab: 'flow', anchor: 'fn-memo', due: c.move,
         text: '처음 메모한 C 송금액 ' + won(num(f.newHome.memoTotal)) + '과 계산값이 ' + won(Math.abs(c.flow.memoDiff)) + ' 달라요 — 계약서 금액을 확인하세요.' });
     }
     const badChecks = c.recon.checks.filter((x) => !x.ok);
@@ -1292,8 +1349,7 @@
       A.push({ id: 'brokerUnder', level: 'info', tab: 'tax', anchor: 'fn-broker',
         text: '중개보수는 최대 ' + won(c.broker.maxWithVat) + '까지 청구될 수 있어요 (계획 ' + won(c.broker.planned) + ') — 금액을 문자로 미리 확정하세요.' });
     }
-    const rank = { bad: 0, warn: 1, info: 2 };
-    return A.sort((a, b) => rank[a.level] - rank[b.level]);
+    return sortAlerts(A);
   }
 
   function compute(state) {
@@ -1322,7 +1378,7 @@
     c.recon = computeRecon(f, flow);
     c.protect = computeProtect(f, state, move);
     linkSteps(c, state);
-    c.alerts = computeAlerts(c, today);
+    c.alerts = computeAlerts(c, today, state);
     return c;
   }
 
@@ -1366,14 +1422,15 @@
     };
   };
   /* 대시보드용 주의사항: 예전 모양({text, level})에 id·href 를 더함. 이 화면의 'info' 알림은 빼고,
-     '꼭 드는 비용 부족' 줄(id 'budget')은 대시보드 머리 숫자와 같은 말이라 level 'info' + headline 으로 맨 뒤에 둠 */
+     '꼭 드는 비용 부족' 줄(id 'budget')은 대시보드 머리 숫자와 같은 말이라 level 'info' + headline 으로 맨 뒤에 둠.
+     href 는 그 탭의 카드까지: '#/money/<탭>/<카드 id>' (자금 화면이 열리면서 그 카드로 내려가요) */
   const HEADLINE_IDS = { budget: true };
   function summaryWarnings(alerts) {
     const rank = { bad: 0, warn: 1, info: 2 };
     return (alerts || [])
       .filter((a) => a.level !== 'info')
       .map((a) => {
-        const w = { id: a.id, text: a.text, level: HEADLINE_IDS[a.id] ? 'info' : a.level, href: '#/money/' + (a.tab || 'flow') };
+        const w = { id: a.id, text: a.text, level: HEADLINE_IDS[a.id] ? 'info' : a.level, href: '#/money/' + (a.tab || 'flow') + (a.anchor ? '/' + a.anchor : '') };
         if (HEADLINE_IDS[a.id]) w.headline = true;
         return w;
       })
@@ -1461,24 +1518,29 @@
   /* ======================= 스타일 ======================= */
   const CSS = `
 .fn-page { min-width: 0; }
-.fn-page .view-head .sub b { color: var(--brand); }
+.fn-page .view-head .sub b { color: var(--brand-ink, var(--brand)); }
 .fn-hero { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin: 0 0 12px; }
 .fn-stat { background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; box-shadow: var(--shadow); min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.fn-stat-k { font-size: .78rem; font-weight: 700; color: var(--ink-3); }
+.fn-stat-k { font-size: .8rem; font-weight: 700; color: var(--ink-3); }
 .fn-stat-v { font-size: 1.38rem; font-weight: 800; letter-spacing: -.02em; line-height: 1.25; font-variant-numeric: tabular-nums; }
-.fn-stat-s { font-size: .74rem; color: var(--ink-3); line-height: 1.4; }
-.fn-stat.is-in .fn-stat-v { color: var(--good); }
+.fn-stat-s { font-size: .8rem; color: var(--ink-3); line-height: 1.4; }
+.fn-stat.is-in .fn-stat-v { color: var(--good-ink, var(--good)); }
 .fn-stat.is-final { background: var(--good-bg); border-color: color-mix(in srgb, var(--good) 35%, var(--line)); }
-.fn-stat.is-final .fn-stat-v { color: var(--good); font-size: 1.55rem; }
+.fn-stat.is-final .fn-stat-v { color: var(--good-ink, var(--good)); font-size: 1.55rem; }
 .fn-stat.is-final.is-neg { background: var(--bad-bg); border-color: color-mix(in srgb, var(--bad) 35%, var(--line)); }
 .fn-stat.is-final.is-neg .fn-stat-v { color: var(--bad); }
+/* '숫자 더 보기' 단추는 폰에서만 (넓은 화면은 5칸 모두) */
+.fn-hero-more { display: none; }
 @media (max-width: 1180px) { .fn-hero { grid-template-columns: repeat(3, minmax(0, 1fr)); } .fn-stat.is-final { grid-column: span 2; } }
 @media (max-width: 640px) {
-  .fn-hero { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .fn-hero { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; align-items: start; }
   .fn-stat { padding: 10px 12px; }
   .fn-stat-v { font-size: 1.12rem; }
-  .fn-stat.is-final { grid-column: 1 / -1; }
+  .fn-stat.is-final { grid-column: 1 / -1; order: -2; }
   .fn-stat.is-final .fn-stat-v { font-size: 1.4rem; }
+  /* 폰 첫 화면: 머리 숫자는 '꼭 드는 비용 내고 여유' 칸만, 나머지 4칸은 '숫자 더 보기'로 (펼침은 이 기기에 기억) */
+  .fn-hero:not(.is-open) > .fn-stat:not(.is-final) { display: none; }
+  .fn-hero-more { display: flex; order: -1; grid-column: 1 / -1; align-items: center; justify-content: center; gap: 6px; width: 100%; min-height: 40px; margin: 0; padding: 4px 12px; border: 1px dashed var(--line-2); border-radius: var(--radius-sm); background: transparent; color: var(--ink-2); font: inherit; font-size: .85rem; font-weight: 700; cursor: pointer; }
 }
 
 .fn-alerts { margin: 0 0 10px; }
@@ -1499,10 +1561,30 @@ div.fn-alert { cursor: default; }
   .fn-alert-txt { font-size: .85rem; }
   .fn-alert-go-t { display: none; }
   .fn-alert-go { font-size: 1.2rem; }
+  /* 폰: 알림 글은 2줄까지 (전체 글은 단추 이름 aria-label 에, 누르면 그 카드로) — '더 보기'로 펼치면 모두 */
+  .fn-alerts:not(.is-open) .fn-alert-txt { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
 }
 
 .fn-tabbar { position: sticky; top: var(--topbar-h); z-index: 12; margin: 0 -4px 12px; padding: 6px 4px 8px; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(8px); }
 .fn-tabbar .tabs button { min-height: 36px; }
+/* 탭 이름: 폰에서는 짧은 이름 (4~5개가 한 줄에 보이게). fn-wide-only = 폰에서 빼는 글 (머리글 설명·단추의 날짜) */
+.fn-tab-s { display: none; }
+@media (max-width: 640px) {
+  .fn-tab-l, .fn-wide-only { display: none; }
+  .fn-tab-s { display: inline; }
+  .fn-tabbar .tabs button { padding: 6px 11px; }
+}
+/* 페이지 맨 아래 작은 단추 (기본값으로 되돌리기) */
+.fn-foot { display: flex; justify-content: flex-end; margin-top: 18px; padding-top: 10px; border-top: 1px dashed var(--line-2); }
+.fn-foot .btn { color: var(--ink-2); }
+/* 이사 날: '다음 단계' 알약 */
+.fn-next-wrap:empty { display: none; }
+.fn-next-wrap { margin: 8px 0 0; }
+.fn-next-wrap.fn-next-top { margin: -4px 0 12px; }
+.fn-next { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 40px; padding: 6px 14px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--brand) 45%, var(--line)); background: var(--brand-bg); color: var(--brand-ink, var(--brand)); font: inherit; font-weight: 750; text-align: left; cursor: pointer; }
+.fn-next.is-all { border-color: color-mix(in srgb, var(--good) 45%, var(--line)); background: var(--good-bg); color: var(--good-ink, var(--good)); cursor: default; }
+/* '11/3 전에 준비할 것' 한 줄에 함께 하는 일 */
+.fn-prep-sub { display: block; margin-top: 2px; font-size: .8rem; color: var(--ink-3); line-height: 1.45; }
 /* 탭이 화면보다 길면 오른쪽(왼쪽)에 '더 있어요' 그림자와 화살표 */
 .fn-tabbar::before, .fn-tabbar::after { content: ''; position: absolute; top: 6px; bottom: 8px; width: 40px; pointer-events: none; display: none; align-items: center; font-weight: 800; color: var(--ink-2); font-size: 1.1rem; z-index: 1; }
 .fn-tabbar::after { content: '›'; right: 4px; justify-content: flex-end; padding-right: 8px; border-radius: 0 12px 12px 0; background: linear-gradient(to right, transparent, var(--bg-3) 65%); }
@@ -1526,19 +1608,19 @@ div.fn-alert { cursor: default; }
 .fn-card-h h3, .fn-card-h h2 { margin: 0; }
 .fn-card-h .spacer { flex: 1; }
 
-.fn-basis { display: block; margin-top: 10px; font-size: .78rem; color: var(--ink-3); line-height: 1.6; }
+.fn-basis { display: block; margin-top: 10px; font-size: .8rem; color: var(--ink-3); line-height: 1.6; }
 .fn-basis > * { margin-right: 6px; }
-.fn-basis .chip { font-size: .7rem; padding: 0 7px; line-height: 1.6; vertical-align: 1px; }
+.fn-basis .chip { font-size: .8rem; padding: 0 7px; line-height: 1.6; vertical-align: 1px; }
 .fn-src { font-weight: 650; white-space: nowrap; max-width: 100%; }
 /* 좁은 화면: 긴 출처 이름(예: '서울시 공동주택 통합정보마당 (단지별 승강기 사용료)')이 화면 밖으로 나가지 않게 줄바꿈 */
 @media (max-width: 640px) { .fn-src { white-space: normal; overflow-wrap: anywhere; } }
 /* '⚠ 확인할 곳' — 좁은 칸·접힌 근거 안에서도 칸 밖으로 나가지 않게 줄바꿈 (예전 nowrap 은 390px 에서 화면 밖으로 나갔어요) */
-.fn-verify { color: var(--warn); font-weight: 700; white-space: normal; overflow-wrap: anywhere; }
+.fn-verify { color: var(--warn-ink, var(--warn)); font-weight: 700; white-space: normal; overflow-wrap: anywhere; }
 
 .fn-seg { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px; background: var(--bg-3); border-radius: 12px; }
 .fn-seg-btn { flex: 1 1 auto; min-height: 38px; border: 0; border-radius: 9px; background: transparent; color: var(--ink-2); font: inherit; font-weight: 700; font-size: .88rem; padding: 6px 12px; cursor: pointer; }
 .fn-seg-btn.is-on { background: var(--bg-2); color: var(--ink); box-shadow: var(--shadow); }
-.fn-seg-btn.is-on.is-alt { color: var(--warn); }
+.fn-seg-btn.is-on.is-alt { color: var(--warn-ink, var(--warn)); }
 
 .fn-two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .fn-fields { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
@@ -1558,11 +1640,11 @@ div.fn-alert { cursor: default; }
 .fn-num { width: 34px; height: 34px; flex: none; border-radius: 50%; display: grid; place-items: center; font-weight: 800; font-size: .95rem; background: var(--bg-3); color: var(--ink-2); border: 2px solid var(--line-2); }
 .fn-line { position: relative; flex: 1; width: 2px; min-height: 18px; margin: 4px 0 2px; background: var(--line-2); }
 .fn-line::after { content: ''; position: absolute; left: 50%; bottom: -2px; transform: translateX(-50%); border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 8px solid var(--line-2); }
-.fn-step.k-in .fn-num { background: var(--good-bg); color: var(--good); border-color: color-mix(in srgb, var(--good) 45%, var(--line)); }
-.fn-step.k-out .fn-num { background: var(--brand-bg); color: var(--brand); border-color: color-mix(in srgb, var(--brand) 45%, var(--line)); }
+.fn-step.k-in .fn-num { background: var(--good-bg); color: var(--good-ink, var(--good)); border-color: color-mix(in srgb, var(--good) 45%, var(--line)); }
+.fn-step.k-out .fn-num { background: var(--brand-bg); color: var(--brand-ink, var(--brand)); border-color: color-mix(in srgb, var(--brand) 45%, var(--line)); }
 .fn-step.k-ext .fn-num { background: var(--think-bg); color: var(--think); border-color: color-mix(in srgb, var(--think) 45%, var(--line)); }
-.fn-step.k-pay .fn-num { background: var(--warn-bg); color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
-.fn-amt.is-pay { color: var(--warn); }
+.fn-step.k-pay .fn-num { background: var(--warn-bg); color: var(--warn-ink, var(--warn)); border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
+.fn-amt.is-pay { color: var(--warn-ink, var(--warn)); }
 .fn-step.is-done .fn-num { background: var(--good); color: var(--on-good); border-color: var(--good); }
 .fn-step.k-result .fn-num { background: var(--ink); color: var(--bg); border-color: var(--ink); }
 .fn-step-card { margin-bottom: 12px; padding: 12px 14px; min-width: 0; }
@@ -1574,7 +1656,7 @@ div.fn-alert { cursor: default; }
 .fn-step-title { margin: 0; font-size: 1.02rem; min-width: 0; }
 .fn-time { width: 136px; min-height: 36px; padding: 4px 8px; font-variant-numeric: tabular-nums; }
 .fn-done { margin-left: auto; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line-2); min-height: 36px; font-weight: 700; }
-.fn-step.is-done .fn-done { background: var(--good-bg); border-color: color-mix(in srgb, var(--good) 45%, var(--line)); color: var(--good); }
+.fn-step.is-done .fn-done { background: var(--good-bg); border-color: color-mix(in srgb, var(--good) 45%, var(--line)); color: var(--good-ink, var(--good)); }
 .fn-step-body { margin-top: 8px; }
 .fn-step-body > * + * { margin-top: 8px; }
 .fn-notes { margin: 0; padding-left: 1.15em; font-size: .86rem; color: var(--ink-2); }
@@ -1582,11 +1664,11 @@ div.fn-alert { cursor: default; }
 .fn-amt-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); align-items: start; }
 .fn-big { max-width: 340px; }
 .fn-big .input { font-size: 1.2rem; font-weight: 800; min-height: 44px; letter-spacing: -.01em; }
-.fn-step.k-in .fn-big .input { color: var(--good); }
-.fn-step.k-out .fn-big .input { color: var(--brand); }
+.fn-step.k-in .fn-big .input { color: var(--good-ink, var(--good)); }
+.fn-step.k-out .fn-big .input { color: var(--brand-ink, var(--brand)); }
 .fn-amt { font-size: 1.3rem; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
-.fn-amt.is-in { color: var(--good); }
-.fn-amt.is-out { color: var(--brand); }
+.fn-amt.is-in { color: var(--good-ink, var(--good)); }
+.fn-amt.is-out { color: var(--brand-ink, var(--brand)); }
 .fn-amt.is-ext { color: var(--think); }
 .fn-amt.is-neg { color: var(--bad); }
 .fn-total { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; padding: 8px 12px; border-radius: var(--radius-sm); background: var(--bg-3); }
@@ -1595,7 +1677,7 @@ div.fn-alert { cursor: default; }
 .fn-warn { font-size: .86rem; font-weight: 650; padding: 6px 10px; border-radius: var(--radius-sm); background: var(--warn-bg); color: var(--ink); border-left: 3px solid var(--warn); }
 .fn-warn.is-bad { background: var(--bad-bg); border-left-color: var(--bad); color: var(--bad); }
 .fn-warn.is-info { background: var(--bg-3); border-left-color: var(--line-2); color: var(--ink-2); font-weight: 600; }
-.fn-warn.is-good { background: var(--good-bg); border-left-color: var(--good); color: var(--good); }
+.fn-warn.is-good { background: var(--good-bg); border-left-color: var(--good); color: var(--good-ink, var(--good)); }
 .fn-bal { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; padding-top: 8px; border-top: 1px dashed var(--line-2); font-size: .86rem; color: var(--ink-3); }
 .fn-bal b { font-size: 1.05rem; color: var(--ink); font-variant-numeric: tabular-nums; }
 .fn-bal.is-neg b { color: var(--bad); }
@@ -1606,7 +1688,7 @@ div.fn-alert { cursor: default; }
 .fn-inline-money > span:first-child { line-height: 40px; white-space: nowrap; }
 .fn-result { background: var(--bg-2); }
 .fn-result-k { font-size: .85rem; font-weight: 700; color: var(--ink-3); }
-.fn-result-v { font-size: 1.9rem; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; line-height: 1.2; color: var(--good); }
+.fn-result-v { font-size: 1.9rem; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; line-height: 1.2; color: var(--good-ink, var(--good)); }
 .fn-result-v.is-neg { color: var(--bad); }
 .fn-memo-input .input { min-height: 36px; font-size: .88rem; }
 @media (max-width: 640px) {
@@ -1631,16 +1713,20 @@ div.fn-alert { cursor: default; }
 .fn-kv > .v { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .fn-kv > .k { color: var(--ink-2); min-width: 0; }
 .fn-kv > .sep { grid-column: 1 / -1; border-top: 1px solid var(--line-2); margin: 2px 0; }
-.fn-kv > .v.is-good { color: var(--good); } .fn-kv > .v.is-bad { color: var(--bad); }
+.fn-kv > .v.is-good { color: var(--good-ink, var(--good)); } .fn-kv > .v.is-bad { color: var(--bad); }
 .fn-cl-link, .fn-guide { display: inline-flex; align-items: center; min-height: 36px; font-size: .8rem; font-weight: 650; white-space: nowrap; }
+/* 글자 대비: 밝은 테마에서 링크는 진한 주황(--brand-ink), 어두운 테마는 그대로 */
+.fn-page a:not(.btn) { color: var(--brand-ink, var(--brand)); }
+/* 주황 바탕 카드(.tint-warn) 안의 흐린 글자는 한 단계 진하게 (어두운 테마에서 4.5:1 경계) */
+.fn-page .tint-warn .fn-basis, .fn-page .tint-warn .muted { color: var(--ink-2); }
 /* 터치 화면: 글 속 링크·접기 버튼도 누르는 곳 36px 이상 */
 @media (pointer: coarse), (any-pointer: coarse), (max-width: 1024px) {
-  .fn-page a:not(.btn) { display: inline-flex; align-items: center; min-height: 36px; vertical-align: middle; }
-  .fn-page details:not(.fn-why) > summary { padding: 8px 0; min-height: 36px; }
+  .fn-page a:not(.btn) { display: inline-flex; align-items: center; min-height: 40px; vertical-align: middle; }
+  .fn-page details:not(.fn-why) > summary { padding: 8px 0; min-height: var(--tap, 40px); }
 }
 /* 터치 화면인데 브라우저가 pointer:coarse 를 알려 주지 않는 경우 (가로 태블릿 등) — JS 로 붙인 fn-touch */
-.fn-page.fn-touch a:not(.btn) { display: inline-flex; align-items: center; min-height: 36px; vertical-align: middle; }
-.fn-page.fn-touch details:not(.fn-why) > summary { padding: 8px 0; min-height: 36px; }
+.fn-page.fn-touch a:not(.btn) { display: inline-flex; align-items: center; min-height: 40px; vertical-align: middle; }
+.fn-page.fn-touch details:not(.fn-why) > summary { padding: 8px 0; min-height: 40px; }
 .fn-card-h .fn-guide { margin-left: auto; }
 .fn-contacts { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
 
@@ -1648,7 +1734,7 @@ div.fn-alert { cursor: default; }
 .fn-check-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 4px 10px; align-items: start; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: .9rem; }
 .fn-check-row:last-child { border-bottom: 0; }
 .fn-check-ico { font-weight: 800; width: 1.4em; text-align: center; }
-.fn-check-row.is-ok .fn-check-ico { color: var(--good); }
+.fn-check-row.is-ok .fn-check-ico { color: var(--good-ink, var(--good)); }
 .fn-check-row.is-bad .fn-check-ico { color: var(--bad); }
 .fn-check-row.is-info .fn-check-ico { color: var(--kid); }
 .fn-check-val { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 700; }
@@ -1657,7 +1743,7 @@ div.fn-alert { cursor: default; }
 @media (max-width: 860px) { .fn-recon { grid-template-columns: 1fr; } }
 .fn-recon table.tbl td.num { font-weight: 700; }
 .fn-recon tfoot td { font-size: .95rem; }
-.fn-sub { display: block; font-size: .76rem; color: var(--ink-3); font-weight: 500; }
+.fn-sub { display: block; font-size: .8rem; color: var(--ink-3); font-weight: 500; }
 .fn-tr-left td { background: var(--good-bg); }
 .fn-bar { display: flex; height: 30px; border-radius: 8px; overflow: hidden; background: var(--bg-3); }
 .fn-bar > i { display: block; height: 100%; min-width: 3px; }
@@ -1673,13 +1759,13 @@ div.fn-alert { cursor: default; }
 .fn-bar-h { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; font-weight: 700; font-size: .92rem; margin-bottom: 6px; }
 .fn-chain { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .fn-chain-node { padding: 6px 10px; border-radius: var(--radius-sm); background: var(--bg-3); font-size: .85rem; font-weight: 650; line-height: 1.35; }
-.fn-chain-node small { display: block; font-weight: 500; color: var(--ink-3); font-size: .74rem; }
+.fn-chain-node small { display: block; font-weight: 500; color: var(--ink-3); font-size: .8rem; }
 .fn-chain-arrow { color: var(--ink-3); font-weight: 800; }
 
 /* --- 예산 --- */
 .fn-bstats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
 .fn-bstat { padding: 10px 12px; border-radius: var(--radius-sm); background: var(--bg-3); min-width: 0; }
-.fn-bstat .k { font-size: .76rem; color: var(--ink-3); font-weight: 700; }
+.fn-bstat .k { font-size: .8rem; color: var(--ink-3); font-weight: 700; }
 .fn-bstat .v { font-size: 1.15rem; font-weight: 800; font-variant-numeric: tabular-nums; }
 @media (max-width: 860px) { .fn-bstats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .fn-verdict { margin-top: 12px; padding: 12px 14px; border-radius: var(--radius-sm); display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
@@ -1687,7 +1773,7 @@ div.fn-alert { cursor: default; }
 .fn-verdict.is-bad { background: var(--bad-bg); }
 .fn-verdict .k { font-weight: 700; }
 .fn-verdict .v { font-size: 1.5rem; font-weight: 800; font-variant-numeric: tabular-nums; }
-.fn-verdict.is-good .v { color: var(--good); }
+.fn-verdict.is-good .v { color: var(--good-ink, var(--good)); }
 .fn-verdict.is-bad .v { color: var(--bad); }
 .fn-cmp { margin-top: 12px; display: grid; gap: 6px; }
 .fn-cmp-row { display: grid; grid-template-columns: 110px minmax(0, 1fr) auto; gap: 8px; align-items: center; font-size: .84rem; }
@@ -1698,7 +1784,7 @@ div.fn-alert { cursor: default; }
 .fn-cmp-row b { font-variant-numeric: tabular-nums; }
 .fn-blist { container-type: inline-size; min-width: 0; }
 /* 기본(좁은 칸·컨테이너 쿼리 미지원): 세로로 쌓기 → 칸 너비가 넉넉할 때만 한 줄로 */
-.fn-bl-head { display: none; font-size: .76rem; color: var(--ink-3); font-weight: 700; padding: 0 0 6px; border-bottom: 1px solid var(--line-2); gap: 8px 10px; }
+.fn-bl-head { display: none; font-size: .8rem; color: var(--ink-3); font-weight: 700; padding: 0 0 6px; border-bottom: 1px solid var(--line-2); gap: 8px 10px; }
 .fn-bl, .fn-rf { display: grid; gap: 8px 10px; align-items: start; padding: 10px 0; border-bottom: 1px solid var(--line); min-width: 0; }
 .fn-bl { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "label del" "amount amount" "date paid" "memo memo"; }
 .fn-rf { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "label del" "amount paid" "memo memo"; }
@@ -1729,20 +1815,20 @@ div.fn-alert { cursor: default; }
 .fn-bl-memo { grid-area: memo; min-width: 0; }
 .fn-bl-del { grid-area: del; }
 .fn-bl .input, .fn-rf .input { min-height: 38px; }
-.fn-bl-label .fn-basis { margin-top: 4px; font-size: .74rem; }
+.fn-bl-label .fn-basis { margin-top: 4px; font-size: .8rem; }
 .fn-bl-auto { display: flex; flex-direction: column; gap: 2px; }
 .fn-bl-auto b { font-size: 1.05rem; font-variant-numeric: tabular-nums; }
-.fn-bl-auto small { color: var(--ink-3); font-size: .74rem; line-height: 1.4; }
+.fn-bl-auto small { color: var(--ink-3); font-size: .8rem; line-height: 1.4; }
 .fn-bl-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; align-items: center; }
 .fn-bl.is-paid .fn-bl-label .input, .fn-rf.is-paid .fn-bl-label .input { text-decoration: line-through; color: var(--ink-3); }
 .fn-bl.is-off { opacity: .55; }
-.fn-range { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; margin-top: 4px; font-size: .76rem; color: var(--ink-3); }
-.fn-why { font-size: .76rem; color: var(--ink-3); min-width: 0; }
+.fn-range { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; margin-top: 4px; font-size: .8rem; color: var(--ink-3); }
+.fn-why { font-size: .8rem; color: var(--ink-3); min-width: 0; }
 .fn-why > summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 4px; min-height: 36px; font-weight: 650; white-space: nowrap; }
 .fn-why > summary::-webkit-details-marker { display: none; }
 .fn-why > summary::after { content: '▾'; font-size: .8em; }
 .fn-why[open] > summary::after { content: '▴'; }
-.fn-why .chip { font-size: .7rem; padding: 0 7px; }
+.fn-why .chip { font-size: .8rem; padding: 0 7px; }
 .fn-why .fn-basis { margin-top: 2px; }
 .fn-range .fn-why[open] { flex-basis: 100%; }
 .fn-bad-hint { color: var(--bad) !important; font-weight: 700; }
@@ -1752,7 +1838,7 @@ div.fn-alert { cursor: default; }
 .fn-err-more pre { margin: 4px 0 0; max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink-2); font-weight: 400; }
 .fn-page .input[aria-invalid="true"] { border-color: var(--bad); box-shadow: 0 0 0 2px color-mix(in srgb, var(--bad) 22%, transparent); }
 .fn-bad-hint:empty, .fn-num-msg:empty { display: none; }
-.fn-warn-hint { color: var(--warn) !important; font-weight: 700; }
+.fn-warn-hint { color: var(--warn-ink, var(--warn)) !important; font-weight: 700; }
 .fn-memo-total { max-width: 240px; margin: 0; }
 .fn-memo-row { align-items: flex-end; }
 
@@ -1769,10 +1855,10 @@ div.fn-alert { cursor: default; }
 .fn-hl-eq { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1.1fr); gap: 6px 10px; align-items: end; }
 .fn-hl-op { font-weight: 800; color: var(--ink-3); font-size: 1.05rem; padding-bottom: 4px; text-align: center; }
 .fn-hl-cell { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.fn-hl-cell small { font-size: .76rem; color: var(--ink-2); font-weight: 700; line-height: 1.35; }
+.fn-hl-cell small { font-size: .8rem; color: var(--ink-2); font-weight: 700; line-height: 1.35; }
 .fn-hl-cell b { font-size: 1.3rem; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; line-height: 1.25; }
 .fn-hl-res b { font-size: 1.6rem; }
-.fn-hl.is-good .fn-hl-res b, .fn-hl.is-good .fn-hl-res small { color: var(--good); }
+.fn-hl.is-good .fn-hl-res b, .fn-hl.is-good .fn-hl-res small { color: var(--good-ink, var(--good)); }
 .fn-hl.is-bad .fn-hl-res b, .fn-hl.is-bad .fn-hl-res small { color: var(--bad); }
 .fn-hl-more { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line-2); }
 @media (max-width: 520px) {
@@ -1802,7 +1888,7 @@ div.fn-alert { cursor: default; }
 .fn-gcard-h { display: flex; align-items: center; gap: 6px; font-weight: 750; font-size: .9rem; }
 .fn-gcard-v { font-size: 1.3rem; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
 .fn-gcard-d { font-size: .8rem; color: var(--ink-2); line-height: 1.5; }
-.fn-gcard-items { font-size: .76rem; color: var(--ink-3); line-height: 1.45; }
+.fn-gcard-items { font-size: .8rem; color: var(--ink-3); line-height: 1.45; }
 .fn-gcard-hug { align-self: flex-start; font-size: .8rem; font-weight: 650; line-height: 1.45; }
 .fn-gcard-go { align-self: flex-start; font-size: .82rem; font-weight: 700; min-height: 36px; display: inline-flex; align-items: center; margin-top: auto; }
 .fn-bgroup { margin-top: 14px; min-width: 0; }
@@ -1816,11 +1902,11 @@ div.fn-alert { cursor: default; }
 .fn-bgroup-sum b { font-size: 1.05rem; color: var(--ink); font-variant-numeric: tabular-nums; }
 .fn-bgroup-d { margin: 6px 2px 0; line-height: 1.5; }
 .fn-bgroup-empty { margin: 0; padding: 10px 2px; }
-.fn-bl-grp { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: .78rem; color: var(--ink-3); font-weight: 700; min-width: 0; }
+.fn-bl-grp { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: .8rem; color: var(--ink-3); font-weight: 700; min-width: 0; }
 .fn-bl-grp > span { white-space: nowrap; }
 .fn-bl-grp .select { flex: 0 1 auto; min-width: 0; max-width: 100%; min-height: 36px; padding-top: 4px; padding-bottom: 4px; font-size: .84rem; }
 .fn-when-wrap:empty { display: none; }
-.fn-when { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 6px; font-size: .78rem; color: var(--ink-2); line-height: 1.4; min-width: 0; }
+.fn-when { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 6px; font-size: .8rem; color: var(--ink-2); line-height: 1.4; min-width: 0; }
 .fn-when .chip { flex: none; }
 .fn-when > span:last-child { min-width: 0; overflow-wrap: anywhere; }
 .fn-before { margin-top: 10px; }
@@ -1834,9 +1920,9 @@ div.fn-alert { cursor: default; }
 .fn-calc-out { margin-top: 12px; padding: 12px 14px; border-radius: var(--radius-sm); background: var(--bg-3); }
 .fn-calc-out > * + * { margin-top: 8px; }
 .fn-big-num { font-size: 1.5rem; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -.02em; line-height: 1.25; }
-.fn-big-num.is-good { color: var(--good); } .fn-big-num.is-bad { color: var(--bad); } .fn-big-num.is-brand { color: var(--brand); }
+.fn-big-num.is-good { color: var(--good-ink, var(--good)); } .fn-big-num.is-bad { color: var(--bad); } .fn-big-num.is-brand { color: var(--brand-ink, var(--brand)); }
 .fn-qa-q { font-size: 1.05rem; font-weight: 800; }
-.fn-qa-a { font-size: 1.25rem; font-weight: 800; color: var(--good); margin: 4px 0 8px; }
+.fn-qa-a { font-size: 1.25rem; font-weight: 800; color: var(--good-ink, var(--good)); margin: 4px 0 8px; }
 .fn-tier-row.is-cur td { background: var(--brand-bg); font-weight: 700; }
 .fn-formula { font-variant-numeric: tabular-nums; font-size: .88rem; color: var(--ink-2); }
 
@@ -1857,19 +1943,33 @@ div.fn-alert { cursor: default; }
 .fn-prot-chips { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .fn-step-link { gap: 2px 10px; }
 
+/* --- 터치 크기: 폰·태블릿(또는 좁은 창)에서 매일 누르는 단추·입력은 var(--tap) (터치 기기 44px) --- */
+@media (pointer: coarse), (max-width: 860px) {
+  .fn-chk, .fn-done, .fn-time, .fn-mini-btn, .fn-tabbar .tabs button, .fn-bl-grp .select, .fn-why > summary,
+  .fn-cl-link, .fn-guide, .fn-seg-btn, .fn-page .view-head .btn, .fn-alert, .fn-alerts-more .btn,
+  .fn-memo-input .input, .fn-gcard-go, .fn-err-more > summary,
+  .fn-hero-more, .fn-foot .btn, .fn-next, .fn-page .btn, .fn-page .select { min-height: var(--tap, 40px); }
+  /* 보증금 지키기 체크 상자: 누르는 칸을 키우고(바깥 여백을 그만큼 당겨) 상자 자리는 그대로 */
+  .fn-prot-cb { width: var(--tap, 40px); height: var(--tap, 40px); margin: calc((26px - var(--tap, 40px)) / 2) calc((22px - var(--tap, 40px)) / 2) 0; }
+}
+
 /* --- 당일 시트 --- */
 .fn-sheet h3 { margin: 14px 0 6px; }
 .fn-sheet-sum { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 8px 0 12px; }
 .fn-sheet-sum > div { padding: 8px 10px; border: 1px solid var(--line-2); border-radius: var(--radius-sm); }
 .fn-sheet-sum b { display: block; font-size: 1.05rem; font-variant-numeric: tabular-nums; }
-.fn-sheet-sum span { font-size: .76rem; color: var(--ink-3); font-weight: 700; }
+.fn-sheet-sum span { font-size: .8rem; color: var(--ink-3); font-weight: 700; }
 .fn-sheet-row { display: grid; grid-template-columns: 30px 54px minmax(0, 1fr) auto; gap: 4px 10px; align-items: start; padding: 8px 0; border-bottom: 1px solid var(--line); break-inside: avoid; }
 .fn-sheet-row input[type=checkbox] { width: 22px; height: 22px; margin: 2px 0 0; accent-color: var(--good); }
+/* 아직 안 한 첫 단계 = 다음에 할 일 */
+.fn-sheet-row.is-next { background: var(--brand-bg); box-shadow: inset 3px 0 0 var(--brand); border-radius: 6px; padding-left: 6px; padding-right: 6px; }
+.fn-sheet-next { display: none; }
+.fn-sheet-row.is-next .fn-sheet-next { display: inline-block; margin-left: 6px; color: var(--brand-ink, var(--brand)); font-size: .8rem; font-weight: 800; }
 .fn-sheet-time { font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .fn-sheet-what b { display: block; }
-.fn-sheet-what small { display: block; color: var(--ink-3); font-size: .78rem; }
+.fn-sheet-what small { display: block; color: var(--ink-3); font-size: .8rem; }
 .fn-sheet-amt { text-align: right; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.fn-sheet-amt small { display: block; font-weight: 600; color: var(--ink-3); font-size: .74rem; }
+.fn-sheet-amt small { display: block; font-weight: 600; color: var(--ink-3); font-size: .8rem; }
 .fn-sheet-contacts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 16px; font-size: .9rem; }
 @media (max-width: 560px) {
   .fn-sheet-sum { grid-template-columns: 1fr; gap: 4px; }
@@ -1883,6 +1983,7 @@ div.fn-alert { cursor: default; }
   html:root.fn-print-mode, body.fn-print-mode {
     --bg: #ffffff; --bg-2: #ffffff; --bg-3: #f1efea; --ink: #111111; --ink-2: #333333; --ink-3: #555555;
     --line: #bbbbbb; --line-2: #888888; --good: #15803d; --good-bg: #ffffff; --brand: #9a3412; --bad: #b91c1c; --warn: #854d0e;
+    --good-ink: #166534; --brand-ink: #9a3412; --warn-ink: #854d0e;
     --brand-bg: #ffffff; --warn-bg: #ffffff; --bad-bg: #ffffff; --kid-bg: #ffffff; --think-bg: #ffffff;
     background: #ffffff !important; color: #111111; color-scheme: light;
   }
@@ -2023,27 +2124,61 @@ div.fn-alert { cursor: default; }
   }
 
   /* ======================= 뷰 ======================= */
-  let lastTab = 'flow';
+  /* 마지막으로 본 탭 — 이 화면을 다시 열면 그 탭 (새로고침해도: 이 기기 localStorage 'mv:money:tab', 공유 기록에는 안 넣음) */
+  let lastTab = null;
+  const TAB_KEY = 'mv:money:tab';
+  function readTab() { try { return validTab(localStorage.getItem(TAB_KEY)); } catch (e) { return null; } }
+  function saveTab(id) { try { localStorage.setItem(TAB_KEY, id); } catch (e) { /* 저장이 막혀도 그대로 동작 */ } }
+  /* 탭 순서는 자주 쓰는 순서 (주소는 그대로). short = 폰에서 보이는 짧은 이름 */
   const TABS = [
-    { id: 'flow', label: '🗓 11/3 돈 흐름' },
-    { id: 'sources', label: '🧮 출처·쓰임' },
-    { id: 'budget', label: '🧾 이사 예산' },
-    { id: 'father', label: '👨‍👦 아버지 차용금' },
-    { id: 'tax', label: '📑 복비·세금' },
-    { id: 'protect', label: '🛡 보증금 지키기' },
+    { id: 'flow', label: '🗓 11/3 돈 흐름', short: '11/3 흐름' },
+    { id: 'budget', label: '🧾 이사 예산', short: '예산' },
+    { id: 'protect', label: '🛡 보증금 지키기', short: '보증금' },
+    { id: 'tax', label: '📑 복비·세금', short: '복비·세금' },
+    { id: 'father', label: '👨‍👦 아버지 차용금', short: '차용금' },
+    { id: 'sources', label: '🧮 출처·쓰임', short: '검산' },
   ];
   const validTab = (t) => (TABS.some((x) => x.id === t) ? t : null);
+  /* 읽어 주는 이름: 전체 이름(그림 글자 빼고). 폰에 보이는 짧은 이름이 그 안에 없으면 짧은 이름을 앞에 붙여요
+     (보이는 글자로 말해도 음성 조작이 그 탭을 찾게 — 예: '검산 · 출처·쓰임') */
+  function tabAria(t) {
+    const full = t.label.replace(/^\S+\s+/, '');
+    return !t.short || full.indexOf(t.short) >= 0 ? full : t.short + ' · ' + full;
+  }
   let alertsOpen = false;
+  /* 폰 머리 숫자 펼침 (이 기기에만 — localStorage 'mv:money:heroOpen') */
+  const HERO_KEY = 'mv:money:heroOpen';
+  let heroOpen = null;
+  function readHeroOpen() {
+    if (heroOpen === null) { try { heroOpen = localStorage.getItem(HERO_KEY) === '1'; } catch (e) { heroOpen = false; } }
+    return heroOpen;
+  }
+  function saveHeroOpen(v) { heroOpen = !!v; try { localStorage.setItem(HERO_KEY, v ? '1' : '0'); } catch (e) { /* 무시 */ } }
+  /* 탭마다 마지막 스크롤 위치 — 탭을 오가거나(탭 단추) 화면 안에서 뒤로 가기로 탭을 바꾸면 그 자리로.
+     다른 화면에서 새로 열면(탭바·링크) 지우고 맨 위부터. 다른 화면에서 뒤로 가기로 돌아올 때는 셸(S8)이 되돌려요 */
+  const tabScroll = {};
+  let popAt = 0;          // 마지막 기록 이동(popstate) 시각 — 링크 해시 이동도 popstate 를 보내서, '화면 안 탭 이동'인지는 아래와 함께 봐요
+  let leftTab = null;     // 이 화면을 마지막으로 정리(cleanup)할 때 보던 탭
+  let otherSince = true;  // 그 뒤 다른 화면이 그려졌는지 (셸이 그릴 때마다 보내는 'route' 알림으로)
+  try { window.addEventListener('popstate', () => { popAt = Date.now(); }); } catch (e) { /* 무시 */ }
+  try { MV.store.on('route', (r) => { if (!r || r.name !== 'money') otherSince = true; }); } catch (e) { /* 무시 */ }
+  const ANCHOR_RE = /^fn-[A-Za-z0-9_-]+$/;
 
   function renderMoney(root, params, ctx) {
     MV.css('fn', CSS);
     ensureState();
+    /* 어떻게 이 화면에 왔는지: 방금 이 화면을 정리하고 다시 그리는 것(화면 안 뒤로 가기·기록 바뀜·날짜 바뀜)인지,
+       다른 화면에서 뒤로 가기(셸 S8 의 MV.navBack)인지, 새로 연 것인지 */
+    const again = !otherSince && !!leftTab;
+    const inPageBack = again && Date.now() - popAt < 1500;
+    if (!again && !MV.navBack) Object.keys(tabScroll).forEach((k) => { delete tabScroll[k]; }); // 새로 열면 모든 탭이 맨 위부터
     const P = {
-      root, tab: validTab(params && params[0]) || lastTab || 'flow',
+      root, tab: validTab(params && params[0]) || lastTab || readTab() || 'flow',
       c: compute(MV.store.get()),
       shell: [], panelBinds: [], target: null, panel: null, tabbar: null, focusAfter: null, deferred: false, sheet: null,
     };
     lastTab = P.tab;
+    saveTab(P.tab);
     P.target = P.shell;
     P.bind = (fn) => {
       const run = () => { try { fn(); } catch (e) { console.error('[money]', e); } };
@@ -2152,8 +2287,10 @@ div.fn-alert { cursor: default; }
       id = validTab(id) || 'flow';
       o = o || {};
       if (id === P.tab && !o.force) return;
+      if (id !== P.tab) tabScroll[P.tab] = window.scrollY; // 떠나는 탭의 자리 기억
       P.tab = id;
       lastTab = id;
+      saveTab(id);
       const hash = '#/money/' + id;
       if (location.hash !== hash) {
         try { history[o.replace ? 'replaceState' : 'pushState'](history.state, '', hash); } catch (e) { /* 무시 */ }
@@ -2161,11 +2298,17 @@ div.fn-alert { cursor: default; }
       MV.route = { name: 'money', params: [id] };
       updateTabButtons();
       rebuildPanel({ force: true });
-      const top = P.tabbar.getBoundingClientRect().top;
-      const topbarH = (document.querySelector('.topbar') || { offsetHeight: 56 }).offsetHeight;
-      if (top <= topbarH + 1) {
-        const y = window.scrollY + P.panel.getBoundingClientRect().top - topbarH - P.tabbar.offsetHeight - 8;
-        window.scrollTo(0, Math.max(0, y));
+      const saved = tabScroll[id];
+      if (typeof saved === 'number') {
+        // 전에 보던 탭이면 그 자리로
+        window.scrollTo(0, saved);
+      } else {
+        const top = P.tabbar.getBoundingClientRect().top;
+        const topbarH = (document.querySelector('.topbar') || { offsetHeight: 56 }).offsetHeight;
+        if (top <= topbarH + 1) {
+          const y = window.scrollY + P.panel.getBoundingClientRect().top - topbarH - P.tabbar.offsetHeight - 8;
+          window.scrollTo(0, Math.max(0, y));
+        }
       }
       revealTab(id);
     }
@@ -2188,20 +2331,32 @@ div.fn-alert { cursor: default; }
       if (P.moreHint) P.moreHint();
     }
 
-    /* ---- 셸: 머리글 · 요약 · 확인할 것 · 탭 ---- */
+    /* ---- 셸: 머리글 · 탭 · 요약 · 확인할 것 · (탭 내용) · 기본값 단추 ----
+       탭 줄은 머리글 바로 아래 (폰에서도 첫 화면에 탭이 보이게), '기본값으로 되돌리기'는 맨 아래 작은 단추 */
     const dd = D.dday(P.c.move);
     let touch = false;
     try { touch = (navigator.maxTouchPoints || 0) > 0 || 'ontouchstart' in window; } catch (e) { touch = false; }
+    const heroNode = P.live('section', 'fn-hero', () => heroTiles(P));
+    heroNode.classList.toggle('is-open', readHeroOpen());
+    const alertsNode = P.live('section', 'fn-alerts', () => alertList(P));
+    P.bind(() => alertsNode.classList.toggle('is-open', alertsOpen));
+    /* 이사 날(D-day): 아직 안 한 첫 단계로 가는 '다음: …' 알약 — 탭 줄 바로 아래(폰 첫 화면, 어느 탭에서나).
+       누르면 돈 흐름 탭의 그 단계로, 체크하면 바로 다음 단계로 바뀌어요 */
+    const nextNode = P.live('div', 'fn-next-wrap fn-next-top', () => {
+      if (D.dday(P.c.move).n !== 0) return null;
+      const nx = P.c.flow.steps.find((s) => !s.done);
+      if (!nx) return el('span', { class: 'fn-next is-all', role: 'status' }, '✅ 오늘 단계를 모두 마쳤어요');
+      return el('button', { class: 'fn-next', type: 'button', 'data-fk': 'next-step', onclick: () => P.goTo('flow', 'fn-step-' + nx.id) },
+        '다음: ' + (nx.time ? nx.time + ' ' : '') + stepTitle(nx.id, P.c) + ' ↓');
+    });
     root.appendChild(el('div', { class: 'fn-page' + (touch ? ' fn-touch' : '') },
       el('div', { class: 'view-head' },
         el('div', null,
           el('h1', '💰 자금흐름'),
-          el('div', { class: 'sub' }, D.fmt(P.c.move) + ' 잔금·이사일 ', dd.n != null ? el('b', dd.label) : null, ' · 금액·시각은 눌러서 고칠 수 있어요')),
+          el('div', { class: 'sub' }, D.fmt(P.c.move) + ' 잔금·이사일 ', dd.n != null ? el('b', dd.label) : null, el('span', { class: 'fn-wide-only' }, ' · 금액·시각은 눌러서 고칠 수 있어요'))),
         el('div', { class: 'actions' },
-          el('button', { class: 'btn btn-primary', type: 'button', onclick: () => openSheet(P) }, (canPrint() ? '🖨 ' : '📋 ') + D.fmt(P.c.move).replace(/\(.\)$/, '') + ' 당일 시트'),
-          el('button', { class: 'btn', type: 'button', onclick: () => resetAll(P) }, '↺ 기본값으로 되돌리기'))),
-      P.live('section', 'fn-hero', () => heroTiles(P)),
-      P.live('section', 'fn-alerts', () => alertList(P)),
+          // 폰에서는 '🖨 당일 시트'로 짧게 (제목 옆 한 줄에 들어가게)
+          el('button', { class: 'btn btn-primary', type: 'button', onclick: () => openSheet(P) }, (canPrint() ? '🖨 ' : '📋 '), el('span', { class: 'fn-wide-only' }, D.fmt(P.c.move).replace(/\(.\)$/, '') + ' '), '당일 시트'))),
       (P.tabbar = el('div', { class: 'fn-tabbar' },
         el('div', { class: 'tabs', role: 'tablist', 'aria-label': '자금흐름 탭' },
           TABS.map((t) => el('button', {
@@ -2216,8 +2371,14 @@ div.fn-alert { cursor: default; }
               const b = P.tabbar.querySelector('button[data-tab="' + n.id + '"]');
               if (b) b.focus();
             },
-          }, t.label))))),
-      (P.panel = el('div', { class: 'fn-panel', role: 'tabpanel' }))));
+            'aria-label': tabAria(t),
+          }, el('span', { class: 'fn-tab-l' }, t.label), el('span', { class: 'fn-tab-s' }, t.short || t.label)))))),
+      nextNode,
+      heroNode,
+      alertsNode,
+      (P.panel = el('div', { class: 'fn-panel', role: 'tabpanel' })),
+      el('div', { class: 'fn-foot' },
+        el('button', { class: 'btn btn-ghost btn-sm', type: 'button', onclick: () => resetAll(P) }, '↺ 자금흐름 기본값으로 되돌리기'))));
     updateTabButtons();
     rebuildPanel({ force: true });
     /* 탭 줄이 넘치면 양 끝에 '더 있어요' 표시 */
@@ -2249,11 +2410,28 @@ div.fn-alert { cursor: default; }
       document.removeEventListener('focusin', onFocusIn, true);
       lastFocus = null;
     });
-    if (!(params && params[0]) || params[0] !== P.tab) {
+    /* '#/money/<탭>/<카드 id>' (대시보드 주의사항 등) → 그 카드까지 내려가고, 주소에서는 카드 id 를 뺌
+       (기록이 바뀌어 다시 그릴 때 또 내려가지 않게). 뒤로 가기로 돌아온 경우는 보던 자리(셸)를 그대로 */
+    const anchor = params && params[1] && ANCHOR_RE.test(params[1]) ? params[1] : null;
+    if (!(params && params[0]) || params[0] !== P.tab || (params && params.length > 1)) {
       // 탭이 없거나 모르는 탭(#/money/xyz)이면 주소를 실제로 보이는 탭으로 고침
       try { history.replaceState(history.state, '', '#/money/' + P.tab); } catch (e) { /* 무시 */ }
       MV.route = { name: 'money', params: [P.tab] };
     }
+    if (anchor && !MV.navBack) requestAnimationFrame(() => { if (root.isConnected) P.goTo(null, anchor); });
+    else if (inPageBack && leftTab !== P.tab && typeof tabScroll[P.tab] === 'number') {
+      // 화면 안에서 뒤로·앞으로 가기로 탭이 바뀜 → 그 탭에서 보던 자리 (셸은 같은 화면이라 스크롤을 그대로 두므로 그 뒤에)
+      const y = tabScroll[P.tab];
+      requestAnimationFrame(() => { if (root.isConnected) window.scrollTo(0, y); });
+    }
+    // 탭마다 보던 자리 기억 (뒤로 가기 직후 브라우저가 옮기는 스크롤은 빼고)
+    const onScroll = () => { if (Date.now() - popAt > 600 && root.isConnected) tabScroll[P.tab] = window.scrollY; };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    ctx.onCleanup(() => {
+      window.removeEventListener('scroll', onScroll);
+      leftTab = P.tab;
+      otherSince = false;
+    });
 
     ctx.subscribe((e) => {
       if (!root.isConnected) return;
@@ -2290,7 +2468,8 @@ div.fn-alert { cursor: default; }
     return [
       tile('is-in', D.fmt(c.move) + ' 받을 돈', eok(fl.inflow), fl.direct ? 'A가 대출을 직접 갚고 남은 돈' : 'A → 내 통장', won(fl.inflow)),
       tile('is-out', D.fmt(c.move) + ' 보낼 돈', eok(fl.outflow), fl.direct ? 'C 잔금 · 중개보수' : 'C 잔금 · 중개보수 · 대출 완제', won(fl.outflow)),
-      tile('', '그날 남는 돈', krw(fl.leftover), '받을 돈 − 보낼 돈' + (fl.rentPart ? ' (월세 ' + krw(fl.rentPart) + ' 포함해 뺌)' : ''), won(fl.leftover)),
+      /* 이사업체 잔금은 '꼭 필요한 현금'(다음 칸)에 들어 있어서 여기서는 빼지 않아요 — 이름에 '잔금 전'을 밝힘 (숫자는 그대로) */
+      tile('', '집 돈 오간 뒤 남는 돈' + (fl.payMover > 0 ? ' (이사업체 잔금 전)' : ''), krw(fl.leftover), '받을 돈 − 보낼 돈' + (fl.rentPart ? ' (월세 ' + krw(fl.rentPart) + ' 포함해 뺌)' : ''), won(fl.leftover)),
       tile('', D.fmt(c.move) + ' 전후 꼭 필요한 현금', krw(b.groups.essential.unpaid),
         '꼭 드는 이사 비용 (이사업체 잔금·에어컨 설치 등, 아직 낼 돈)' + (b.groups.essential.paid > 0 ? ' · 이미 낸 ' + krw(b.groups.essential.paid) + (b.mover && b.mover.paid ? '(이사업체 계약금)' : '') + '은 빼고' : '') +
           (b.before.essential > 0 ? ' · 그중 ' + krw(b.before.essential) + '은 이사 전에 지금 통장에서 나가요' : ''),
@@ -2298,19 +2477,34 @@ div.fn-alert { cursor: default; }
       el('div', { class: 'fn-stat is-final' + (c.netEssential < 0 ? ' is-neg' : '') },
         el('span', { class: 'fn-stat-k' }, c.netEssential < 0 ? '⚠ 꼭 드는 비용 내면 부족' : '꼭 드는 비용 내고 여유'),
         el('span', { class: 'fn-stat-v', title: won(c.netEssential) }, krw(Math.abs(c.netEssential))),
-        b.refundsGot > 0 ? el('span', { class: 'fn-stat-s' }, '그날 남는 돈 + 받은 돈 ' + krw(b.refundsGot) + '(장기수선충당금 등) − 꼭 드는 비용') : null,
+        b.refundsGot > 0 ? el('span', { class: 'fn-stat-s' }, '집 돈 오간 뒤 남는 돈 + 받은 돈 ' + krw(b.refundsGot) + '(장기수선충당금 등) − 꼭 드는 비용') : null,
         el('span', { class: 'fn-stat-s' }, '살림 구입까지 포함하면 ', el('b', verdictTxt(c.netWithPurchases))),
         el('span', { class: 'fn-stat-s' }, '전부 포함하면 ', el('b', verdictTxt(c.net)), ' · ',
           el('a', { href: '#/money/budget', onclick: P.tabLink('budget', 'fn-budget-sum') }, '예산 보기'))),
+      /* 폰에서만 보이는 펼침 단추 (넓은 화면은 CSS 로 숨김) */
+      el('button', {
+        class: 'fn-hero-more', type: 'button', 'data-fk': 'hero-more', 'aria-expanded': String(readHeroOpen()),
+        onclick: (e) => {
+          const open = !readHeroOpen();
+          saveHeroOpen(open);
+          const btn = e.currentTarget;
+          const sec = btn.closest('.fn-hero');
+          if (sec) sec.classList.toggle('is-open', open);
+          btn.setAttribute('aria-expanded', String(open));
+          btn.textContent = heroMoreTxt(open);
+        },
+      }, heroMoreTxt(readHeroOpen())),
     ];
   }
+  const heroMoreTxt = (open) => (open ? '숫자 접기 ▴' : '받을 돈·보낼 돈 등 숫자 더 보기 ▾');
 
   /* ---------- 지금 확인할 것 ---------- */
   function alertList(P) {
     const list = P.c.alerts;
     if (!list.length) return el('div', { class: 'fn-alert is-info' }, el('span', { class: 'fn-alert-ico', 'aria-hidden': 'true' }, '✅'), el('span', { class: 'fn-alert-txt' }, '지금 급하게 확인할 것은 없어요.'));
+    // 폰은 3개까지 (글은 CSS 로 2줄까지 — 순서는 단계(🚨→⚠→ℹ)·기한 순이라 급한 것이 위)
     let LIMIT = 4;
-    try { if (window.matchMedia('(max-width: 640px)').matches) LIMIT = 2; } catch (e) { /* 무시 */ }
+    try { if (window.matchMedia('(max-width: 640px)').matches) LIMIT = 3; } catch (e) { /* 무시 */ }
     const shown = alertsOpen ? list : list.slice(0, LIMIT);
     const out = shown.map((a) => el('button', {
       class: 'fn-alert is-' + a.level, type: 'button', 'data-fk': 'alert-' + a.id,
@@ -2340,12 +2534,14 @@ div.fn-alert { cursor: default; }
   }
 
   /* ======================= 탭 1: 11/3 돈 흐름 ======================= */
+  /* 순서: 이사 전에는 지금 할 일(11/3 전에 준비할 것·늦어지면)이 맨 위 → 대출 상환 방식·이체한도 → 그날 단계.
+     이사 날부터는 그날 단계가 맨 위('다음: …' 알약은 셸의 탭 줄 아래) → 상환 방식·한도 → 준비할 것 */
   function tabFlow(P) {
-    return el('div', { class: 'fn-panel' },
-      el('div', { class: 'grid grid-2' }, lienCard(P), limitsCard(P)),
-      stepsSection(P),
-      el('div', { class: 'grid grid-2' }, prepCard(P), contingencyCard(P)),
-      contactsCard(P));
+    const dn = D.dday(P.c.move).n;
+    const setup = el('div', { class: 'grid grid-2' }, lienCard(P), limitsCard(P));
+    const prep = el('div', { class: 'grid grid-2' }, prepCard(P), contingencyCard(P));
+    if (dn != null && dn > 0) return el('div', { class: 'fn-panel' }, prep, setup, stepsSection(P), contactsCard(P));
+    return el('div', { class: 'fn-panel' }, stepsSection(P), setup, prep, contactsCard(P));
   }
 
   function lienCard(P) {
@@ -2386,6 +2582,8 @@ div.fn-alert { cursor: default; }
         const out = [el('div', { class: 'fn-kv' },
           el('span', { class: 'k' }, '11/3 내 통장에서 나갈 돈' + (fl.payMover ? ' (이사업체 잔금 포함)' : '')), el('span', { class: 'v' }, won(dayOut)),
           el('span', { class: 'k' }, '가장 큰 1건'), el('span', { class: 'v' }, won(fl.maxOut)))];
+        /* 위 '보낼 돈'(집 돈)과 이 숫자가 왜 다른지: 이사업체 잔금을 더한 값 */
+        if (fl.payMover) out.push(el('div', { class: 'fn-formula' }, '보낼 돈 ' + krw(fl.outflow) + ' + 이사업체 잔금 ' + krw(fl.payMover) + ' = ' + krw(dayOut)));
         if (fl.perTx && fl.perTx < 1000000) {
           out.push(el('div', { class: 'fn-warn is-bad' }, '1회 한도를 ' + won(fl.perTx) + '으로 넣었어요 — 맞나요? 보통 1천만원(보안2등급)이나 1억원(OTP)이에요. 이렇게 낮으면 앱으로는 못 보내니 창구(평일 09~16시)를 이용하세요.'));
         }
@@ -2417,6 +2615,7 @@ div.fn-alert { cursor: default; }
           return [MV.ui.progress(fl.doneCount / fl.steps.length), '당일 체크 ' + fl.doneCount + '/' + fl.steps.length];
         })),
       el('p', { class: 'small muted mb-0' }, '금액(예: 3.78억, 120만)과 시각은 눌러서 고칠 수 있어요. 단계마다 그 뒤 내 통장 잔액이 바로 계산돼요.'),
+      /* 이사 날 '다음: …' 알약은 셸(탭 줄 바로 아래)에 있어요 — 폰 첫 화면에 보이게 */
       /* 이사 전에 먼저 나가는 돈은 이 흐름(11/3 하루)에 넣지 않음 — 따로 알려 줌 */
       P.live('div', 'fn-before-wrap', () => beforeNote(P, 'flow')),
       ol);
@@ -2524,7 +2723,7 @@ div.fn-alert { cursor: default; }
         moneyField('기타 (있으면)', f.newHome.extraToC, (v) => upd((fin) => { fin.newHome.extraToC = v; }), { fk: 'amt-extra', placeholder: '예: 관리비 정산', hint: '관리비 정산 등 C에게 함께 보낼 돈' })));
       const rentBox = el('div', { class: 'callout fn-rentbox fn-anchor', id: 'fn-rent' },
         P.live('p', null, () => (P.c.f.newHome.rentConfirmed && !P.c.f.newHome.rentOnMoveDay
-          ? [el('b', '📌 월세 후불 확정 — '), '첫 월세 ' + krw(nn(P.c.f.newHome.rent)) + '는 ' + D.fmt(addMonths(P.c.move, 1)) + '에 내요. ' + D.fmt(P.c.move) + '에는 C에게 잔금만 보내요.']
+          ? [el('b', '📌 월세 후불 확정 — '), '첫 월세 ' + krw(nn(P.c.f.newHome.rent)) + '은 ' + D.fmt(addMonths(P.c.move, 1)) + '에 내요. ' + D.fmt(P.c.move) + '에는 C에게 잔금만 보내요.']
           : [el('b', '📌 월세 지급일 확인 — '), '계약서상 후불이면 첫 월세는 ' + D.fmt(addMonths(P.c.move, 1)) + '. ' + D.fmt(P.c.move) + '에 ' + krw(nn(P.c.f.newHome.rent)) + '을 함께 줄지 중개사·임대인과 확인하고, 주면 영수증/문자로 남기기'])),
         el('div', { class: 'row' },
           checkbox(D.fmt(P.c.move) + '에 첫 월세도 보내기 (잔금과 따로 이체)', f.newHome.rentOnMoveDay, (v) => upd((fin) => { fin.newHome.rentOnMoveDay = v; }, { log: '자금흐름: 11/3 첫 월세 ' + (v ? '함께 지급' : '지급 안 함 (12/3부터)') }), { fk: 'rent-on' }),
@@ -2627,7 +2826,8 @@ div.fn-alert { cursor: default; }
       P.live('div', 'card fn-step-card fn-result', () => {
         const c = P.c, fl = c.flow;
         return [
-          el('div', { class: 'fn-result-k' }, '모두 끝나면 남는 돈'),
+          /* 이사업체 잔금은 아래 '꼭 드는 이사 비용'에서 빼요 — 이 숫자는 그 전 (숫자는 그대로, 이름만 정확하게) */
+          el('div', { class: 'fn-result-k' }, '집 돈 오간 뒤 남는 돈' + (fl.payMover > 0 ? ' (이사업체 잔금 전)' : '')),
           el('div', { class: 'fn-result-v' + (fl.leftover < 0 ? ' is-neg' : ''), title: won(fl.leftover) }, eok(fl.leftover)),
           el('div', { class: 'fn-formula' }, '받을 돈 ' + won(fl.inflow) + ' − 보낼 돈 ' + won(fl.outflow) + ' = ' + won(fl.leftover)),
           /* 이사업체 잔금(pay 단계)은 집 돈 흐름과 따로 — 꼭 드는 이사 비용에 들어 있어서 아래에서 함께 빼요 */
@@ -2635,7 +2835,7 @@ div.fn-alert { cursor: default; }
             ((fl.steps.find((x) => x.id === 'mover') || {}).time ? ' (' + fl.steps.find((x) => x.id === 'mover').time + ')' : '') + '까지 보내면 통장에 약 ' + krw(fl.leftover - fl.payMover) + ' — 이 잔금은 아래 "꼭 드는 이사 비용"에 들어 있어요.') : null,
           jangsuLine(P),
           el('p', { class: 'small mb-0 mt-8' }, '꼭 드는 이사 비용 ' + krw(c.budget.groups.essential.unpaid) + '까지 빼면 ' + (c.budget.refundsGot ? '(받은 돈 ' + krw(c.budget.refundsGot) + ' 더해서) ' : ''),
-            el('b', { style: { color: c.netEssential < 0 ? 'var(--bad)' : 'var(--good)' } }, verdictTxt(c.netEssential)),
+            el('b', { style: { color: c.netEssential < 0 ? 'var(--bad)' : 'var(--good-ink, var(--good))' } }, verdictTxt(c.netEssential)),
             ' · 살림 구입까지 ' + verdictTxt(c.netWithPurchases) + ' · 전부 포함 ' + verdictTxt(c.net) + ' · ',
             el('a', { href: '#/money/budget', onclick: P.tabLink('budget', 'fn-budget-sum') }, '예산 보기 →')),
         ];
@@ -2644,12 +2844,14 @@ div.fn-alert { cursor: default; }
 
   function prepCard(P) {
     const move = P.c.move;
+    /* 기한 칩은 연결된 체크리스트 항목의 기한을 따라요 (linkedChecklist). off 는 연결 항목이 없을 때만 쓰는 이사일 기준 날짜.
+       지연이체·안심이체·한도제한계좌 확인은 체크리스트 'OTP 받고 이체한도 올리기' 항목에 함께 들어 있어서 OTP 줄 하나로 합쳤어요
+       (예전 따로 체크하던 'delay'·'limitAcct' 값은 기록에 남아 있지만 화면에서는 OTP 줄 하나로 봐요) */
     const PREP = [
-      { key: 'otp', re: [/OTP|이체\s*한도/], off: -20, text: 'OTP 발급 + 이체한도 1회 1억·1일 5억으로 증액 (영업점 방문이 필요할 수 있어요)' },
+      /* 위 '확인할 것'의 이체한도 알림과 같은 항목을 고르도록 OTP_ITEM(key·part·re)을 그대로 씀 */
+      { key: OTP_ITEM.key, part: OTP_ITEM.part, re: OTP_ITEM.re, off: -7, text: ['OTP 발급 + 이체한도 1회 1억·1일 5억으로 증액 (영업점 방문이 필요할 수 있어요)',
+        el('small', { class: 'fn-prep-sub' }, '같이 확인: 지연이체·안심이체(입금계좌지정)가 켜져 있으면 해제하거나 C·중개사·대출 상환계좌를 미리 등록 · 받는 통장이 한도제한계좌(1일 100만원 안팎)가 아닌지')] },
       { key: 'aSend', re: [/A의\s*송금/], off: -8, text: '지금 집 중개사를 통해 A의 송금 시각(10:30 전)·1일 이체한도(' + eok(nn(P.c.f.old.receive)) + ' 이상) 확인, 우리 수취계좌는 문자로 전달' },
-      /* 지연이체·한도제한계좌는 가이드(통장업무 → 이체 준비)·체크리스트 OTP 항목과 같은 10/14까지 */
-      { key: 'delay', off: -20, text: '지연이체·안심이체(입금계좌지정)가 켜져 있으면 해제하거나 C·중개사·대출 상환계좌를 미리 등록' },
-      { key: 'limitAcct', off: -20, text: '받는 통장이 한도제한계좌(1일 100만원 안팎)가 아닌지 확인' },
       { key: 'payoff', re: [/완제\s*금액/], off: -1, text: '우리은행에서 11/3 기준 완제금액(원 단위)·상환계좌·마감시각 받기' },
       { key: 'payee', re: [/예금주/], off: -4, text: 'C·중개사·상환계좌 예금주 조회 — 처음 보내는 계좌는 이상거래탐지로 보류될 수 있어요' },
       { key: 'registry1', re: [/전입\s*세대\s*확인/], off: -1, text: '새 집 등기부 1차 열람 + 전입세대확인서 발급' },
@@ -2670,7 +2872,7 @@ div.fn-alert { cursor: default; }
     const links = P.c.f.links || {};
     const resolved = rows.map((r) => {
       const link = r.re ? findLinked(r, items, links, fkPrefix) : { item: null };
-      return Object.assign({}, r, { linked: link.item, done: link.item ? !!link.item.done : !!local[r.key] });
+      return Object.assign({}, r, { linked: link.item, linkDue: link.item && D.valid(link.item.due) ? link.item.due : null, done: link.item ? !!link.item.done : !!local[r.key] });
     });
     const list = el('ul', { class: 'fn-list' }, resolved.map((r) => {
       const li = el('li', { class: r.done ? 'is-done' : '' },
@@ -2682,7 +2884,8 @@ div.fn-alert { cursor: default; }
             if (!!it.done !== v) MV.items.toggle(it.id);
           } else setLocal(r.key, v);
         }, { fk: fkPrefix + r.key }),
-        withDue && r.due ? MV.ui.dueChip(r.due, r.done) : null,
+        /* 기한: 연결된 체크리스트 항목이 있으면 그 기한 (체크리스트와 같은 날짜), 없으면 이 화면의 기본 날짜 */
+        withDue && (r.linkDue || r.due) ? MV.ui.dueChip(r.linkDue || r.due, r.done) : null,
         r.linked ? el('a', { class: 'fn-cl-link', href: itemHref(r.linked), title: '체크리스트: ' + r.linked.title, 'aria-label': '체크리스트 항목 보기: ' + r.linked.title }, '📋 체크리스트') : null);
       return li;
     }));
@@ -3684,14 +3887,27 @@ div.fn-alert { cursor: default; }
       actions,
       onClose: () => { printMode(false); P.sheet = null; },
     });
+    /* 이미 한 단계가 있으면 '다음' 줄이 보이게 (첫 줄이 다음이면 그대로 맨 위) */
+    requestAnimationFrame(() => {
+      const rowsAll = body.querySelectorAll('.fn-sheet-row');
+      const nx = body.querySelector('.fn-sheet-row.is-next');
+      if (nx && rowsAll[0] !== nx) { try { nx.scrollIntoView({ block: 'center' }); } catch (e) { /* 무시 */ } }
+    });
   }
 
   function sheetContent(P, printable) {
     const c = P.c, fl = c.flow, f = c.f;
     const memo = f.flow.memo || {};
+    /* 아직 안 한 첫 단계에 '다음' 표시 — 시트 안에서 체크하면 바로 다음 줄로 옮겨 가요 */
+    const cbs = [];
+    const markNext = () => {
+      const i = cbs.findIndex((x) => !x.checked);
+      cbs.forEach((x, k) => { const row = x.closest('.fn-sheet-row'); if (row) row.classList.toggle('is-next', k === i); });
+    };
     const rows = fl.steps.map((s) => {
       const cb = el('input', { type: 'checkbox', checked: !!s.done, 'aria-label': stepTitle(s.id, c) + ' 완료' });
-      cb.addEventListener('change', () => setStepDone(P, s.id, cb.checked));
+      cbs.push(cb);
+      cb.addEventListener('change', () => { setStepDone(P, s.id, cb.checked); markNext(); });
       const extra = [];
       if (s.splitN > 1) extra.push((s.partLabel ? s.partLabel + ' ' : '') + timesTxt(s.splitN) + ' 나눠: ' + splitSummary(s.split));
       (s.seps || []).forEach((p) => extra.push(p.label + ' ' + krw(p.amount) + '은 따로 이체' + (p.memo ? ' (메모 "' + p.memo + '")' : '')));
@@ -3705,11 +3921,12 @@ div.fn-alert { cursor: default; }
       return el('label', { class: 'fn-sheet-row' },
         cb,
         el('span', { class: 'fn-sheet-time' }, s.time || '—'),
-        el('span', { class: 'fn-sheet-what' }, el('b', stepWho(s.id) + ' · ' + stepTitle(s.id, c)), extra.map((t) => el('small', t))),
+        el('span', { class: 'fn-sheet-what' }, el('b', stepWho(s.id) + ' · ' + stepTitle(s.id, c), el('span', { class: 'fn-sheet-next fn-no-print' }, '← 다음')), extra.map((t) => el('small', t))),
         s.amount != null
           ? el('span', { class: 'fn-sheet-amt' }, s.kind === 'in' ? signedWon(s.amount) : s.kind === 'out' || s.kind === 'pay' ? signedWon(-s.amount) : won(Math.abs(s.amount)), s.kind !== 'ext' ? el('small', '잔액 ' + won(s.balance)) : el('small', '내 통장 변화 없음'))
           : el('span', { class: 'fn-sheet-amt' }, ''));
     });
+    markNext();
     const ct = f.contacts || {};
     const CT = [['A', '구집 임대인 A'], ['C', '새 집 임대인 C'], ['broker', '새 집 중개사'], ['oldBroker', '구집 중개사'], ['bank', '우리은행'], ['mover', '이사업체']];
     return [

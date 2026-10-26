@@ -1046,7 +1046,7 @@
   /* ---------- 상단바 표시 ---------- */
   const CHIP = {
     connecting: ['⏳', '공유 저장소에 연결하는 중'],
-    synced: ['🔗', '공유 중 — 부부가 같은 기록을 봐요'],
+    synced: ['🔗', '공유 중 — 가족이 같은 기록을 봐요'],
     saving: ['⏳', '공유 저장소에 저장하는 중'],
     empty: ['✨', '공유 기록이 아직 없어요 — ⋯ 메뉴에서 시작하세요'],
     readonly: ['👁', '보기 전용 — 바꾼 내용은 이 기기에만 남아요', '보기만'],
@@ -1055,7 +1055,7 @@
     revoked: ['🔒', '공유 권한이 없어요 — 이 기기에만 저장돼요', '이 기기만'],
     unreachable: ['⚠', '공유 저장소에 연결하지 못했어요 — 지금은 이 기기에만 저장돼요', '이 기기만'],
     error: ['⚠', '공유 저장소 오류'],
-    login: ['🔑', '로그인하면 부부가 같은 기록을 봐요 — 지금은 이 기기에만 저장돼요', '로그인'],
+    login: ['🔑', '로그인하면 가족이 같은 기록을 봐요 — 지금은 이 기기에만 저장돼요', '로그인'],
     local: ['💾', '이 브라우저에만 저장 중 — 함께 쓰기에 연결되지 않았어요. 눌러서 확인하세요', '이 기기만'],
   };
   /** 체크가 공유 기록에 올라가지 않는 상태인지 (칩에 짧은 글·완료 알림에 '이 기기에만' 덧붙임) */
@@ -1287,10 +1287,11 @@
   global.document.addEventListener('visibilitychange', () => { if (global.document.visibilityState === 'hidden') onHide(); });
   MV.css('sync', `
     .sync-chip { flex: 0 0 auto; padding: 0 8px; font-size: 1rem; white-space: nowrap; }
-    .sync-chip.sync-chip-warn { color: var(--warn); font-size: .8rem; font-weight: 800; border: 1.5px solid var(--warn); border-radius: 999px; min-height: 32px; }
+    .sync-chip.sync-chip-warn { color: var(--warn-ink, var(--warn)); font-size: .8rem; font-weight: 800; border: 1.5px solid var(--warn); border-radius: 999px; min-height: 32px; }
     @media (max-width: 420px) { .topbar:has(.sync-chip-warn) .brand-text strong { display: none; } }
     .sync-chip[data-status="offline"], .sync-chip[data-status="error"], .sync-chip[data-status="partial"],
-    .sync-chip[data-status="revoked"], .sync-chip[data-status="unreachable"], .sync-chip[data-status="local"] { color: var(--warn); }
+    .sync-chip[data-status="revoked"], .sync-chip[data-status="unreachable"], .sync-chip[data-status="local"] { color: var(--warn-ink, var(--warn)); }
+    @media (pointer: coarse) { .sync-chip, .sync-chip.sync-chip-warn { min-height: 40px; } }
   `);
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => { connect(); });
   else setTimeout(connect, 0);

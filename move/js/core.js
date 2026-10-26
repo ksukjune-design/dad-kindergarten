@@ -18,7 +18,7 @@
             MV.store.update(fn(state), {log, silent}) 변경 + 저장 + 'change' 알림
             MV.store.on('change', fn) → 해제함수 / MV.store.on('flush', fn) 창을 닫기 직전 (입력 중인 값 반영용)
             MV.store.ensure(key, defaultsFactory) 모듈 전용 하위 상태 확보
-            MV.store.log(text) 활동 기록 / exportJSON() / importJSON(text) / reset()
+            MV.store.log(text) 활동 기록 / exportJSON() / importJSON(text) / checkBackup(text) 복원 전 살펴보기 / reset()
    체크     MV.parts.list() / get(id) / add(p) / update(id, patch) / remove(id) / stats(id)
             MV.items.list(filterFn) / byPart(id) / get(id) / add(p) / update(id, patch)
             MV.items.remove(id) / toggle(id) / addNote(id, text) / removeNote(id, noteId)
@@ -36,11 +36,27 @@
    라우팅   MV.view(name, {title, icon, order, nav, badge(), render(root, params, ctx)})
             ctx.onCleanup(fn) / ctx.subscribe(fn) (뷰를 떠날 때 자동 해제)
             MV.go('#/checklist/money') / MV.route → {name, params}
-   UI       MV.ui.modal({title, body, wide, actions:[{label, kind, onClick(close)}], onClose})
-            MV.ui.confirm(msg, {okLabel, danger}) → Promise<bool>
+            선택 필드 (없으면 지금과 같음):
+              navHref()      탭바 링크 주소 '#/…' (글자가 아니거나 '#/'로 시작하지 않거나 오류면 '#/이름'). 탭바를 그릴 때마다 다시 불러요
+              ownScroll:true 화면이 스크롤 위치를 직접 정해요 → 셸의 '뒤로 가기 스크롤 기억'을 쓰지 않아요 (적지 않아도 checklist·guide·agent 는 그렇게 봐요)
+                             그 밖의 화면: 뒤로·앞으로 가기로 돌아오면 셸이 떠날 때 자리로(그린 직후 + 덜 그려졌으면 몇 프레임 더, 화면이 스스로 옮기면 그대로),
+                             탭바·링크로 새로 오면 맨 위, 같은 화면을 다시 그리면 그 자리
+            MV.navBack  이번 그리기가 뒤로·앞으로 가기(셸이 그린 적 있는 기록 칸으로 옮겨 옴)인지 — render 안에서 읽기
+              dayRerender:false 날짜가 바뀌어도(자정·탭 복귀) 셸이 다시 그리지 않아요 (도면처럼 날짜가 안 보이는 화면)
+   UI       MV.ui.modal({title, body, wide, actions:[{label, kind, onClick(close)}], onClose, focus, isDirty})
+              → {close, dismiss, root, body}
+              focus   생략·'first' = 보이는 첫 입력칸(file·hidden·disabled 제외) → 없으면 아래 .btn-primary·.btn-danger → 없으면 닫기 ✕
+                      (창을 연 그 순간에 있는 것만 — modal() 이 돌아온 뒤에 넣은 칸은 고르지 않아요)
+                      'none'  = 입력칸에 포커스하지 않음(폰 자판이 안 뜸) — 창 상자 자체에 포커스(Esc 는 그대로)
+                      요소    = 그 요소에 포커스 / 함수 (box) => 요소 (창을 만든 뒤 고를 때)
+              Tab 은 창 안에서만 돌고, 열린 동안 #app·아래 창은 inert. role=dialog + aria-labelledby(제목)
+              isDirty () => bool  참이면 Esc·바깥 누르기·머리 ✕ 로 닫을 때 '고친 내용을 저장하지 않고 닫을까요?'를 물어요.
+                      actions 단추와 close() 는 묻지 않아요. dismiss() 는 묻는 닫기(취소 단추 등에서 쓰기).
+              Esc 는 맨 위 창만 닫아요 (창 위에 확인창이 뜬 경우).
+            MV.ui.confirm(msg, {okLabel, cancelLabel, danger, title}) → Promise<bool>  (첫 포커스: danger 면 취소, 아니면 확인)
             MV.ui.prompt(title, {value, placeholder, multiline, label}) → Promise<string|null>
             MV.ui.toast(msg, {action:{label, onClick}, ms})
-            MV.ui.progress(pct, cls) / MV.ui.dueChip(dateStr, done) / MV.ui.moneyInput(value, onChange, opts)
+            MV.ui.progress(pct, cls) / MV.ui.dueChip(dateStr, done) '10/27(화) · 내일' (오늘·내일·D-n·n일 지남) / MV.ui.moneyInput(value, onChange, opts)
             MV.ui.download(filename, text, mime)  (공유 버전에서는 Promise)
             MV.ui.errorBox(title, err, {small, hint, retry, cls}) 화면 오류 카드 (쉬운 안내 + 접힌 '자세히'에 오류 원문)
             MV.ui.errorText(err, fallback) 한국어 메시지면 그대로, 영어 원문·코드면 fallback
@@ -855,7 +871,7 @@
       S.storageOK = true;
     } catch (e) {
       // 공유 저장소에 연결돼 있으면 기록은 거기에 남으므로 경고하지 않음
-      if (S.storageOK && !(MV.sync && MV.sync.mode === 'shared')) MV.ui && MV.ui.toast && MV.ui.toast('브라우저 저장소를 쓸 수 없어 이 창을 닫으면 사라집니다. ⋯ 메뉴에서 백업하세요.');
+      if (S.storageOK && !(MV.sync && MV.sync.mode === 'shared')) MV.ui && MV.ui.toast && MV.ui.toast('브라우저 저장소를 쓸 수 없어 이 창을 닫으면 기록이 사라져요. ⋯ 메뉴에서 백업하세요.');
       S.storageOK = false;
     }
     S.afterPersist.forEach((fn) => { try { fn(); } catch (err) { console.error(err); } });
@@ -917,11 +933,18 @@
     if (!noEmit) { persistSoon(); bus.emit('change', { log: text }); }
   };
   S.exportJSON = () => JSON.stringify(Object.assign({ _app: 'mv-move', _exportedAt: MV.nowISO() }, S.get()), null, 1);
+  const looksLikeBackup = (st) => !!(validState(st) && (st._app === 'mv-move' || (typeof st.seedVersion === 'number' && st.items.every((i) => i && typeof i.id === 'string' && typeof i.title === 'string'))));
+  /** 복원하기 전에 파일만 살펴봐요 (기록은 그대로) → {ok:true, exportedAt, items} | {ok:false, why} — importJSON 과 같은 기준 */
+  S.checkBackup = function checkBackup(text) {
+    let st;
+    try { st = JSON.parse(text); } catch (e) { return { ok: false, why: '파일을 읽을 수 없어요. 이 앱에서 저장한 백업 파일인지 확인해 주세요.' }; }
+    if (!looksLikeBackup(st)) return { ok: false, why: '이 앱에서 저장한 백업 파일이 아니에요.' };
+    return { ok: true, exportedAt: typeof st._exportedAt === 'string' ? st._exportedAt : null, items: st.items.length };
+  };
   S.importJSON = function importJSON(text) {
     let st;
     try { st = JSON.parse(text); } catch (e) { throw new Error('파일을 읽을 수 없어요. 이 앱에서 저장한 백업 파일인지 확인해 주세요.'); }
-    const looksOk = validState(st) && (st._app === 'mv-move' || (typeof st.seedVersion === 'number' && st.items.every((i) => i && typeof i.id === 'string' && typeof i.title === 'string')));
-    if (!looksOk) throw new Error('이 앱의 백업 파일이 아니에요.');
+    if (!looksLikeBackup(st)) throw new Error('이 앱의 백업 파일이 아니에요.');
     delete st._app; delete st._exportedAt;
     st.inventory = st.inventory || [];
     st.activity = st.activity || [];
@@ -1176,6 +1199,17 @@
     const catalog = MV.catalog || [];
     const f = {};
     const field = (label, input, hint) => el('label', { class: 'field' }, el('span', label), input, hint ? el('small', { class: 'hint' }, hint) : null);
+    MV.css('mv-editor', `
+      .mv-preset-d { border-top: 1px solid var(--line); padding-top: 4px; }
+      .mv-preset-d > summary { cursor: pointer; font-weight: 750; color: var(--ink-2); min-height: 40px; display: flex; align-items: center; gap: 6px; list-style: none; }
+      .mv-preset-d > summary::-webkit-details-marker { display: none; }
+      .mv-preset-d > summary::after { content: '▾'; color: var(--ink-3); }
+      .mv-preset-d[open] > summary::after { content: '▴'; }
+      .mv-preset-d > .stack { margin-top: 6px; }
+      .mv-preset-prev { margin: 0; font-weight: 700; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+      .mv-preset-prev:empty { display: none; }
+      @media (pointer: coarse) { .mv-preset-d > summary, .mv-preset-d .btn { min-height: 44px; } }
+    `);
     f.preset = el('select', { class: 'select' },
       el('option', { value: '' }, '— 많이 쓰는 규격에서 고르기 —'),
       catalog.map((c, i) => el('option', { value: String(i) }, (V.cat(c.cat).icon) + ' ' + c.name + ' (' + c.w + '×' + c.d + '×' + c.h + ')')));
@@ -1211,12 +1245,11 @@
     };
     [f.w, f.d, f.h].forEach((x) => x.addEventListener('input', syncAssumed));
     f.assumed.addEventListener('change', () => { assumedBase = f.assumed.checked; dimsBase = dimVals(); });
-    const acRow = field('에어컨 종류', f.ac, '에어컨이면 견적에 이전설치비가 붙습니다');
+    const acRow = field('에어컨 종류', f.ac, '에어컨이면 견적에 이전설치비가 붙어요');
     const syncAc = () => { acRow.hidden = f.cat.value !== 'aircon'; };
     f.cat.addEventListener('change', syncAc);
-    f.preset.addEventListener('change', () => {
-      const c = catalog[+f.preset.value];
-      if (!c) return;
+    const pickedPreset = () => (f.preset.value === '' ? null : catalog[+f.preset.value] || null);
+    const applyPreset = (c) => {
       if (!f.name.value.trim()) f.name.value = c.name;
       f.cat.value = c.cat; f.w.value = c.w; f.d.value = c.d; f.h.value = c.h;
       if (c.ac) f.ac.value = c.ac;
@@ -1224,11 +1257,40 @@
       // 프리셋 = 흔한 제품의 근사값(추정). 우리 집 실제 모델 규격(catalog 의 assumed: false)만 추정 아님
       dimsBase = dimVals(); assumedBase = c.assumed !== false; f.assumed.checked = assumedBase;
       syncAc();
-    });
+    };
+    /* 기존 짐: 프리셋은 맨 아래 접힌 '규격 프리셋으로 바꾸기' 안에 두고, 고르면 미리보기만 — '이 규격 넣기'를 눌러야 크기가 바뀌어요.
+       (예전: 맨 위 프리셋 칸에 첫 포커스가 가서 ↓ 한 번에 실측 규격을 덮어썼어요. 이미 덮어쓴 기록은 고치지 않아요)
+       새 짐: 지금처럼 맨 위에서 고르면 바로 채워요 */
+    const sizeTxt = (w, d, h) => [w, d, h].map((v) => Math.round(Math.max(0, +v || 0))).join('×');
+    // tabindex -1: '이 규격 넣기'를 누르면 단추가 꺼지니 포커스를 이 안내 줄로 옮겨요 (키보드 포커스가 맨 앞으로 튀지 않게)
+    const presetPrev = el('p', { class: 'small mv-preset-prev', 'aria-live': 'polite', tabindex: '-1' });
+    const presetApply = el('button', { type: 'button', class: 'btn btn-sm', disabled: true }, '이 규격 넣기');
+    if (existing) {
+      f.preset.addEventListener('change', () => {
+        const c = pickedPreset();
+        presetApply.disabled = !c;
+        presetPrev.textContent = c ? '지금 ' + sizeTxt(f.w.value, f.d.value, f.h.value) + ' → ' + sizeTxt(c.w, c.d, c.h) + ' cm' + (c.assumed !== false ? ' (추정 규격으로 바뀌어요)' : '') : '';
+      });
+      presetApply.addEventListener('click', () => {
+        const c = pickedPreset();
+        if (!c) return;
+        applyPreset(c);
+        presetPrev.textContent = '크기를 ' + sizeTxt(c.w, c.d, c.h) + ' cm로 바꿨어요. ‘저장’을 누르면 저장돼요.';
+        try { presetPrev.focus({ preventScroll: true }); } catch (e) { /* 무시 */ }
+        presetApply.disabled = true;
+      });
+    } else {
+      f.preset.addEventListener('change', () => { const c = pickedPreset(); if (c) applyPreset(c); });
+    }
     if (opts.preset != null && catalog[opts.preset]) { f.preset.value = String(opts.preset); f.preset.dispatchEvent(new Event('change')); }
     syncAc();
+    const presetBox = !catalog.length ? null : existing
+      ? el('details', { class: 'mv-preset-d' }, el('summary', '규격 프리셋으로 바꾸기'),
+        el('div', { class: 'stack' }, field('규격 프리셋', f.preset, '고르면 미리보기만 보여요. ‘이 규격 넣기’를 눌러야 크기가 바뀌어요'),
+          el('div', { class: 'row' }, presetApply), presetPrev))
+      : field('규격 프리셋', f.preset);
     const body = el('div', { class: 'stack' },
-      catalog.length ? field('규격 프리셋', f.preset) : null,
+      existing ? null : presetBox,
       el('div', { class: 'form-grid' },
         field('이름', f.name), field('분류', f.cat), field('처리', f.fate), field('수량', f.qty)),
       el('div', { class: 'form-grid' },
@@ -1238,9 +1300,10 @@
         field('지금 집 위치', f.room), field('새 집 위치', f.roomNew), field('제조사', f.brand), acRow),
       el('div', { class: 'field mv-modelfield' }, el('label', { class: 'field' }, el('span', '모델명'), f.model,
         el('small', { class: 'hint' }, '명판·라벨 사진의 모델명을 적어 두면 정확한 규격을 찾을 수 있어요')), modelLinks),
-      field('제품 링크 (URL)', f.url, '인터넷에서 찾은 제품 페이지를 붙여 두면 규격 확인이 쉽습니다'),
+      field('제품 링크 (URL)', f.url, '인터넷에서 찾은 제품 페이지를 붙여 두면 규격 확인이 쉬워요'),
       el('label', { class: 'check' }, f.lg, '제조사 서비스(LG·삼성전자서비스)로 옮김 — 이삿짐센터 대신'),
-      field('메모', f.note));
+      field('메모', f.note),
+      existing ? presetBox : null);
     const read = () => ({
       name: f.name.value.trim() || '이름 없는 짐',
       cat: f.cat.value, fate: f.fate.value,
@@ -1253,7 +1316,7 @@
     const actions = [];
     if (existing) {
       actions.push({ label: '삭제', kind: 'danger', onClick: (close) => {
-        MV.ui.confirm('“' + existing.name + '”을(를) 짐 목록에서 지울까요? 도면 배치도 함께 지워집니다.', { danger: true, okLabel: '삭제' })
+        MV.ui.confirm('“' + existing.name + '”을(를) 짐 목록에서 지울까요? 도면 배치도 함께 지워져요.', { danger: true, okLabel: '삭제' })
           .then((ok) => { if (ok) { V.remove(existing.id); close(); opts.onSave && opts.onSave(null); } });
         return false;
       } });
@@ -1266,7 +1329,17 @@
       else saved = V.add(data);
       opts.onSave && opts.onSave(saved);
     } });
-    return MV.ui.modal({ title: existing ? '짐 수정' : '짐 추가', body, actions });
+    /* 닫기 전 확인(S6 isDirty): 처음 연 값의 지문과 다르면 Esc·바깥 누르기·✕ 에서 물어요 (저장·취소 단추는 묻지 않음).
+       화면을 떠나며 창을 정리하는 경우(도면 화면은 떠날 때 ✕ 를 눌러 닫아요)는 주소가 바뀌었으니 묻지 않고 닫아요 — 예전과 같음 */
+    const fingerprint = () => { try { return JSON.stringify(read()); } catch (e) { return ''; } };
+    const base = fingerprint();
+    const openedAt = location.hash;
+    // 첫 포커스: 데스크톱은 이름 칸, 터치 기기는 없음(자판이 바로 뜨지 않게 — 창 상자에 포커스, Esc 는 그대로)
+    let coarse = false;
+    try { coarse = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches); } catch (e) { /* 무시 */ }
+    return MV.ui.modal({ title: existing ? '짐 수정' : '짐 추가', body, actions,
+      focus: coarse ? 'none' : f.name,
+      isDirty: () => location.hash === openedAt && fingerprint() !== base });
   };
 
   /* ---------------- 계산 레지스트리 ---------------- */
@@ -1274,38 +1347,130 @@
 
   /* ---------------- UI ---------------- */
   const U = MV.ui = {};
+  // 열린 창 쌓임 — Esc 는 맨 위 창만 닫아요 (창 위에 뜬 확인창에서 Esc 를 누르면 확인창만)
+  const modalStack = [];
+  const topModal = () => {
+    for (let i = modalStack.length - 1; i >= 0; i--) { if (modalStack[i].root.isConnected) return modalStack[i]; modalStack.splice(i, 1); }
+    return null;
+  };
+  /* 창이 열린 동안 창 밖(#app·아래에 깔린 창)은 inert — Tab·화면 읽기가 창 뒤로 새지 않게.
+     토스트(되돌리기)는 #app 밖이라 그대로 누를 수 있어요. 창을 close() 없이 바로 지운 경우(도면 화면 정리 등)도 body 변화를 보고 풀어요 */
+  function syncInert() {
+    const top = topModal();
+    const app = document.getElementById('app');
+    if (app) { if (top) app.setAttribute('inert', ''); else app.removeAttribute('inert'); }
+    modalStack.forEach((m) => { if (m === top) m.root.removeAttribute('inert'); else m.root.setAttribute('inert', ''); });
+  }
+  let modalObs = null;
+  function watchModals() {
+    if (modalObs || typeof MutationObserver !== 'function') return;
+    modalObs = new MutationObserver(() => {
+      const app = document.getElementById('app');
+      if (modalStack.length || (app && app.hasAttribute('inert'))) syncInert();
+    });
+    modalObs.observe(document.body, { childList: true });
+  }
+  // Tab 으로 갈 수 있는 것 (보이는 것만 — 닫힌 details 안·display:none 은 rect 가 없어요)
+  const FOCUSABLE = 'a[href], button, input, select, textarea, summary, [tabindex], [contenteditable="true"]';
+  const tabbables = (box) => Array.from(box.querySelectorAll(FOCUSABLE)).filter((n) => !(n.disabled || n.hidden || n.type === 'hidden' || n.getAttribute('tabindex') === '-1' || n.closest('[inert]') || !n.getClientRects().length));
+  let modalSeq = 0;
   U.modal = function modal(o) {
+    o = o || {};
     const el = MV.el;
     const prevFocus = document.activeElement;
     const back = el('div', { class: 'modal-back', role: 'presentation' });
+    let api = null;
     const close = () => {
       if (!back.isConnected) return;
       back.remove();
+      const i = modalStack.indexOf(api);
+      if (i >= 0) modalStack.splice(i, 1);
+      syncInert();
       document.removeEventListener('keydown', onKey);
       o.onClose && o.onClose();
-      if (prevFocus && prevFocus.focus) try { prevFocus.focus({ preventScroll: true }); } catch (e) { /* 무시 */ }
+      if (prevFocus && prevFocus.focus && prevFocus.isConnected) try { prevFocus.focus({ preventScroll: true }); } catch (e) { /* 무시 */ }
     };
-    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    // 묻는 닫기: o.isDirty() 가 참이면 한 번 물어요 (Esc·바깥 누르기·머리 ✕)
+    let asking = null;   // 지금 떠 있는 '닫기 전에 확인' 창
+    const dismiss = () => {
+      if (!back.isConnected) return;
+      let dirty = false;
+      if (typeof o.isDirty === 'function') { try { dirty = !!o.isDirty(); } catch (e) { console.warn('[창] isDirty', e); } }
+      if (asking && !(asking.root && asking.root.isConnected)) asking = null;   // 확인창이 close() 없이 지워졌으면 다시 물을 수 있게
+      if (asking) {
+        // 묻는 중에 다시 불렸어요 (도면 화면을 떠나며 창의 ✕ 를 누름 등). 이제 고친 게 아니면(주소가 바뀜 등) 확인창과 함께 닫아요
+        if (dirty) return;
+        const q = asking; asking = null;
+        q.close(); close(); return;
+      }
+      if (!dirty) { close(); return; }
+      const ask = U.confirm('고친 내용을 저장하지 않고 닫을까요?', { title: '닫기 전에 확인', okLabel: '저장하지 않고 닫기', cancelLabel: '계속 고치기', danger: true });
+      const q = topModal() || { close() {} };   // confirm 은 창을 바로 열어요 → 맨 위가 그 확인창
+      asking = q;
+      ask.then((ok) => { if (asking !== q) return; asking = null; if (ok) close(); });
+    };
+    // Tab·Shift+Tab 은 맨 위 창 안에서만 돌아요 (끝에서 처음으로, 처음에서 끝으로)
+    const trapTab = (e) => {
+      const list = tabbables(box);
+      const a = document.activeElement;
+      const inside = box.contains(a);
+      if (!list.length) { e.preventDefault(); try { box.focus({ preventScroll: true }); } catch (err) { /* 무시 */ } return; }
+      const first = list[0], last = list[list.length - 1];
+      if (e.shiftKey) { if (!inside || a === first || a === box) { e.preventDefault(); last.focus(); } }
+      else if (!inside || a === last) { e.preventDefault(); first.focus(); }
+    };
+    const onKey = (e) => {
+      if (!back.isConnected) { document.removeEventListener('keydown', onKey); return; }
+      if ((e.key !== 'Escape' && e.key !== 'Tab') || e.mvModalDone || topModal() !== api) return;
+      e.mvModalDone = true;
+      if (e.key === 'Tab') { trapTab(e); return; }
+      dismiss();
+    };
     const bodyNode = typeof o.body === 'string' ? el('div', { html: o.body }) : o.body;
     const foot = (o.actions && o.actions.length) ? el('div', { class: 'modal-foot' }, o.actions.map((a) => el('button', {
       class: 'btn ' + (a.kind === 'primary' ? 'btn-primary' : a.kind === 'danger' ? 'btn-danger' : a.kind === 'ghost' ? 'btn-ghost' : ''),
       type: 'button',
       onclick: () => { const r = a.onClick ? a.onClick(close) : undefined; if (r !== false) close(); },
     }, a.label))) : null;
-    const box = el('div', { class: 'modal' + (o.wide ? ' wide' : ''), role: 'dialog', 'aria-modal': 'true', 'aria-label': o.title || '대화상자' },
-      el('div', { class: 'modal-head' }, el('h2', o.title || ''), el('button', { class: 'btn btn-ghost btn-icon', type: 'button', 'aria-label': '닫기', onclick: close }, '✕')),
+    const closeBtn = el('button', { class: 'btn btn-ghost btn-icon', type: 'button', 'aria-label': '닫기', onclick: dismiss }, '✕');
+    const titleId = 'mv-modal-t' + (++modalSeq);
+    // aria-label 은 남겨 둬요 (sync.js 가 '데이터' 창을 이 이름으로 찾음). 화면 읽기는 aria-labelledby(제목)를 먼저 읽어요
+    const box = el('div', { class: 'modal' + (o.wide ? ' wide' : ''), role: 'dialog', 'aria-modal': 'true', 'aria-label': o.title || '대화상자', 'aria-labelledby': o.title ? titleId : null, tabindex: '-1' },
+      el('div', { class: 'modal-head' }, el('h2', { id: titleId }, o.title || ''), closeBtn),
       el('div', { class: 'modal-body' }, bodyNode),
       foot);
     back.appendChild(box);
     // 배경을 눌렀다 뗐을 때만 닫기 (열자마자 들어오는 더블클릭의 두 번째 누름·드래그로 닫히지 않게)
     let downOnBack = false;
     back.addEventListener('mousedown', (e) => { downOnBack = e.target === back && e.detail < 2; });
-    back.addEventListener('click', (e) => { if (downOnBack && e.target === back) close(); downOnBack = false; });
+    back.addEventListener('click', (e) => { if (downOnBack && e.target === back) dismiss(); downOnBack = false; });
     document.addEventListener('keydown', onKey);
     document.body.appendChild(back);
-    const first = box.querySelector('.modal-body input, .modal-body textarea, .modal-body select') || box.querySelector('.modal-foot .btn-primary');
-    setTimeout(() => { if (first && first.isConnected) first.focus({ preventScroll: true }); }, 30);
-    return { close, root: back, body: bodyNode };
+    api = { close, dismiss, root: back, body: bodyNode };
+    modalStack.push(api);
+    watchModals();
+    syncInert();
+    // 첫 포커스 (o.focus — 머리말 계약). 생략하면 'first'
+    const pickFirst = () => {
+      const fields = box.querySelectorAll('.modal-body input, .modal-body textarea, .modal-body select');
+      for (const n of fields) {
+        if (n.disabled || n.hidden || n.type === 'file' || n.type === 'hidden' || !n.getClientRects().length) continue;
+        return n;
+      }
+      return box.querySelector('.modal-foot .btn-primary:not(:disabled)') || box.querySelector('.modal-foot .btn-danger:not(:disabled)') || closeBtn;
+    };
+    /* 'first' 는 창을 연 그 순간에 있는 것만 봐요 (예전과 같음). 연 뒤에 넣는 칸은 고르지 않아요
+       — 도면 💾 창은 이름 칸을 일부러 연 뒤에 넣어 폰 자판이 목록을 가리지 않게 해요 */
+    const initial = (o.focus == null || o.focus === 'first') ? pickFirst() : null;
+    setTimeout(() => {
+      if (!back.isConnected) return;
+      let f = o.focus;
+      if (typeof f === 'function') { try { f = f(box); } catch (e) { f = null; } }
+      let t = f === 'none' ? box : (f && typeof f.focus === 'function') ? f : (initial || pickFirst());
+      if (!t || !t.isConnected) t = closeBtn;
+      try { t.focus({ preventScroll: true }); } catch (e) { /* 무시 */ }
+    }, 30);
+    return api;
   };
   U.confirm = (msg, o) => new Promise((resolve) => {
     o = o || {};
@@ -1317,6 +1482,8 @@
         { label: o.cancelLabel || '취소', kind: 'ghost', onClick: () => { done = true; resolve(false); } },
         { label: o.okLabel || '확인', kind: o.danger ? 'danger' : 'primary', onClick: () => { done = true; resolve(true); } },
       ],
+      // 지우기 같은 위험한 확인은 Enter 한 번에 실행되지 않게 '취소'에 포커스, 나머지는 확인 단추에
+      focus: o.danger ? (box) => box.querySelector('.modal-foot .btn-ghost') : 'first',
       onClose: () => { if (!done) resolve(false); },
     });
   });
@@ -1357,7 +1524,9 @@
     else if (dd.n < 0) cls = 'bad';
     else if (dd.n <= 3) cls = 'warn';
     else if (dd.n <= 7) cls = 'brand';
-    return MV.el('span', { class: 'chip ' + cls, title: D.fmtLong(due) }, D.fmt(due) + (done ? '' : ' · ' + dd.label));
+    // 할 일 기한 칩 용어: 오늘 · 내일 · D-n · n일 지남 ('D-day'는 이사 날짜에만 — 상단바·이정표의 D.dday)
+    const label = dd.n === 0 ? '오늘' : dd.n === 1 ? '내일' : dd.n > 1 ? 'D-' + dd.n : (-dd.n) + '일 지남';
+    return MV.el('span', { class: 'chip ' + cls, title: D.fmtLong(due) }, D.fmt(due) + (done ? '' : ' · ' + label));
   };
   U.moneyInput = function moneyInput(value, onChange, o) {
     o = o || {};
@@ -1450,6 +1619,43 @@
   };
   let cleanups = [];
   function runCleanups() { cleanups.forEach((fn) => { try { fn(); } catch (e) { console.error(e); } }); cleanups = []; }
+  /* 뒤로 가기 스크롤 기억 (S8) — 주소마다 마지막 스크롤 위치를 기억했다가, 뒤로·앞으로 가기로 돌아오면 그 자리로 되돌려요.
+     해시 이동은 브라우저가 링크를 눌러도 popstate 를 보내서 그것만으로는 뒤로 가기를 알 수 없어요 → 셸이 그린 기록 칸에
+     history.state.mvNav 표시를 남기고, 표시가 있는 칸으로 '옮겨 오면' 뒤로·앞으로 가기로 봐요 (MV.navBack).
+     탭바·링크로 새로 연 화면은 지금처럼 맨 위. ownScroll 화면(체크·가이드·비서)은 스스로 정하니 건드리지 않아요 */
+  const scrollMemo = {};
+  const OWN_SCROLL = { checklist: true, guide: true, agent: true };
+  const ownsScroll = (v) => v.ownScroll === true || (v.ownScroll === undefined && !!OWN_SCROLL[v.name]);
+  let lastHash = null;
+  let navPending = false;     // 기록 이동(popstate) 직후 ~ 다시 그리기 전: 브라우저가 옮긴 스크롤을 기억하지 않아요
+  let navPendingT = 0;
+  let userScrollAt = 0;       // 손가락·휠·키로 직접 움직인 시각 — 되돌리는 중이면 멈춰요
+  let renderSeq = 0;
+  global.addEventListener('scroll', () => { if (!navPending) scrollMemo[global.location.hash || '#/'] = global.scrollY; }, { passive: true });
+  global.addEventListener('popstate', () => {
+    navPending = true;
+    clearTimeout(navPendingT);
+    navPendingT = setTimeout(() => { navPending = false; }, 400);
+  });
+  ['wheel', 'touchstart', 'keydown'].forEach((t) => global.addEventListener(t, () => { userScrollAt = Date.now(); }, { passive: true, capture: true }));
+  MV.navBack = false;
+  function restoreScroll(want) {
+    const seq = renderSeq;
+    const t0 = Date.now();
+    global.scrollTo(0, want);
+    let applied = global.scrollY;
+    let tries = 0;
+    // 화면이 다 그려지기 전이라 끝까지 못 갔으면 몇 프레임 더 (그사이 화면이 스스로 옮겼거나 손을 댔으면 그대로 둬요)
+    const step = () => {
+      if (seq !== renderSeq || userScrollAt > t0) return;
+      const y = global.scrollY;
+      if (Math.abs(y - applied) > 1 || Math.abs(y - want) <= 1) return;
+      global.scrollTo(0, want);
+      applied = global.scrollY;
+      if (++tries < 8) global.requestAnimationFrame(step);
+    };
+    global.requestAnimationFrame(() => global.requestAnimationFrame(step));
+  }
   MV.rerender = function rerender(keepScroll) {
     const root = document.getElementById('view');
     if (!root) return;
@@ -1457,6 +1663,12 @@
     const v = views[r.name] || views.dashboard;
     if (!v) return;
     const sameView = MV.route.name === r.name;
+    const hash = global.location.hash || '#/';
+    let hst = null;
+    try { hst = global.history.state; } catch (e) { /* 무시 */ }
+    MV.navBack = hash !== lastHash && lastHash !== null && !!(hst && typeof hst === 'object' && hst.mvNav);
+    const want = MV.navBack && !ownsScroll(v) && typeof scrollMemo[hash] === 'number' ? scrollMemo[hash] : null;
+    renderSeq++;
     MV.route = { name: v.name, params: r.params };
     runCleanups();
     const scrollY = global.scrollY;
@@ -1475,6 +1687,15 @@
     }
     document.title = (v.title ? v.title + ' · ' : '') + '우리집 이사 관리';
     MV.store.emit('route', MV.route);
-    if (keepScroll || sameView) global.scrollTo(0, scrollY); else global.scrollTo(0, 0);
+    if (keepScroll || sameView) global.scrollTo(0, scrollY);
+    else if (want !== null) restoreScroll(want);
+    else global.scrollTo(0, 0);
+    // 이 기록 칸에 '셸이 그린 적 있음' 표시 (뷰가 그리면서 바꾼 state 는 그대로 두고 덧붙임)
+    try {
+      const s = global.history.state;
+      if (!(s && typeof s === 'object' && s.mvNav)) global.history.replaceState(Object.assign({}, s && typeof s === 'object' && !Array.isArray(s) ? s : {}, { mvNav: 1 }), '');
+    } catch (e) { /* 무시 */ }
+    lastHash = global.location.hash || '#/';
+    navPending = false;
   };
 })(window);

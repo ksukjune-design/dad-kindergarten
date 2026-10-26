@@ -319,7 +319,7 @@ tbl(['무엇', '내용'], [
 ]),
 `<h3 id="howto-steps">순서</h3>
 <ol>
-<li><span class="chip warn">10/12까지</span> 중개사를 통해 C에게 <b>납세증명서·확정일자 부여현황</b> 요청 → ${g('money/protect', '보증금 지키기')}</li>
+<li><span class="chip warn">10/27까지</span> 중개사를 통해 C에게 <b>납세증명서·확정일자 부여현황</b> 요청 → ${g('money/protect', '보증금 지키기')}</li>
 <li><span class="chip warn">10월 중</span> C가 <b>등록임대사업자</b>인지 중개사에게 묻기(<a href="https://www.renthome.go.kr">렌트홈</a>에서도 확인)</li>
 <li><span class="chip">11/2 · 11/3 송금 직전</span> <a href="https://www.iros.go.kr">인터넷등기소</a>에서 <b>등기부 열람</b> — 소유자, 을구 채권최고액 합계, 갑구 신탁·가압류·압류·경매</li>
 <li><span class="chip bad">11/3</span> <b>전입신고 + 확정일자</b>(임대차 신고를 했으면 확정일자가 이미 붙어 있어요)</li>
@@ -376,7 +376,7 @@ tbl(['질문', '\'예\'라면', '\'아니요\'라면'], [
     title: '별첨: HUG 전세보증금반환보증 — 가입하지 않으면?',
     icon: '🛡️',
     summary: '이 집은 보증금이 시세의 약 32%라 원금을 잃을 가능성은 낮지만, 가입하지 않으면 반환이 늦을 때 3.2억(그중 약 3억은 아버지 차용금)이 1~2년 묶일 수 있어요. 결론: 등기부·밀린 세금·등록임대사업자 여부를 확인한 뒤 11월 중 가입(2년 약 68.5만원, 추정, 분납 가능)을 권해요.',
-    updated: '2026-10-08',
+    updated: '2026-10-26',
     html,
     sources: [
       { label: 'HUG 주택도시보증공사 누리집 (가입 조건·보증료 최종 확인)', url: 'https://www.khug.or.kr' },
