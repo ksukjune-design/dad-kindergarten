@@ -708,14 +708,20 @@
 
   /* ---------------- 배치 저장 · 기본 배치로 되돌리기 ----------------
      바꾼 자리는 늘 바로 저장되고, '💾 지금 배치 저장'은 그때 배치를 이름 붙여 따로 남겨 두는 것(체크포인트)이에요.
-     layouts[key].saves = [{ id: 'ls_…', at: ISO, name, auto?: true, placements: [{ id, invId, x, y, rot, n? }] }]  최신이 앞, 많아야 SAVE_MAX 개
+     layouts[key].saves = [{ id: 'ls_…', at: ISO, name, auto?: true, placements: [{ id, invId, x, y, rot, n? }] }]  최신이 앞
        · move/layouts 한 문서라 두 기기가 같이 저장해도 id 로 합쳐져요(sync.js) — 저장한 것은 고치지 않고 더하거나 지우기만
-       · 꽉 차면 오래된 자동 저장부터, 그다음 오래된 것부터 빼요 · 기본값 이전 규칙(core migrateSeed)은 placements 만 봐요
+       · 이름 붙인 저장은 SAVE_MAX 개, 자동 저장(바꾸기 전 배치)은 따로 AUTO_MAX 개까지 — 자동 저장은 이름 붙인 저장을 밀어내지 않아요.
+         넘치면 더한 쪽 종류에서만 오래된 것부터 빼고(지금 불러오는 저장은 빼지 않음), 이름 붙인 것이 빠지면 알림에 이름을 적어요.
+         두 기기가 꽉 찬 채 같이 저장하면 잠깐 넘칠 수 있어요(창에 그대로 보이고, 다음 저장 때 줄여요).
+       · 기본값 이전 규칙(core migrateSeed)은 placements 만 봐요
      기본 배치 = MV.seedLayouts[key] (data-layouts.js — 새 집은 10/24 밤 가족 배치). 방 치수·문(planEdits)은 그대로 둬요.
      불러오기·되돌리기: 짐 목록에서 지웠거나 이 집에 안 가져가는 짐은 빼고, 짐 개수(qty)를 넘는 배치는 줄여요.
+       같은 짐의 지금 배치 id 를 그대로 쓰고 자리만 바꿔요 (다시 놓아 id 가 바뀐 짐도 동기화에서 '옮기기'로 합쳐져 두 번 놓이지 않게).
+       불러올 배치에 없는 짐은 도면에서 빠져 '배치할 짐'으로 돌아가요 — 확인 창과 알림에 몇 개인지 적어요.
        놓인 방 이름(room/roomNew)은 끌어 옮길 때(commitPos)처럼 놓인 방으로 맞춰요 (그 짐이 놓인 방 중 하나면 그대로).
        한 번의 저장(MV.store.update)으로 바꾸고, 바꾸기 전 배치가 저장한 것·기본 배치와 다르면 먼저 자동 저장해요. */
   const SAVE_MAX = 10;
+  const AUTO_MAX = 3;
   const DEFAULT_NAME = { new: '기본 배치 (10/24 밤 가족 배치)', old: '기본 배치 (큰 가전 자리)' };
   const plCopy = (p) => { const o = { id: String(p.id), invId: String(p.invId), x: r1(num(p.x, 0)), y: r1(num(p.y, 0)), rot: rotOf(p) }; if (plN(p) > 1) o.n = plN(p); return o; };
   const okPl = (p) => !!p && typeof p === 'object' && p.id != null && typeof p.invId === 'string';
@@ -757,24 +763,44 @@
     if (!iso || isNaN(d)) return '';
     return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
   };
-  const saveCount = (s) => s.placements.filter(okPl).reduce((t, p) => t + plN(p), 0);
-  /** 저장 하나를 더함 (store.update 안에서). 꽉 차면 오래된 자동 저장부터 빼요 */
+  /** 짐 수 (쌓은 것은 개수대로) — 지운 짐·이 집에 안 가져가는 짐은 빼고, 불러오면 실제로 놓일 수 */
+  const sumN = (list) => list.reduce((t, p) => t + plN(p), 0);
+  const fitCount = (st, key, list) => sumN(fitArrangement(st, key, list).list);
+  /** 이 배치 목록(list)에 짐(invId)을 몇 개 더 놓을 수 있는지 (짐 개수 qty − 이미 놓은 수) */
+  function qtyRoom(st, list, invId) {
+    const it = (st.inventory || []).find((i) => i && i.id === invId);
+    return it ? qtyOf(it) - sumN(list.filter((p) => p && p.invId === invId)) : 0;
+  }
+  /** 다시 넣는 배치(p)를 개수 안으로: 자리가 없으면 null, 쌓은 수가 넘치면 줄여요 */
+  function fitBack(st, list, p) {
+    const room = qtyRoom(st, list, p.invId);
+    if (room < 1) return null;
+    const q = MV.clone(p);
+    if (plN(q) > room) { if (room > 1) q.n = room; else delete q.n; }
+    return q;
+  }
+  /** 저장 목록 줄이기: auto 쪽(자동 저장이면 true) 종류만 max 개로 — 맨 앞(방금 더한 것)과 keepId 는 빼지 않아요 → { list, gone } */
+  function trimSaves(list, auto, keepId) {
+    const max = auto ? AUTO_MAX : SAVE_MAX;
+    const mine = list.filter((x) => !!x.auto === !!auto);
+    const gone = [];
+    for (let k = mine.length - 1, extra = mine.length - max; k > 0 && extra > 0; k--) {
+      if (mine[k].id === keepId) continue;
+      gone.push(mine[k]); extra--;
+    }
+    const g = new Set(gone);
+    return { list: list.filter((x) => !g.has(x)), gone };
+  }
+  /** 저장 하나를 더함 (store.update 안에서) → { s, gone: 넘쳐서 뺀 같은 종류 저장들 } */
   function pushSave(st, key, name, auto, keepId) {
     const L = layoutsOf(st)[key];
     const s = { id: MV.uid('ls'), at: MV.nowISO(), name: String(name || '').trim().slice(0, 40) || fmtAt(MV.nowISO()) + ' 배치', placements: L.placements.filter(okPl).map(plCopy) };
     if (auto) s.auto = true;
     const list = savesOf(L);
     list.unshift(s);
-    while (list.length > SAVE_MAX) {
-      let i = -1;
-      // 지금 불러오는 저장(keepId)은 빼지 않아요
-      for (let k = list.length - 1; k > 0; k--) if (list[k].auto && list[k].id !== keepId) { i = k; break; }
-      if (i < 0) for (let k = list.length - 1; k > 0; k--) if (list[k].id !== keepId) { i = k; break; }
-      if (i < 0) break;
-      list.splice(i, 1);
-    }
-    L.saves = list;
-    return s;
+    const t = trimSaves(list, !!auto, keepId);
+    L.saves = t.list;
+    return { s, gone: t.gone };
   }
   /** 지금 배치를 잃지 않게: 저장한 것·기본 배치 어느 것과도 다르고 비어 있지 않으면 자동 저장 (store.update 안에서) */
   function autoSaveIfNew(st, key, why, keepId) {
@@ -784,20 +810,53 @@
     const sd = seedPls(key);
     if (sd && fitSig(st, key, sd) === now) return null;
     if (savesOf(L).some((s) => fitSig(st, key, s.placements) === now)) return null;
-    return pushSave(st, key, why + ' 자동 저장', true, keepId);
+    return pushSave(st, key, why + ' 자동 저장', true, keepId).s;
   }
-  /** 배치를 통째로 바꿈 (store.update 안에서) → { before, dropped, cut, rooms: { invId: [옛 방, 새 방] } } */
+  /** 지금 배치 → 불러올 배치(src)로 바꾸면 도면에서 빠지는 짐: { off: 개수, offNames: [이름] } (지운 짐·안 가져가는 짐은 빼고 셈) */
+  function offOf(st, key, src) {
+    const cnt = (list) => { const c = new Map(); list.forEach((p) => c.set(p.invId, (c.get(p.invId) || 0) + plN(p))); return c; };
+    const a = cnt(fitArrangement(st, key, layoutsOf(st)[key].placements).list);
+    const b = cnt(fitArrangement(st, key, src).list);
+    let off = 0;
+    const offNames = [];
+    a.forEach((n, iid) => {
+      const d = n - (b.get(iid) || 0);
+      if (d <= 0) return;
+      off += d;
+      const it = (st.inventory || []).find((i) => i && i.id === iid);
+      offNames.push(shortName((it && it.name) || '짐', 16));
+    });
+    return { off, offNames };
+  }
+  /** 배치를 통째로 바꿈 (store.update 안에서) → { before, after, dropped, cut, rooms: { invId: [옛 방, 새 방] } }
+      같은 짐의 지금 배치 id 를 그대로 쓰고 자리(x·y·정면·쌓은 수)만 바꿔요 — 다른 기기가 그 사이 같은 배치를 옮겨도
+      동기화가 '지우기 + 새로 더하기'가 아닌 '같은 배치 고침'으로 합쳐서, 개수 1인 짐이 두 번 놓이지 않아요 */
   function applyArrangement(st, key, list, plan, preferSeed) {
     const L = layoutsOf(st)[key];
     const before = L.placements.map((p) => MV.clone(p));
     const fit = fitArrangement(st, key, list);
-    L.placements = fit.list;
+    const curs = L.placements.filter(okPl);
+    const curById = new Map(curs.map((p) => [String(p.id), p]));
+    const used = new Set();
+    // 1) 불러올 배치 id 가 지금 같은 짐의 배치 id 와 같으면 그대로
+    const ids = fit.list.map((t) => { const c = curById.get(t.id); if (c && c.invId === t.invId && !used.has(t.id)) { used.add(t.id); return t.id; } return null; });
+    // 2) 아니면 같은 짐의 남은 지금 배치 id (놓인 순서대로), 3) 그것도 없으면 불러올 배치 id (겹치면 새 id)
+    const out = fit.list.map((t, i) => {
+      let id = ids[i];
+      if (!id) { const c = curs.find((p) => p.invId === t.invId && !used.has(String(p.id))); if (c) { id = String(c.id); used.add(id); } }
+      if (!id) { id = curById.has(t.id) || used.has(t.id) ? MV.uid('pl') : t.id; used.add(id); }
+      const base = curById.get(id);
+      const p = base ? Object.assign(MV.clone(base), { x: t.x, y: t.y, rot: t.rot }) : { id, invId: t.invId, x: t.x, y: t.y, rot: t.rot };
+      if (plN(t) > 1) p.n = plN(t); else delete p.n;
+      return p;
+    });
+    L.placements = out;
     const rooms = {};
     if (plan) {
       const f = roomField(key);
       const inv = new Map((st.inventory || []).filter((i) => i && i.id).map((i) => [i.id, i]));
       const byInv = new Map();
-      fit.list.forEach((p) => {
+      out.forEach((p) => {
         const it = inv.get(p.invId);
         if (!it) return;
         const r = rectOf(p, it);
@@ -816,7 +875,7 @@
         it[f] = nv;
       });
     }
-    return { before, after: fit.list.map((p) => MV.clone(p)), dropped: fit.dropped, cut: fit.cut, rooms };
+    return { before, after: out.map((p) => MV.clone(p)), dropped: fit.dropped, cut: fit.cut, rooms };
   }
   const samePl = (p, q) => !!p && !!q && p.invId === q.invId && Math.abs(num(p.x, 0) - num(q.x, 0)) < 0.05 && Math.abs(num(p.y, 0) - num(q.y, 0)) < 0.05 && rotOf(p) === rotOf(q) && plN(p) === plN(q);
   /** 바로 되돌리기: 바꾼 배치만 바꾸기 전으로 — 그 뒤 다른 기기·직접 옮긴 배치는 그대로, 그 사이 지운 짐은 빼요.
@@ -837,9 +896,13 @@
         ['x', 'y', 'rot', 'n'].forEach((k) => { if (b[k] === undefined) delete p[k]; else p[k] = b[k]; });
         out.push(p);
       });
-      // 바꾸면서 뺀 배치는 다시 (아직 없으면)
+      // 바꾸면서 뺀 배치는 다시 (아직 없고, 짐 개수 안일 때만 — 그 사이 같은 짐을 다시 놓았으면 두 번 놓지 않아요)
       const have = new Set(out.map((p) => p.id));
-      res.before.forEach((b) => { if (!A.has(b.id) && !have.has(b.id) && ids.has(b.invId)) out.push(MV.clone(b)); });
+      res.before.forEach((b) => {
+        if (A.has(b.id) || have.has(b.id) || !ids.has(b.invId)) return;
+        const q = fitBack(st, out, b);
+        if (q) out.push(q);
+      });
       L.placements = out.filter((p) => ids.has(p.invId));
       const f = roomField(key);
       Object.keys(res.rooms || {}).forEach((iid) => {
@@ -852,13 +915,33 @@
   }
   /** 다른 화면·시험에서도 같은 규칙으로 (화면은 아래 편집 화면의 '💾 저장·되돌리기') */
   MV.calc = MV.calc || {};
+  const srcOf = (st, key, what) => (what === 'default' ? seedPls(key) : (savesOf(layoutsOf(st)[key]).find((s) => s.id === what) || {}).placements);
   MV.calc.planSaves = {
-    list: (key) => savesOf(layoutsOf(MV.store.get())[key === 'old' ? 'old' : 'new']).map((s) => ({ id: s.id, at: s.at, name: s.name, auto: !!s.auto, count: saveCount(s) })),
+    /** count = 불러오면 실제로 놓일 짐 수 (지운 짐·안 가져가는 짐 빼고, 개수 안으로) */
+    list(key) {
+      key = key === 'old' ? 'old' : 'new';
+      const st = MV.store.get();
+      return savesOf(layoutsOf(st)[key]).map((s) => ({ id: s.id, at: s.at, name: s.name, auto: !!s.auto, count: fitCount(st, key, s.placements) }));
+    },
+    /** → { id, name, at, count, gone: [10개를 넘어 뺀 이름 붙인 저장 이름] } */
     save(key, name) {
       key = key === 'old' ? 'old' : 'new';
-      let s = null;
-      MV.store.update((st) => { s = pushSave(st, key, name, false); }, { log: '💾 ' + PLAN_LABEL[key] + ' 배치 저장: ' + (String(name || '').trim().slice(0, 40) || '이름 없음') });
-      return s && { id: s.id, name: s.name, at: s.at, count: saveCount(s) };
+      let r = null;
+      MV.store.update((st) => { r = pushSave(st, key, name, false); }, { log: '💾 ' + PLAN_LABEL[key] + ' 배치 저장: ' + (String(name || '').trim().slice(0, 40) || '이름 없음') });
+      if (!r) return null;
+      const s = r.s;
+      return { id: s.id, name: s.name, at: s.at, count: fitCount(MV.store.get(), key, s.placements), gone: r.gone.map((g) => String(g.name || '이름 없음')) };
+    },
+    /** 바꾸기 전에 알릴 것 (기록은 그대로): { same, name, count, off, offNames, dropped, cut } | null */
+    preview(key, what) {
+      key = key === 'old' ? 'old' : 'new';
+      const st = MV.store.get();
+      const src = srcOf(st, key, what);
+      if (!src) return null;
+      const L = layoutsOf(st)[key];
+      const fit = fitArrangement(st, key, src);
+      const name = what === 'default' ? DEFAULT_NAME[key] : (savesOf(L).find((s) => s.id === what) || {}).name || '저장한 배치';
+      return Object.assign({ same: arrSig(fit.list) === fitSig(st, key, L.placements), name, count: sumN(fit.list), dropped: fit.dropped, cut: fit.cut }, offOf(st, key, src));
     },
     remove(key, id) {
       key = key === 'old' ? 'old' : 'new';
@@ -870,21 +953,22 @@
       }, { log: '🗑 저장한 ' + PLAN_LABEL[key] + ' 배치 지움' });
       return gone;
     },
-    /** what = 저장 id 또는 'default' → { same } | { name, before, dropped, cut, rooms, auto } | null */
+    /** what = 저장 id 또는 'default' → { same } | { name, before, after, dropped, cut, off, offNames, rooms, auto } | null */
     restore(key, what) {
       key = key === 'old' ? 'old' : 'new';
       const st0 = MV.store.get();
       const L0 = layoutsOf(st0)[key];
       const isDef = what === 'default';
-      const src = isDef ? seedPls(key) : (savesOf(L0).find((s) => s.id === what) || {}).placements;
+      const src = srcOf(st0, key, what);
       if (!src) return null;
       const name = isDef ? DEFAULT_NAME[key] : (savesOf(L0).find((s) => s.id === what) || {}).name || '저장한 배치';
       if (fitSig(st0, key, src) === fitSig(st0, key, L0.placements)) return { same: true, name };
       const plan = getPlan(key);
       let res = null;
       MV.store.update((st) => {
+        const off = offOf(st, key, src);
         const auto = autoSaveIfNew(st, key, isDef ? '되돌리기 전' : '불러오기 전', isDef ? null : what);
-        res = applyArrangement(st, key, src, plan, isDef);
+        res = Object.assign(applyArrangement(st, key, src, plan, isDef), off);
         res.auto = auto ? auto.name : null;
         res.name = name;
       }, { log: isDef ? '⟲ ' + PLAN_LABEL[key] + ' 배치를 ' + DEFAULT_NAME[key] + '로 되돌림' : '📂 ' + PLAN_LABEL[key] + ' 배치 불러오기: ' + name });
@@ -894,9 +978,8 @@
     same(key, what) {
       key = key === 'old' ? 'old' : 'new';
       const st = MV.store.get();
-      const L = layoutsOf(st)[key];
-      const src = what === 'default' ? seedPls(key) : (savesOf(L).find((s) => s.id === what) || {}).placements;
-      return !!src && fitSig(st, key, src) === fitSig(st, key, L.placements);
+      const src = srcOf(st, key, what);
+      return !!src && fitSig(st, key, src) === fitSig(st, key, layoutsOf(st)[key].placements);
     },
   };
 
@@ -2803,7 +2886,7 @@ body.fp-sheet:not(:has(.modal-back)) .toast-wrap { bottom: calc(var(--bottom-h) 
 .fp-legwrap > summary::-webkit-details-marker { display: none; }
 .fp-legwrap > summary::before { content: '▸'; color: var(--ink-3); transition: transform .15s; }
 .fp-legwrap[open] > summary::before { transform: rotate(90deg); }
-@media (min-width: 601px) and (min-height: 501px) { .fp-legwrap > summary { display: none; } }
+@media (min-width: 601px) and (min-height: 501px) { .fp-legwrap[open] > summary { display: none; } }
 .fp-touchtip { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; padding: 4px 4px 4px 12px; font-size: .86rem; line-height: 1.45; }
 .fp-touchtip > span { flex: 1 1 auto; min-width: 0; }
 .fp-touchtip .btn { flex: none; }
@@ -2813,7 +2896,7 @@ body.fp-sheet:not(:has(.modal-back)) .toast-wrap { bottom: calc(var(--bottom-h) 
 .fp-savenew { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; padding: 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); }
 .fp-savelab { display: flex; flex-direction: column; gap: 4px; flex: 1 1 180px; min-width: 0; }
 .fp-savenew .btn { flex: 0 0 auto; }
-.fp-saveh { display: flex; align-items: center; gap: 8px; }
+.fp-saveh { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
 .fp-saveh h3, .fp-savedef h3 { margin: 0; font-size: .95rem; }
 .fp-savelist { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .fp-saverow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg-2); }
@@ -3076,6 +3159,13 @@ body.fp-sheet:not(:has(.modal-back)) .toast-wrap { bottom: calc(var(--bottom-h) 
     const underRow = el('div', { class: 'fp-under' }, zoomGrp(zoomV2, 'fp-zoomun'), coarse ? el('span', { class: 'tiny muted fp-dbl' }, '빈 곳 두 번 톡: 2배 ↔ 맞춤') : null);
     // 범례·도움말: 넓은 화면은 늘 펼침, 폰은 접어 둠
     const legWrap = el('details', { class: 'fp-legwrap', open: !compact() }, el('summary', '범례 · 도움말'), legend(), hint);
+    // 좁게 열었다가 넓히면(창 키우기·옆 패널 넓히기) 펼쳐요 — 넓은 화면은 펼친 동안 접는 줄을 숨겨요 (접혀 있으면 줄이 보여 다시 펼 수 있음)
+    if (window.matchMedia) {
+      const mqC = window.matchMedia(COMPACT_Q);
+      const onMqC = () => { if (!mqC.matches) legWrap.open = true; };
+      if (mqC.addEventListener) mqC.addEventListener('change', onMqC); else if (mqC.addListener) mqC.addListener(onMqC);
+      ctx.onCleanup(() => { if (mqC.removeEventListener) mqC.removeEventListener('change', onMqC); else if (mqC.removeListener) mqC.removeListener(onMqC); });
+    }
     const side = el('aside', { class: 'card fp-side', 'aria-label': '배치할 짐 목록' });
     const checks = el('section', { class: 'card fp-checks', 'aria-label': '배치 점검' });
     const laundry = key === 'new' ? el('section', { class: 'card fp-laundry', 'aria-label': '다용도실 세탁기·건조기 점검' }) : null;
@@ -3173,14 +3263,16 @@ body.fp-sheet:not(:has(.modal-back)) .toast-wrap { bottom: calc(var(--bottom-h) 
       document.body.style.removeProperty('--fp-sheet-h');
     }
     ctx.onCleanup(selSheetOff);
+    let sheetSig = '';   // 폰 띠: 마지막으로 '띠 뒤에 숨지 않게' 맞춰 본 짐·자리 (같으면 다시 굴리지 않음)
     function drawSelBar() {
       const o = curSel();
-      if (!o || editMode || wiz || !cur) { selBar.hidden = true; selBar.textContent = ''; selSheetOff(); return; }
+      if (!o || editMode || wiz || !cur) { selBar.hidden = true; selBar.textContent = ''; selSheetOff(); sheetSig = ''; return; }
       const { plan, s } = cur;
       const sheet = compact();
       const parent = sheet ? planCard : stage;
       if (selBar.parentNode !== parent) parent.appendChild(selBar);
       selBar.classList.toggle('is-sheet', sheet);
+      if (!sheet) sheetSig = '';
       const room = roomAt(plan, o.r.x + o.r.w / 2, o.r.y + o.r.h / 2);
       const out = !within(o.r, plan.bounds, 1);
       // 단추 글: 넓은 화면 = 아이콘 + 짧은 글(short), 폰 띠 = 아이콘 아래 작은 글(tiny)
@@ -3219,12 +3311,18 @@ body.fp-sheet:not(:has(.modal-back)) .toast-wrap { bottom: calc(var(--bottom-h) 
         selBar.style.left = selBar.style.top = '';
         selBar.style.opacity = '';
         document.body.classList.add('fp-sheet');
-        // 띠 높이만큼 알림을 올리고, 고른 짐이 띠 뒤에 숨으면 화면을 조금 올려요 (끄는 중·두 손가락 중엔 그대로)
+        // 띠 높이만큼 알림을 올리고, 고른 짐이 띠 뒤에 숨으면 화면을 조금 올려요 (끄는 중·두 손가락 중엔 그대로).
+        // 굴리는 건 짐을 막 골랐거나 옮기거나 돌린 뒤 한 번만 — 격자 켜기·다른 기기 변경처럼 그냥 다시 그릴 때는 화면을 그대로 둬요
+        const sg = pid + '|' + o.p.x + '|' + o.p.y + '|' + rotOf(o.p);
         selRaf = requestAnimationFrame(() => {
           if (selBar.hidden || sel !== pid) return;
           const br = selBar.getBoundingClientRect();
           document.body.style.setProperty('--fp-sheet-h', Math.round(br.height) + 'px');
-          if (drag || pinch || gest || Date.now() - revealAt < 700) return;   // revealSel 이 따로 굴리는 중이면 그대로
+          if (drag || pinch || gest) return;
+          if (sg === sheetSig) return;
+          sheetSig = sg;
+          if (Date.now() - revealAt < 700) return;   // revealSel 이 따로 굴리는 중이면 그대로
+          if (moreOpen || document.querySelector('.modal-back')) return;   // ⋯ 더보기·창을 쓰는 중엔 그대로
           const g = svgEl && svgEl.querySelector('[data-pid="' + CSS.escape(pid) + '"]');
           if (!g) return;
           const gr = g.getBoundingClientRect();
@@ -4108,7 +4206,11 @@ body.fp-sheet:not(:has(.modal-back)) .toast-wrap { bottom: calc(var(--bottom-h) 
             was.forEach((p0, pid) => {
               const p = L.placements.find((x) => x.id === pid);
               if (p) ['x', 'y', 'rot', 'n'].forEach((k) => { if (p0[k] === undefined) delete p[k]; else p[k] = p0[k]; });
-              else if ((st.inventory || []).some((i) => i.id === p0.invId)) L.placements.push(MV.clone(p0));
+              else {
+                // 그 사이 지운 배치는 짐 개수 안일 때만 다시 (같은 짐을 다시 놓았으면 두 번 놓지 않아요)
+                const q = fitBack(st, L.placements, p0);
+                if (q) L.placements.push(q);
+              }
             });
             const nowR = new Map(after ? after.rooms : []);
             rooms.forEach(([id, v]) => {
@@ -4299,10 +4401,20 @@ body.fp-sheet:not(:has(.modal-back)) .toast-wrap { bottom: calc(var(--bottom-h) 
     }
     /* ---- 💾 배치 저장 · 저장한 배치 불러오기 · 기본 배치로 되돌리기 (규칙은 위 MV.calc.planSaves) ---- */
     let savesUI = null;   // 열린 창 { m, draw }
+    let alive = true;     // 화면을 떠나면 false (떠날 때 닫힌 확인 창이 저장 창을 다시 열지 않게)
+    ctx.onCleanup(() => { alive = false; });
     const DEFAULT_DESC = {
       new: '짐 자리만 기본 배치(10/24 밤 가족 배치)로 돌아가요.',
       old: '짐 자리만 처음 넣어 둔 기본 배치(냉장고·세탁기·건조기·에어컨 자리)로 돌아가요.',
     };
+    /** 확인 창에 덧붙일 말 (PS.preview 결과): 도면에서 빠지는 짐 · 목록에 없어 빼는 짐 · 개수를 넘어 줄이는 짐 */
+    function changeNote(pv, where, verb) {
+      const nm = pv.offNames || [];
+      const names = nm.slice(0, 3).join('·') + (nm.length > 3 ? ' 외 ' + (nm.length - 3) + '가지' : '');
+      return (pv.off ? ' ' + where + ' 없는 짐 ' + pv.off + '개(' + names + ')는 도면에서 빠져 “배치할 짐”으로 돌아가요.' : '')
+        + (pv.dropped ? ' 짐 목록에서 지웠거나 이 집에 안 가져가는 짐 ' + pv.dropped + '개는 빼고 ' + verb + '.' : '')
+        + (pv.cut ? ' 짐 개수를 넘는 ' + pv.cut + '개는 줄여서 ' + verb + '.' : '');
+    }
     function openSaves() {
       if (savesUI && savesUI.m && savesUI.m.root && savesUI.m.root.isConnected) return;
       const PS = MV.calc.planSaves;
@@ -4317,21 +4429,31 @@ body.fp-sheet:not(:has(.modal-back)) .toast-wrap { bottom: calc(var(--bottom-h) 
         nameIn.value = '';
         nameIn.placeholder = '예: ' + defName();
         draw();
-        if (s0) toast('지금 배치를 「' + s0.name + '」' + joRo(s0.name) + ' 저장했어요 · 짐 ' + s0.count + '개');
+        if (!s0) return;
+        const g = s0.gone || [];
+        toast('지금 배치를 「' + s0.name + '」' + joRo(s0.name) + ' 저장했어요 · 짐 ' + s0.count + '개'
+          + (g.length ? ' · ' + SAVE_MAX + '개가 넘어 가장 오래된 「' + g.join('」·「') + '」' + jo(g[g.length - 1], '은', '는') + ' 지웠어요' : ''), g.length ? { ms: 7000 } : undefined);
       };
       nameIn.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); doSave(); } });
       const close = () => { if (savesUI && savesUI.m) savesUI.m.close(); };
+      // 확인 창은 저장 창을 닫고 띄워요 (Esc 한 번에 두 창이 같이 닫히지 않게) → '취소'하면 저장 창으로 돌아와요
+      const back = () => { if (alive && root.isConnected) openSaves(); };
       const doLoad = (sv) => {
-        if (PS.same(key, sv.id)) { toast('지금 배치가 「' + sv.name + '」' + jo(sv.name, '과', '와') + ' 같아요'); return; }
+        const pv = PS.preview(key, sv.id);
+        if (!pv) { toast('불러올 배치를 찾지 못했어요 — 다른 기기에서 지웠을 수 있어요'); draw(); return; }
+        if (pv.same) { toast('지금 배치가 「' + sv.name + '」' + jo(sv.name, '과', '와') + ' 같아요'); return; }
         close();
-        ui.confirm('「' + sv.name + '」(' + fmtAt(sv.at) + ' · 짐 ' + sv.count + '개) 배치를 불러올까요? 지금 배치는 잃지 않게 자동으로 저장해 둬요. 방 치수·문 고친 것은 그대로예요.',
-          { okLabel: '📂 불러오기', title: '저장한 배치 불러오기' }).then((ok) => { if (ok) runRestore(sv.id); });
+        ui.confirm('「' + sv.name + '」(' + fmtAt(sv.at) + ' · 짐 ' + pv.count + '개) 배치를 불러올까요?' + changeNote(pv, '이 배치에', '불러와요')
+          + ' 지금 배치는 잃지 않게 자동으로 저장해 둬요. 방 치수·문 고친 것은 그대로예요.',
+          { okLabel: '📂 불러오기', title: '저장한 배치 불러오기' }).then((ok) => { if (ok) runRestore(sv.id); else back(); });
       };
       const doReset = () => {
-        if (PS.same(key, 'default')) { toast('지금 배치가 이미 기본 배치와 같아요'); draw(); return; }
+        const pv = PS.preview(key, 'default');
+        if (!pv || pv.same) { toast('지금 배치가 이미 기본 배치와 같아요'); draw(); return; }
         close();
-        ui.confirm(PLAN_LABEL[key] + ' 짐 자리를 ' + DEFAULT_NAME[key] + joRo(DEFAULT_NAME[key]) + ' 되돌릴까요? 지금 배치는 잃지 않게 자동으로 저장해 둬요. 방 치수·문 고친 것은 그대로예요.',
-          { okLabel: '⟲ 기본 배치로', title: '기본 배치로 되돌리기' }).then((ok) => { if (ok) runRestore('default'); });
+        ui.confirm(PLAN_LABEL[key] + ' 짐 자리를 ' + DEFAULT_NAME[key] + joRo(DEFAULT_NAME[key]) + ' 되돌릴까요?' + changeNote(pv, '기본 배치에', '되돌려요')
+          + ' 지금 배치는 잃지 않게 자동으로 저장해 둬요. 방 치수·문 고친 것은 그대로예요.',
+          { okLabel: '⟲ 기본 배치로', title: '기본 배치로 되돌리기' }).then((ok) => { if (ok) runRestore('default'); else back(); });
       };
       const doDel = (sv) => {
         const gone = PS.remove(key, sv.id);
@@ -4350,11 +4472,17 @@ body.fp-sheet:not(:has(.modal-back)) .toast-wrap { bottom: calc(var(--bottom-h) 
         const L = layoutsOf(st)[key];
         const nowSig = fitSig(st, key, L.placements);
         const list = savesOf(L);
+        const named = list.filter((x) => !x.auto);
+        const autos = list.length - named.length;
+        // 이름 붙인 저장이 꽉 찼으면 하나 더 저장할 때 빠질 것을 미리 (두 기기가 같이 저장해 넘쳤으면 넘친 만큼)
+        const next = named.length >= SAVE_MAX ? named.slice(SAVE_MAX - 1).map((x) => String(x.name || '이름 없음')) : [];
         listBox.textContent = '';
         put(listBox,
-          el('div', { class: 'fp-saveh' }, el('h3', '저장한 배치'), el('span', { class: 'chip' }, list.length + '/' + SAVE_MAX)),
+          el('div', { class: 'fp-saveh' }, el('h3', '저장한 배치'),
+            el('span', { class: 'chip', title: '이름 붙여 저장한 배치 수' }, '이름 ' + named.length + '/' + SAVE_MAX),
+            autos ? el('span', { class: 'chip', title: '바꾸기 전 배치를 자동으로 남긴 수' }, '자동 ' + autos + '/' + AUTO_MAX) : null),
           list.length ? el('ul', { class: 'fp-savelist' }, list.map((sv) => {
-            const n = saveCount(sv);
+            const n = fitCount(st, key, sv.placements);
             const same = fitSig(st, key, sv.placements) === nowSig;
             const row = { id: sv.id, name: String(sv.name || '이름 없음'), at: sv.at, count: n };
             return el('li', { class: 'fp-saverow' + (same ? ' is-now' : '') },
@@ -4367,7 +4495,9 @@ body.fp-sheet:not(:has(.modal-back)) .toast-wrap { bottom: calc(var(--bottom-h) 
                 el('button', { type: 'button', class: 'btn btn-sm fp-b', onclick: () => doLoad(row), 'aria-label': row.name + ' 불러오기' }, '📂 불러오기'),
                 el('button', { type: 'button', class: 'btn btn-sm btn-ghost fp-b', onclick: () => doDel(row), 'aria-label': row.name + ' 지우기' }, '🗑 지우기')));
           })) : el('p', { class: 'small muted mb-0' }, '아직 저장한 배치가 없어요. 위 단추로 지금 배치를 남겨 보세요.'),
-          list.length >= SAVE_MAX ? el('p', { class: 'tiny muted mb-0' }, '저장은 ' + SAVE_MAX + '개까지예요. 더 저장하면 오래된 자동 저장부터, 그다음 오래된 것부터 빠져요.') : null);
+          next.length ? el('p', { class: 'tiny muted mb-0 fp-savecap' }, (named.length > SAVE_MAX ? '두 기기에서 같이 저장해 ' + SAVE_MAX + '개를 넘었어요. ' : '이름 붙인 저장은 ' + SAVE_MAX + '개까지예요. ')
+            + '하나 더 저장하면 가장 오래된 「' + next.join('」·「') + '」' + jo(next[next.length - 1], '이', '가') + ' 빠져요.') : null,
+          autos ? el('p', { class: 'tiny muted mb-0' }, '자동 저장(바꾸기 전 배치)은 이름 붙인 저장과 따로, 최근 ' + AUTO_MAX + '개만 남아요 — 이름 붙인 저장을 밀어내지 않아요.') : null);
         defBox.textContent = '';
         if (!hasDef) return;
         const isDef = PS.same(key, 'default');
@@ -4393,7 +4523,8 @@ body.fp-sheet:not(:has(.modal-back)) .toast-wrap { bottom: calc(var(--bottom-h) 
       if (!res) { toast('불러올 배치를 찾지 못했어요 — 다른 기기에서 지웠을 수 있어요'); return; }
       if (res.same) { toast('지금 배치가 이미 「' + res.name + '」' + jo(res.name, '과', '와') + ' 같아요'); return; }
       sel = null;
-      const extra = [res.dropped ? '목록에 없거나 이 집에 안 가져가는 짐 ' + res.dropped + '개는 뺐어요' : '', res.cut ? '개수를 넘는 ' + res.cut + '개는 줄였어요' : ''].filter(Boolean).join(' · ');
+      const extra = [res.off ? '짐 ' + res.off + '개는 도면에서 빠져 “배치할 짐”으로 돌아갔어요' : '',
+        res.dropped ? '목록에 없거나 이 집에 안 가져가는 짐 ' + res.dropped + '개는 뺐어요' : '', res.cut ? '개수를 넘는 ' + res.cut + '개는 줄였어요' : ''].filter(Boolean).join(' · ');
       toast((what === 'default' ? '기본 배치로 되돌렸어요' : '「' + res.name + '」' + jo(res.name, '을', '를') + ' 불러왔어요') + (extra ? ' — ' + extra : '') + (res.auto ? ' · 바꾸기 전 배치는 「' + res.auto + '」' + joRo(res.auto) + ' 남겼어요' : ''),
         { ms: 8000, action: { label: '되돌리기', onClick: () => { MV.calc.planSaves.undo(key, res); setTimeout(() => toast('바꾸기 전 배치로 돌아왔어요'), 30); } } });
       // 바뀐 도면이 보이게
