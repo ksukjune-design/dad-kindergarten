@@ -604,8 +604,12 @@
       stage.appendChild(wait);
       GL.load().then((ok) => {
         if (closed) return;
-        wait.remove();
-        if (!(ok && glMode())) cssMode();
+        // 창과 '준비하고 있어요'가 먼저 화면에 그려진 뒤에 장면을 만들어요 — 누르자마자 창이 떠요(장면 만들기는 그다음)
+        afterPaint(() => {
+          if (closed) return;
+          wait.remove();
+          if (!(ok && glMode())) cssMode();
+        });
       });
     } else cssMode();
     setTimeout(() => { try { stage.focus({ preventScroll: true }); } catch (err) { /* 무시 */ } }, 30);
@@ -815,6 +819,31 @@
       rebuild();
     }
   }
+
+  /** 다음 화면이 그려진 뒤에 fn (숨긴 탭이면 rAF 가 멈추니 0.5초 뒤에는 그냥 해요) */
+  function afterPaint(fn) {
+    let done = false;
+    const go = () => { if (done) return; done = true; clearTimeout(t); fn(); };
+    const t = setTimeout(go, 500);
+    requestAnimationFrame(() => setTimeout(go, 0));
+  }
+
+  /* ---------------- 3D 그림 도구 미리 불러오기 ----------------
+     도면 화면을 열면 쉬는 틈에 three.js(약 600KB)를 미리 받아 둬요 → '3D로 보기'를 처음 눌러도 받기를 기다리지 않아요.
+     CSS 그림으로 정해 둔 기기 · WebGL 이 안 되는 기기 · 데이터 절약 모드 · 인터넷이 끊긴 때는 받지 않아요. 못 받으면 열 때 다시 받아요
+     (받는 중에 '3D로 보기'를 누르면 같은 받기를 이어서 기다려요 — 두 번 받지 않아요) */
+  let preloaded = false;
+  function preload() {
+    const GL = MV.plan3dGL;
+    if (preloaded || !GL || loadPrefs().engine === 'css') return;
+    const c = navigator.connection;
+    if ((c && c.saveData) || navigator.onLine === false) return;
+    preloaded = true;
+    const run = () => { try { if (GL.supported()) GL.load(); } catch (e) { /* 열 때 다시 해요 */ } };
+    if (window.requestIdleCallback) window.requestIdleCallback(run, { timeout: 4000 });
+    else setTimeout(run, 1500);
+  }
+  if (MV.store && MV.store.on) MV.store.on('route', (r) => { if (r && r.name === 'plan') preload(); });
 
   /* ---------------- 보기 설정 (이 기기에만) ---------------- */
   const PREF_KEY = 'mv:plan3d';

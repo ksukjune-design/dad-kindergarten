@@ -7,6 +7,12 @@
        시점(전체 조감도·방), 문 열림 비율(0 닫힘 ~ 1 열림) — 앞이 막혀 끝까지 못 여는 문·서랍은 열 수 있는 만큼만(주황 테두리)
    단위: 1 = 1m. 세계 X = 도면 x(동), Z = 도면 y(남), Y = 위. 짐 모델은 바닥 가운데가 원점, 정면이 +Z(폭 = X, 깊이 = Z),
          도면 rot(정면 방향 0 남 · 90 서 · 180 북 · 270 동) → rotation.y = −rot.
+   빠르게(보이는 그림은 그대로):
+     · 움직이지 않는 조각은 짐·고정물·벽·바닥마다 재질별로 한 모양으로 합쳐 그려요(전체 조감도 그리기 930번 → 470번쯤). 여닫는 문·서랍·반투명한 것,
+       같은 재질끼리 겹치며 면을 나눠 갖는 조각(모서리)은 따로 — 그래야 모서리 픽셀까지 전과 같아요.
+     · 바뀔 때만 그려요(가만히 있으면 화면 갱신 요청도 멈춰요). 그림자는 장면이 바뀔 때만 다시.
+     · 손가락으로 쓰는 촘촘한 화면(휴대폰·태블릿)은 돌리는 동안만 픽셀을 덜 쓰고, 멈추면 바로 원래 선명도로 다시 그려요(마우스로 쓰는 컴퓨터는 늘 그대로).
+     · 창을 닫아도 그림판(셰이더)·환경광·무늬·재질·모양을 잠시(3분) 남겨 다시 열 때 빨리 떠요. 화면을 숨기거나 3분이 지나면 돌려줘요.
    제공  MV.plan3dGL = { supported(), load() → Promise<boolean>, create(host, P, opt) → 엔진, TABLE }
    ============================================================ */
 (function () {
@@ -33,26 +39,30 @@
     } catch (e) { sup = false; }
     return sup;
   }
-  let loading = null;
+  // 받는 중인 파일은 끝까지 기다려요(같은 파일을 두 번 넣지 않아요 — three.js 가 두 번 돌면 안 돼요). 못 받은 파일만 다음에 새로 받아요
+  const scripts = {};
   function loadScript(src) {
-    return new Promise((res, rej) => {
+    if (scripts[src]) return scripts[src];
+    return (scripts[src] = new Promise((res, rej) => {
       const s = document.createElement('script');
       s.src = src; s.async = false;
-      s.onload = () => res(); s.onerror = () => rej(new Error('불러오기 실패: ' + src));
+      s.onload = () => res();
+      s.onerror = () => { delete scripts[src]; s.remove(); rej(new Error('불러오기 실패: ' + src)); };
       document.head.appendChild(s);
-    });
+    }));
   }
+  let loading = null;
+  /** three.js 받기 → 다 됐으면 true. 부를 때마다 15초까지만 기다려요(느리면 이번 창은 CSS 그림, 받기는 계속 — 다음에 열 때 씀) */
   function load() {
     if (VENDOR.every(([, ok]) => ok())) return Promise.resolve(true);
     if (!loading) {
-      const run = (async () => {
+      loading = (async () => {
         for (const [src, ok] of VENDOR) if (!ok()) await loadScript(src);
         return VENDOR.every(([, ok]) => ok());
-      })();
-      const timeout = new Promise((res) => setTimeout(() => res(false), 15000));
-      loading = Promise.race([run, timeout]).catch(() => false).then((ok) => { if (!ok) loading = null; return ok; });
+      })().catch(() => false).then((ok) => { loading = null; return ok; });
     }
-    return loading;
+    const timeout = new Promise((res) => setTimeout(() => res(false), 15000));
+    return Promise.race([loading, timeout]);
   }
 
   /* ---------------- 재질 · 모양 도우미 ---------------- */
@@ -93,16 +103,17 @@
     return g;
   }
 
+  /** 재질·모양 모음 — 같은 값이면 하나를 같이 써요. 다시 열 때도 그대로 쓰고(셰이더·올린 모양 재사용), 장면을 다 만든 뒤 이번에 안 쓴 것은 버려요(sweep) */
   function kit(T) {
-    const mats = new Map(), geos = new Map(), texs = [];
-    const mat = (key, make) => { if (!mats.has(key)) mats.set(key, make()); return mats.get(key); };
+    const mats = new Map(), geos = new Map(), usedM = new Set(), usedG = new Set();
+    const mat = (key, make) => { usedM.add(key); let m = mats.get(key); if (!m) { m = make(); mats.set(key, m); } return m; };
     const xkey = (extra) => (extra ? Object.keys(extra).sort().map((k) => { const v = extra[k]; return k + ':' + (v && v.uuid ? v.uuid : v && v.isColor ? v.getHexString() : String(v)); }).join(',') : '');
     const std = (color, rough, metal, extra) => mat('s|' + color + '|' + rough + '|' + metal + '|' + xkey(extra),
       () => new T.MeshStandardMaterial(Object.assign({ color: new T.Color(color), roughness: rough == null ? 0.6 : rough, metalness: metal || 0, envMapIntensity: 0.7 }, extra || {})));
     const glass = (color, opacity) => mat('g|' + color + '|' + opacity, () => new T.MeshStandardMaterial({ color: new T.Color(color), roughness: 0.06, metalness: 0.1, envMapIntensity: 1.2, transparent: true, opacity: opacity == null ? 0.45 : opacity, depthWrite: false }));
     const line = (color) => mat('l|' + color, () => new T.LineBasicMaterial({ color: new T.Color(color) }));
     const r3 = (v) => Math.round(v * 1000) / 1000;
-    const cache = (k, make) => { if (!geos.has(k)) geos.set(k, make()); return geos.get(k); };
+    const cache = (k, make) => { usedG.add(k); let g = geos.get(k); if (!g) { g = make(); geos.set(k, g); } return g; };
     const boxGeo = (w, h, d) => cache('b|' + r3(w) + '|' + r3(h) + '|' + r3(d), () => new T.BoxGeometry(Math.max(0.002, w), Math.max(0.002, h), Math.max(0.002, d)));
     const rboxGeo = (w, h, d, r) => cache('r|' + r3(w) + '|' + r3(h) + '|' + r3(d) + '|' + r3(r), () => roundedBoxGeometry(T, Math.max(0.004, w), Math.max(0.004, h), Math.max(0.004, d), 3, r));
     const cylGeo = (rt, rb, h, seg) => cache('c|' + r3(rt) + '|' + r3(rb) + '|' + r3(h) + '|' + (seg || 24), () => new T.CylinderGeometry(rt, rb, Math.max(0.002, h), seg || 24));
@@ -141,7 +152,6 @@
       if (repeat) { t.wrapS = t.wrapT = T.RepeatWrapping; }
       if (T.sRGBEncoding) t.encoding = T.sRGBEncoding;
       t.anisotropy = 4;
-      texs.push(t);
       return t;
     };
     /** 옷 한 벌(어깨선 있는 몸판) — 봉과 직각(폭 = Z), 위 끝(목)이 원점 */
@@ -154,8 +164,111 @@
       g.rotateY(Math.PI / 2);
       return g;
     });
-    const dispose = () => { mats.forEach((m) => m.dispose()); geos.forEach((g) => g.dispose()); texs.forEach((t) => t.dispose()); mats.clear(); geos.clear(); };
-    return { T, std, glass, line, box, rbox, cyl, sph, torus, edges, canvasTex, garmentGeo, boxGeo, put, dispose };
+    let texCache = null;
+    /** 무늬 텍스처(나무결·천·대리석·바구니·바닥) — 한 번 만들어 계속 써요 */
+    const tex = () => texCache || (texCache = textures(K));
+    const begin = () => { usedM.clear(); usedG.clear(); };
+    const sweep = () => {
+      mats.forEach((m, k) => { if (!usedM.has(k)) { m.dispose(); mats.delete(k); } });
+      geos.forEach((g, k) => { if (!usedG.has(k)) { g.dispose(); geos.delete(k); } });
+    };
+    const dispose = () => {
+      mats.forEach((m) => m.dispose()); geos.forEach((g) => g.dispose()); mats.clear(); geos.clear();
+      if (texCache) Object.keys(texCache).forEach((k) => texCache[k].dispose());
+      texCache = null;
+    };
+    const K = { T, std, glass, line, box, rbox, cyl, sph, torus, edges, canvasTex, garmentGeo, boxGeo, put, tex, begin, sweep, dispose };
+    return K;
+  }
+
+  /** 움직이지 않는 조각을 재질(+그림자 설정)별로 한 모양으로 합쳐요 — 그리기 횟수가 줄고, 위치·면 방향·무늬 좌표는 그대로라 그림은 같아요.
+      빼는 것: skip 안(여닫는 문·서랍·의자) · 반투명 · 자식이 있는 조각(테두리 선) · 숨긴 조각 · 뒤집힌(거울) 변환 · 그리는 순서를 정한 것.
+      합친 모양의 상자(boundingBox)는 조각마다 상자를 옮겨 합친 것 — 고른 짐 테두리(Box3.setFromObject)가 전과 똑같아요 */
+  const _mm = { m: null, inv: null, nm: null, b: null };
+  function mergeStatic(T, root, skip) {
+    if (!_mm.m) { _mm.m = new T.Matrix4(); _mm.inv = new T.Matrix4(); _mm.nm = new T.Matrix3(); _mm.b = new T.Box3(); }
+    const { m, inv, nm, b } = _mm;
+    root.updateMatrixWorld(true);
+    inv.copy(root.matrixWorld).invert();
+    const groups = new Map();
+    const ok = (o) => o.isMesh && !o.isInstancedMesh && !o.isSkinnedMesh && o.visible && !o.children.length && o.renderOrder === 0 && !Array.isArray(o.material)
+      && !o.material.transparent && o.geometry && o.geometry.attributes.position && o.geometry.attributes.normal && o.geometry.attributes.uv && !o.geometry.morphAttributes.position;
+    (function walk(o) {
+      for (const c of o.children) {
+        if (skip && skip.has(c)) continue;
+        if (!c.visible) continue;
+        if (ok(c)) {
+          m.multiplyMatrices(inv, c.matrixWorld);
+          if (m.determinant() <= 0) continue;
+          const k = c.material.uuid + '|' + c.castShadow + '|' + c.receiveShadow;
+          let g = groups.get(k);
+          if (!g) groups.set(k, g = []);
+          g.push(c);
+        } else if (!c.isMesh && !c.isLine && !c.isPoints && !c.isSprite) walk(c);
+      }
+    })(root);
+    groups.forEach((all) => {
+      if (all.length < 2) return;
+      // 같은 재질 조각이 겹치면서 같은 평면의 면을 나눠 가지면(옷장 옆판·윗판 모서리 등) 따로 둬요 — 그런 면은 카메라 거리 순서로 보이는 쪽이
+      // 정해지는데, 합치면 순서가 고정돼 모서리 몇 픽셀이 달라져요. 그냥 서로 꿰뚫는 것(의자 다리·틀)은 깊이로 정해져서 합쳐도 같아요
+      const E = 1e-5;
+      const bb = all.map((o) => {
+        const g = o.geometry; if (!g.boundingBox) g.computeBoundingBox();
+        m.multiplyMatrices(inv, o.matrixWorld);
+        const e = m.elements, axis = [0, 4, 8].every((c) => [0, 1, 2].filter((r) => Math.abs(e[c + r]) > 1e-6).length === 1);   // 90° 단위로만 돌았는지
+        const b2 = g.boundingBox.clone().applyMatrix4(m); b2.axis = axis; return b2;
+      });
+      const near = (a, b) => Math.abs(a - b) < E;
+      const hit = (p, q) => p.min.x < q.max.x - E && q.min.x < p.max.x - E && p.min.y < q.max.y - E && q.min.y < p.max.y - E && p.min.z < q.max.z - E && q.min.z < p.max.z - E
+        && (!p.axis || !q.axis || near(p.min.x, q.min.x) || near(p.max.x, q.max.x) || near(p.min.y, q.min.y) || near(p.max.y, q.max.y) || near(p.min.z, q.min.z) || near(p.max.z, q.max.z));
+      const list = all.filter((o, i) => !bb.some((q, j) => j !== i && hit(bb[i], q)));
+      if (list.length < 2) return;
+      let nv = 0, ni = 0;
+      list.forEach((o) => { const g = o.geometry; nv += g.attributes.position.count; ni += g.index ? g.index.count : g.attributes.position.count; });
+      const pos = new Float32Array(nv * 3), nor = new Float32Array(nv * 3), uv = new Float32Array(nv * 2);
+      const idx = nv > 65535 ? new Uint32Array(ni) : new Uint16Array(ni);
+      const box = new T.Box3();
+      let vo = 0, io = 0;
+      const flat = (a, n) => (!a.isInterleavedBufferAttribute && a.itemSize === n && !a.normalized && a.array.length >= a.count * n ? a.array : null);
+      list.forEach((o) => {
+        const g = o.geometry, P = g.attributes.position, N = g.attributes.normal, U = g.attributes.uv;
+        m.multiplyMatrices(inv, o.matrixWorld);
+        nm.getNormalMatrix(m);
+        const e = m.elements, q = nm.elements, pa = flat(P, 3), na = flat(N, 3), ua = flat(U, 2);
+        for (let i = 0; i < P.count; i++) {
+          const x = pa ? pa[i * 3] : P.getX(i), y = pa ? pa[i * 3 + 1] : P.getY(i), z = pa ? pa[i * 3 + 2] : P.getZ(i), j = (vo + i) * 3;
+          pos[j] = e[0] * x + e[4] * y + e[8] * z + e[12]; pos[j + 1] = e[1] * x + e[5] * y + e[9] * z + e[13]; pos[j + 2] = e[2] * x + e[6] * y + e[10] * z + e[14];
+          const u0 = na ? na[i * 3] : N.getX(i), u1 = na ? na[i * 3 + 1] : N.getY(i), u2 = na ? na[i * 3 + 2] : N.getZ(i);
+          const nx = q[0] * u0 + q[3] * u1 + q[6] * u2, ny = q[1] * u0 + q[4] * u1 + q[7] * u2, nz = q[2] * u0 + q[5] * u1 + q[8] * u2;
+          const len = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+          nor[j] = nx / len; nor[j + 1] = ny / len; nor[j + 2] = nz / len;
+          uv[(vo + i) * 2] = ua ? ua[i * 2] : U.getX(i); uv[(vo + i) * 2 + 1] = ua ? ua[i * 2 + 1] : U.getY(i);
+        }
+        if (g.index) { const I = g.index, ia = I.array; for (let k = 0; k < I.count; k++) idx[io++] = ia[k] + vo; }
+        else for (let k = 0; k < P.count; k++) idx[io++] = vo + k;
+        if (!g.boundingBox) g.computeBoundingBox();
+        box.union(b.copy(g.boundingBox).applyMatrix4(m));
+        vo += P.count;
+      });
+      const geo = new T.BufferGeometry();
+      geo.setAttribute('position', new T.BufferAttribute(pos, 3));
+      geo.setAttribute('normal', new T.BufferAttribute(nor, 3));
+      geo.setAttribute('uv', new T.BufferAttribute(uv, 2));
+      geo.setIndex(new T.BufferAttribute(idx, 1));
+      geo.boundingBox = box;
+      geo.boundingSphere = box.getBoundingSphere(new T.Sphere());   // 상자를 감싸는 공(넉넉하게) — 화면 밖 거르기·누르기 검사용, 꼭짓점을 다시 훑지 않아요
+      const first = list[0];
+      const mesh = new T.Mesh(geo, first.material);
+      mesh.castShadow = first.castShadow; mesh.receiveShadow = first.receiveShadow;
+      mesh.userData = Object.assign({}, first.userData, { ownGeo: true, merged: list.length });
+      // 합친 모양은 root 기준 좌표 — 첫 조각 자리에 끼워 둬요(그리는 순서가 전과 비슷하게)
+      const at = root.children.indexOf(first);
+      list.forEach((o) => { if (o.userData.ownGeo) o.geometry.dispose(); o.parent.remove(o); });
+      mesh.parent = root;
+      if (at >= 0) root.children.splice(Math.min(at, root.children.length), 0, mesh); else root.children.push(mesh);
+      mesh.dispatchEvent({ type: 'added' });
+    });
+    return root;
   }
 
   /* 같은 결과가 나오는 가짜 난수 (책 색·높이 등) */
@@ -578,6 +691,8 @@
         g.add(lv);
       }
     }
+    // 움직이지 않는 조각 합치기 (여닫는 문·서랍·의자 그룹은 그대로 따로)
+    mergeStatic(T, g, new Set(movers.map((mv) => mv.rot || mv.slide)));
 
     // 겉 그룹(도면 자리 · 방향) 안에 모델 그룹 — 의자는 모델 그룹을 앞뒤로 옮겨 넣고 빼요
     const outer = new T.Group();
@@ -718,6 +833,7 @@
     } else {
       rbox(g, w, 0.4, d, 0.01, 0, 0.2, 0, std('#d9d4cc', 0.6));
     }
+    mergeStatic(T, g);
     g.position.set(cx / 100, 0, cy / 100);
     g.rotation.y = -deg(rot);
     return { obj: g };
@@ -776,34 +892,88 @@
     return { grain, fabric, marble, weave, wood, tile };
   }
 
+  /* ---------------- 다시 열 때 쓰려고 남겨 두는 그림 도구 ----------------
+     그림판(WebGL 문맥)과 그 안의 셰이더 · 환경광 · 무늬 · 재질 · 모양. 창을 닫으면 장면만 버리고 이것들은 KEEP_MS 동안 남겨 둬요.
+     다시 열면 셰이더를 새로 만들지 않아(가장 오래 걸리는 일) 금방 떠요. 그 사이 문맥을 잃었으면 새로 만들어요. */
+  const KEEP_MS = 180000;
+  let pool = null;
+  const isLost = (r) => { try { return r.getContext().isContextLost(); } catch (e) { return true; } };
+  function freeSet(s) {
+    clearTimeout(s.timer);
+    const lost = isLost(s.renderer);
+    try { s.K.dispose(); if (s.envRT) s.envRT.dispose(); s.renderer.dispose(); if (!lost && s.renderer.forceContextLoss) s.renderer.forceContextLoss(); } catch (e) { /* 무시 */ }
+  }
+  function releasePool() {
+    if (!pool || pool.inUse) return;
+    const s = pool;
+    pool = null;
+    freeSet(s);
+  }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') releasePool(); });
+  /** 그림판 하나 빌리기 — 남겨 둔 것이 있으면 그대로, 없으면 새로 (이미 하나를 쓰는 중이면 이번 것만 따로 만들고 닫을 때 바로 돌려줘요) */
+  function acquire(T, opt) {
+    if (pool && !pool.inUse && (pool.preserve !== !!opt.preserve || isLost(pool.renderer))) releasePool();
+    if (pool && !pool.inUse) { clearTimeout(pool.timer); pool.inUse = true; return pool; }
+    let renderer;
+    try {
+      renderer = new T.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: !!opt.preserve });
+    } catch (e) { return null; }
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = T.PCFSoftShadowMap;
+    renderer.shadowMap.autoUpdate = false;   // 그림자는 장면이 바뀔 때만 다시 (돌려 보기만 할 때는 그대로)
+    renderer.toneMapping = T.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.0;
+    if (T.sRGBEncoding) renderer.outputEncoding = T.sRGBEncoding;
+    renderer.physicallyCorrectLights = true;
+    const s = { renderer, K: kit(T), envRT: null, preserve: !!opt.preserve, inUse: true, timer: 0 };
+    // 남겨 둔 사이에 문맥을 잃으면(GPU 재시작·절전 뒤 깨어남 등) 바로 돌려줘요 — 되살아나도 환경광이 빈 채라 그대로 쓰면 어둡게 그려져요.
+    // 창이 열려 있을 때 잃은 것은 장면 쪽(onRestored)이 환경광을 다시 만들고, 못 살리고 닫으면 dispose 가 돌려줘요
+    renderer.domElement.addEventListener('webglcontextlost', () => { if (pool === s && !s.inUse) releasePool(); });
+    if (!pool) pool = s;
+    return s;
+  }
+
   /* ---------------- 장면 ---------------- */
   function create(host, P, opt) {
     const T = window.THREE;
     opt = opt || {};
     if (T.ColorManagement && 'legacyMode' in T.ColorManagement) T.ColorManagement.legacyMode = false;
-    const K = kit(T);
+    const set = acquire(T, opt);
+    if (!set) return null;
+    const undo = [];   // 장면을 만들다 멈추면 그때까지 시작한 것(그리기·조작·이름표·크기 감시)을 거둬요
+    try { return scene3d(T, set, host, P, opt, undo); } catch (e) {
+      // 만들다 멈추면 빌린 그림판을 돌려줘요(부른 쪽이 CSS 그림으로 바꿔요)
+      undo.forEach((f) => { try { f(); } catch (er) { /* 무시 */ } });
+      set.inUse = false;
+      if (set === pool) pool = null;
+      freeSet(set);
+      if (set.renderer.domElement.parentNode) set.renderer.domElement.remove();
+      throw e;
+    }
+  }
+  function scene3d(T, set, host, P, opt, undo) {
+    const K = set.K, renderer = set.renderer;
+    K.begin();
     const geo = (MV.plan3d && MV.plan3d._geo) || {};
     const B = P.bounds;
     const cx = (B.x + B.w / 2) / 100, cz = (B.y + B.h / 2) / 100;
     let dirty = true, raf = 0, alive = true, tween = null, anim = null, lastView = opt.view || 'all';
-    let renderer = null;
-    const need = (shadows) => { dirty = true; if (shadows && renderer) renderer.shadowMap.needsUpdate = true; };
+    undo.push(() => { alive = false; cancelAnimationFrame(raf); raf = 0; });   // 만들다 멈추면 깨워 둔 그리기를 멈춰요(돌려준 그림판에 그리지 않게)
+    /** 다시 그려 달라고 표시하고, 쉬고 있던 그리기를 깨워요 (shadows: 그림자도 다시) */
+    const need = (shadows) => { dirty = true; if (shadows) renderer.shadowMap.needsUpdate = true; kick(); };
     const span = Math.max(B.w, B.h) / 100;
 
     const W0 = Math.max(200, host.clientWidth || 600), H0 = Math.max(200, host.clientHeight || 400);
-    try {
-      renderer = new T.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: !!opt.preserve });
-    } catch (e) { K.dispose(); return null; }
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    // 픽셀 비율: 멈춰 있을 때는 늘 원래대로(최대 2). 손가락으로 만지는 촘촘한 화면(휴대폰·태블릿)에서 시점이 움직이는 동안만 조금 낮춰요
+    // (마우스로 쓰는 컴퓨터는 고해상도 화면이어도 그대로)
+    const fullPR = Math.min(window.devicePixelRatio || 1, 2);
+    let coarse = false;
+    try { coarse = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches); } catch (e) { /* 그대로 */ }
+    const movePR = coarse && fullPR > 1 ? Math.max(1, Math.round(fullPR * 0.6 * 100) / 100) : fullPR;
+    let curPR = fullPR, lastMove = -1e9, tail = 0, interacting = false, coasting = false;
+    renderer.setPixelRatio(fullPR);
     renderer.setSize(W0, H0);
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = T.PCFSoftShadowMap;
-    renderer.shadowMap.autoUpdate = false;   // 그림자는 장면이 바뀔 때만 다시 (돌려 보기만 할 때는 그대로)
     renderer.shadowMap.needsUpdate = true;
-    renderer.toneMapping = T.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.0;
-    if (T.sRGBEncoding) renderer.outputEncoding = T.sRGBEncoding;
-    renderer.physicallyCorrectLights = true;
     const canvas = renderer.domElement;
     canvas.className = 'p3gl-canvas';
     canvas.setAttribute('aria-hidden', 'true');
@@ -820,9 +990,9 @@
     controls.minDistance = 0.6;
     controls.maxDistance = span * 3;
     controls.screenSpacePanning = true;
+    undo.push(() => controls.dispose());
 
-    // 주변 반사(환경광): 위는 밝고 아래는 따뜻한 회색인 하늘 공 → 금속·거울·유리가 실제처럼 비쳐요
-    let envRT = null;
+    // 주변 반사(환경광): 위는 밝고 아래는 따뜻한 회색인 하늘 공 → 금속·거울·유리가 실제처럼 비쳐요 (한 번 만들어 다시 열 때도 써요)
     function makeEnv() {
       try {
       const pm = new T.PMREMGenerator(renderer);
@@ -831,12 +1001,14 @@
       const sg = new T.SphereGeometry(10, 32, 16);
       const sm = new T.MeshBasicMaterial({ map: sky, side: T.BackSide });
       es.add(new T.Mesh(sg, sm));
-      envRT = pm.fromScene(es, 0.04);
-      scene.environment = envRT.texture;
-      pm.dispose(); sg.dispose(); sm.dispose();
-      } catch (e) { envRT = null; }
+      set.envRT = pm.fromScene(es, 0.04);
+      scene.environment = set.envRT.texture;
+      pm.dispose(); sg.dispose(); sm.dispose(); sky.dispose();
+      } catch (e) { set.envRT = null; }
     }
-    makeEnv();
+    if (set.envRT) scene.environment = set.envRT.texture;
+    else makeEnv();
+    const envRT = set.envRT;
 
     // 빛: 은은한 전체 빛 + 해(그림자) + 푸른 보조광
     scene.add(new T.AmbientLight('#ffffff', envRT ? 0.18 : 0.32));
@@ -864,10 +1036,12 @@
     scene.add(ground);
     K.box(scene, B.w / 100 + 0.3, 0.1, B.h / 100 + 0.3, cx, -0.06, cz, K.std('#1e293b', 0.9), { noCast: true });
 
-    const tex = textures(K);
+    const tex = K.tex();
     // 바닥 무늬 — 방마다가 아니라 집 전체 좌표로 이어지게 (주방·복도·거실 경계에서 나무 판 줄이 이어져요)
     const floorKind = (kind) => (kind === 'bath' ? ['tile', '#7d8a99', 1.2] : kind === 'utility' || kind === 'balcony' || kind === 'storage' ? ['tile', '#a3adb8', 1.2]
       : kind === 'entrance' ? ['tile', '#4b5563', 1.2] : kind === 'bedroom' ? ['wood', C.floorRoom, 1.6] : ['wood', C.floorWood, 1.6]);
+    const floorGroup = new T.Group();
+    scene.add(floorGroup);
     P.rooms.forEach((r) => {
       if (!(r.w > 0 && r.h > 0)) return;
       const [tk, col, per] = floorKind(r.kind);
@@ -880,8 +1054,9 @@
       m.rotation.x = -Math.PI / 2;
       m.position.set((r.x + r.w / 2) / 100, 0.001, (r.y + r.h / 2) / 100);
       m.receiveShadow = true;
-      scene.add(m);
+      floorGroup.add(m);
     });
+    mergeStatic(T, floorGroup);
     // 방 이름 · 남쪽 표시 (바닥 글씨 — 짐·고정물에 덜 가리는 빈 자리에, 테두리 있는 흰 글씨). 카메라 쪽에서 바로 읽히게 90°씩 돌려요
     const floorTexts = [];
     let textTurn = 0;
@@ -905,6 +1080,7 @@
       });
       const mesh = new T.Mesh(new T.PlaneGeometry(size * tw / (fs + 28), size), new T.MeshBasicMaterial({ map: tx, transparent: true, depthWrite: false }));
       mesh.userData.ownGeo = true;
+      mesh.userData.ownMat = true;   // 글씨 무늬·재질은 이 장면 것 — 닫을 때 버려요
       mesh.rotation.x = -Math.PI / 2;
       mesh.position.set(x, 0.004, z);
       mesh.renderOrder = 2;
@@ -966,7 +1142,11 @@
       return { inner: K.std('#f1f5f9', 0.75, 0, { envMapIntensity: 0.4 }), outer: K.std('#cbd5e1', 0.7, 0, { envMapIntensity: 0.4 }) };
     }
     function buildWalls() {
-      while (wallGroup.children.length) wallGroup.remove(wallGroup.children[0]);
+      while (wallGroup.children.length) {
+        const o = wallGroup.children[0];
+        wallGroup.remove(o);
+        if (o.userData.ownGeo && o.geometry) o.geometry.dispose();   // 합친 벽 모양(이 벽 보기에서만 쓴 것)
+      }
       doorObjs.length = 0;
       const M = wallMats(wallMode), winMat = K.glass('#93c5fd', wallMode === 'glass' ? 0.2 : 0.38);
       const hOf = (outer) => (wallMode === 'cut' ? (outer ? CUT.outer : CUT.inner) : FULL_H);
@@ -994,6 +1174,7 @@
         const r = dr.v ? { x: dr.x / 100 + sh, z: (dr.y + dr.w / 2) / 100, w: WALL_T, d: dr.w / 100 } : { x: (dr.x + dr.w / 2) / 100, z: dr.y / 100 + sh, w: dr.w / 100, d: WALL_T };
         add(r.x, DOOR_H, r.z, r.w, FULL_H - DOOR_H, r.d, M.inner, false);
       });
+      mergeStatic(T, wallGroup);   // 벽 조각도 재질별로 (겹치는 모서리 조각은 따로 · 문짝은 아래에서 따로)
       buildDoors();
       need(true);
     }
@@ -1091,11 +1272,13 @@
 
     buildWalls();
     applyRatio();
+    K.sweep();   // 지난번에 쓰고 이번 장면에는 없는 재질·모양은 버려요(남겨 둔 것이 쌓이지 않게)
 
     // 이름표 (화면 위 글씨) — 짐을 따라 움직이고(의자 넣기·빼기), 겹치면 키 큰 짐 것만 보여요. 같은 짐 여러 개(의자 4)는 하나로
     const labelLayer = document.createElement('div');
     labelLayer.className = 'p3gl-labels';
     host.appendChild(labelLayer);
+    undo.push(() => labelLayer.remove());
     let labelsOn = !!opt.labels;
     const labels = [];
     const seenInv = {};
@@ -1195,17 +1378,19 @@
     }
     view(lastView, 0);
 
-    // 그리기 (바뀔 때만 — 그림자는 장면이 바뀔 때만 다시)
+    // 그리기 (바뀔 때만 — 그림자는 장면이 바뀔 때만 다시). 할 일이 없으면 화면 갱신 요청도 멈추고, need()·조작이 다시 깨워요
     controls.addEventListener('change', () => need());
+    function kick() { if (!raf && alive) raf = requestAnimationFrame(frame); }
     function frame(now) {
+      raf = 0;
       if (!alive) return;
-      raf = requestAnimationFrame(frame);
+      let moved = false;
       if (anim) {
         const k = clamp((now - anim.t0) / anim.ms, 0, 1), e = 1 - Math.pow(1 - k, 3);
         camera.position.lerpVectors(anim.p0, anim.p1, e);
         controls.target.lerpVectors(anim.t0v, anim.t1, e);
         if (k >= 1) anim = null;
-        dirty = true;
+        dirty = true; moved = true;
       }
       if (tween) {
         const k = clamp((now - tween.t0) / tween.ms, 0, 1), e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
@@ -1215,14 +1400,26 @@
         if (k >= 1) { tween = null; if (opt.onRatio) opt.onRatio(ratio); }
         dirty = true;
       }
-      if (controls.update()) dirty = true;
-      if (!dirty) return;
-      dirty = false;
-      turnFloorTexts();
-      renderer.render(scene, camera);
-      placeLabels();
+      const camMoved = controls.update();   // 끌기·관성(damping)
+      if (camMoved) { dirty = true; lastMove = now; }
+      if (camMoved || anim || interacting) tail = 90;   // 관성이 아주 작게 남은 것까지 1.5초쯤 더 풀어 줘요(그릴 것이 없으면 그리지 않아요)
+      else if (tail > 0) tail--;
+      if (!camMoved && !interacting) coasting = false;
+      // 손으로 돌리는 중·놓은 뒤 미끄러지는 중·시점 옮기는 중에만 픽셀 비율을 낮추고(촘촘한 화면만), 멈추면 바로 원래 비율로 다시 그려요
+      const low = moved || ((interacting || coasting) && now - lastMove < 100);
+      const pr = low ? movePR : fullPR;
+      if (pr !== curPR) { curPR = pr; renderer.setPixelRatio(pr); dirty = true; }
+      if (dirty) {
+        dirty = false;
+        turnFloorTexts();
+        renderer.render(scene, camera);
+        placeLabels();
+      }
+      if (anim || tween || tail > 0 || curPR !== fullPR) kick();
     }
-    raf = requestAnimationFrame(frame);
+    controls.addEventListener('start', () => { interacting = true; coasting = false; });
+    controls.addEventListener('end', () => { interacting = false; coasting = true; kick(); });
+    kick();
     function setRatio(r, animate) {
       r = clamp(num(r, 0), 0, 1);
       if (animate && Math.abs(r - ratio) > 0.01) { tween = { t0: performance.now(), ms: 600, a: ratio, b: r }; need(); return; }
@@ -1240,7 +1437,11 @@
       down = act.size === 1 ? { x: e.clientX, y: e.clientY, id: e.pointerId } : null;
       if (opt.onTouch) opt.onTouch();
     };
-    const onCancel = (e) => { act.delete(e.pointerId); if (!act.size) multi = false; down = null; };
+    // 손가락 끌기가 취소되면(스크롤·제스처로 넘어감 등) 돌리기 조작은 'end' 없이 끝나요 → 놓았을 때처럼 마무리해야 그리기가 다시 쉬어요
+    const onCancel = (e) => {
+      act.delete(e.pointerId); down = null;
+      if (!act.size) { multi = false; if (interacting) { interacting = false; coasting = true; kick(); } }
+    };
     const onUp = (e) => {
       act.delete(e.pointerId);
       const wasMulti = multi;
@@ -1278,10 +1479,11 @@
     }
     const ro = window.ResizeObserver ? new ResizeObserver(resize) : null;
     if (ro) ro.observe(host);
+    undo.push(() => { if (ro) ro.disconnect(); });
     // 그림 문맥을 잃으면(기기 메모리 부족 등) 브라우저가 되살릴 때까지 3초 기다리고, 안 돌아오면 알려요. 돌아오면 환경광·그림자를 다시
     let lostT = 0;
     const onLost = (e) => { e.preventDefault(); clearTimeout(lostT); if (alive && opt.onLost) lostT = setTimeout(() => { if (alive) opt.onLost(); }, 3000); };
-    const onRestored = () => { clearTimeout(lostT); if (!alive) return; envRT = null; makeEnv(); need(true); };   // 잃은 문맥의 옛 환경광은 이미 사라져서 버리기만
+    const onRestored = () => { clearTimeout(lostT); if (!alive) return; set.envRT = null; makeEnv(); need(true); };   // 잃은 문맥의 옛 환경광은 이미 사라져서 버리기만
     canvas.addEventListener('webglcontextlost', onLost);
     canvas.addEventListener('webglcontextrestored', onRestored);
     // 손으로 돌리면 '마지막 시점'은 잊어요(창 크기가 바뀌어도 손으로 맞춘 시점을 지켜요)
@@ -1293,6 +1495,7 @@
     function dispose() {
       alive = false;
       cancelAnimationFrame(raf);
+      raf = 0;
       if (ro) ro.disconnect();
       clearTimeout(lostT);
       canvas.removeEventListener('webglcontextlost', onLost);
@@ -1302,16 +1505,23 @@
       canvas.removeEventListener('pointerdown', onDown);
       canvas.removeEventListener('pointerup', onUp);
       controls.dispose();
-      scene.traverse((o) => { if (o.userData && o.userData.ownGeo && o.geometry) o.geometry.dispose(); if (o.isLineSegments && o.geometry) o.geometry.dispose(); if (o.userData && o.userData.ownGeo && o.material && o.material.map) { o.material.map.dispose(); o.material.dispose(); } });
+      // 이 장면에서만 쓴 것: 합친 모양 · 테두리 선 · 바닥 글씨(무늬·재질) · 고른 짐 테두리 · 땅 · 그림자 지도
+      scene.traverse((o) => {
+        if (o.userData && o.userData.ownGeo && o.geometry) o.geometry.dispose();
+        if (o.isLineSegments && o.geometry) o.geometry.dispose();
+        if (o.userData && o.userData.ownMat && o.material) { if (o.material.map) o.material.map.dispose(); o.material.dispose(); }
+      });
       if (selBox) { selBox.geometry.dispose(); selBox.material.dispose(); }
       ground.geometry.dispose(); ground.material.dispose();
-      if (envRT) envRT.dispose();
       sun.dispose();
-      K.dispose();
-      renderer.dispose();
-      if (renderer.forceContextLoss) try { renderer.forceContextLoss(); } catch (e) { /* 무시 */ }
       canvas.remove();
       labelLayer.remove();
+      // 그림판·셰이더·환경광·재질·모양은 다시 열 때 쓰려고 잠시 남겨요 (따로 만든 것이거나 문맥을 잃었으면 바로 돌려줘요)
+      set.inUse = false;
+      if (set !== pool || isLost(renderer)) { if (set === pool) pool = null; freeSet(set); return; }
+      renderer.renderLists.dispose();
+      renderer.setSize(1, 1, false);   // 큰 그림 버퍼는 돌려줘요
+      set.timer = setTimeout(releasePool, KEEP_MS);
     }
 
     // 키보드: ←→ 돌리기 · ↑↓ 위아래 각도 · +− 확대 (CSS 그림과 같은 키)
