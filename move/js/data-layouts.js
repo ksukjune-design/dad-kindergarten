@@ -7,6 +7,8 @@
            바닥 크기는 0·180 이 가로 w × 깊이 d, 90·270 이 d × w (옛 기록의 0·90 은 뜻이 그대로예요)
      개수가 여럿인 짐(의자 4·캐비닛장 ① 2·어린이책장 3)은 같은 invId 로 배치를 여러 개 둠 (도면 화면도 같은 방식)
    - 처음 여는 기기: core.js freshState 가 MV.seedLayouts 를 그대로 씀.
+   - 도면 화면 '💾 저장·되돌리기 › ⟲ 기본 배치로 되돌리기'도 이 MV.seedLayouts 로 돌아가요(view-floorplan.js MV.calc.planSaves —
+     짐 자리만, 방 치수·문은 그대로). 여기 자리를 바꾸면 그 '기본 배치'도 함께 바뀌어요.
    - 이미 쓰던 기록: 이 파일 끝에서 MV.seed.migrations 에 { to: 8, layouts } 를 더함 (core migrateSeed 의 layouts 규칙)
        · move: 그 배치가 아직 v7 기본 자리(from)에 있을 때만 새 자리(set)로 — 사용자가 옮긴 배치는 그대로
        · move 도 새 자리에 다른 배치가 있으면 옮기지 않고 활동 기록에 남겨요
