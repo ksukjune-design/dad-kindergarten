@@ -335,17 +335,22 @@
      · 이미 완료한 항목은 건드리지 않음(완료 날짜·메모 그대로). 지운 항목은 되살리지 않음
      · 메모 id·시각과 고친 시각(updatedAt — 기본 데이터 버전 시각, 더 늦게 고친 항목은 그대로)이 정해진 값이라
        두 기기가 같이 맞춰도 글자 하나까지 같아요(공유 기록에서 메모가 두 번 생기거나 엇갈리지 않음)
+     · keepAfter?: 'ISO 시각' (체크포인트 백업을 받은 시각, 예: version 21) — 그 뒤에 손댄 항목(updatedAt 이 더 늦음)은 건드리지 않아요.
+       체크포인트 뒤에 가족이 체크를 푼 항목을 새 버전이 다시 체크하지 않게. 기본 데이터가 맞추며 적은 시각(지금 버전 시각 —
+       새로 여는 기기·이번에 더한 항목)은 손댄 것으로 보지 않아요
      → 완료로 바꾼 항목 배열 */
   function completeSeedItems(state, m, seed) {
     const day = ruleDay(m, seed);
     const at = seedAt(seed);
     const nid = 'nt_seed_v' + m.to + '_done';
     const done = [];
+    const keepAfter = typeof m.keepAfter === 'string' && m.keepAfter ? m.keepAfter : '';
     // onlyCreated: 이 기록(meta.createdAt)일 때만 — 우리 가족 기록의 백업에서 되살리는 완료 표시를 새로 여는 기기·다른 기록엔 하지 않게
     if (Array.isArray(m.onlyCreated) && !m.onlyCreated.includes(String((state.meta && state.meta.createdAt) || ''))) return done;
     Object.keys(m.completeItems || {}).forEach((iid) => {
       const it = (state.items || []).find((x) => x && x.id === iid);
       if (!it || it.done) return;
+      if (keepAfter && typeof it.updatedAt === 'string' && it.updatedAt > keepAfter && it.updatedAt !== at) return;
       // 값: '메모 한 줄' 또는 { note?: '메모', at?: 'ISO 시각' } — at 이 있으면 그 시각을 완료 시각으로 (예: 백업에 남은 체크 시각)
       const v = m.completeItems[iid];
       const obj = v && typeof v === 'object';
@@ -482,6 +487,27 @@
         (Array.isArray(v) ? v : [v]).forEach((h) => { if (typeof h === 'string') { if (!prev.has(iid)) prev.set(iid, new Set()); prev.get(iid).add(h); } });
       });
     });
+    // 예전 기본값이 새 기기에서 미리 완료로 만든 항목 다시 열기: { reopenItems: { id: '그 규칙이 적은 완료 시각' }, reopenNote?: 글({n}·{list}) }
+    //  · 기본 항목이고, 완료 시각이 그 값 그대로, 만든 뒤 한 번도 안 고침(updatedAt === createdAt)일 때만 — 새로 연 기기가
+    //    예전 completeItems 로 받은 완료 표시를 손대지 않은 것만이에요(가족이 체크·메모·글을 고친 항목은 고친 시각이 달라 그대로.
+    //    같은 기기가 처음 열 때 기본 데이터가 되살린 가족 메모(itemNotes)는 고친 시각이 그대로라 손대지 않은 것으로 봐요).
+    //  · 가족이 나중에 다시 연 할 일(예: version 21 의 money-01)을 그런 기기에서도 열어요. 고친 시각은 그대로(아래에서 새 기본 글로 바뀌게)
+    const reopened = new Set();     // 다시 연 항목 — 아래에서 메모가 있어도(기본 데이터가 되살린 메모) 새 기본 글로 바꿔요
+    const reopenedBy = [];          // [규칙, 다시 연 항목들] — 활동 기록 한 줄(새 글로 바꾼 뒤의 제목으로)
+    (seed.migrations || []).forEach((m) => {
+      if (!(m.to > from && m.to <= seed.version) || !m.reopenItems) return;
+      const opened = [];
+      Object.keys(m.reopenItems).forEach((iid) => {
+        const it = state.items.find((x) => x && x.id === iid);
+        if (!it || !it.seed || !it.done || it.doneAt !== m.reopenItems[iid]) return;
+        if (!(typeof it.updatedAt === 'string' && it.updatedAt === it.createdAt)) return;
+        it.done = false;
+        it.doneAt = null;
+        reopened.add(it.id);
+        opened.push(it);
+      });
+      if (opened.length) { n += opened.length; reopenedBy.push([m, opened]); }
+    });
     // 손대지 않은 기본 항목(완료·메모 없음, 한 번도 고치지 않았거나 글이 직전 기본값 그대로)은 새 기본 내용으로 바꿔요.
     // 숫자(n)에는 글·날짜·중요도·링크가 실제로 바뀐 항목만 셈 — 보이지 않는 옛 담당(owner)은 조용히 지움
     const seedItems = new Map((seed.items || []).map((x) => [x.id, x]));
@@ -489,7 +515,7 @@
     const sv = (sp, k) => (sp[k] === undefined ? (k === 'due' ? null : k === 'priority' ? 'mid' : '') : sp[k]);
     state.items.forEach((it) => {
       const sp = seedItems.get(it.id);
-      if (!sp || !it.seed || it.done || (it.notes && it.notes.length)) return;
+      if (!sp || !it.seed || it.done || (it.notes && it.notes.length && !reopened.has(it.id))) return;
       const untouched = it.updatedAt === it.createdAt || (prev.has(it.id) && prev.get(it.id).has(itemPrint(it)));
       if (!untouched) return;
       const changed = keys.some((k) => sv(sp, k) !== (it[k] === undefined ? sv({}, k) : it[k]))
@@ -499,6 +525,11 @@
       keys.forEach((k) => { it[k] = MV.clone(sv(sp, k)); });
       it.links = MV.clone(sp.links || []);
       n++;
+    });
+    reopenedBy.forEach(([m, opened]) => {
+      const shown = opened.map((it) => '「' + String(it.title || it.id).slice(0, 26) + '」').join(', ');
+      noteOnce('seed-v' + m.to + '-reopen', (m.reopenNote || '예전 기본값이 미리 완료로 표시했던 할 일 {n}개를 다시 열었어요: {list} — 이미 끝낸 일이면 다시 체크하세요.')
+        .replace('{n}', String(opened.length)).replace('{list}', shown));
     });
     (seed.migrations || []).forEach((m) => {
       if (!(m.to > from && m.to <= seed.version)) return;
@@ -510,6 +541,39 @@
         const same = Object.keys(f).every((k) => p[k] === f[k]);
         if (!same) return;
         ['name', 'emoji', 'group', 'desc', 'guide'].forEach((k) => { if (sp[k] !== undefined) p[k] = sp[k]; });
+        n++;
+      });
+      // 완료·메모 때문에 새 글로 못 바뀐 옛 기본 글: { refreshItems: { id: 옛 기본 글 지문 | [지문…] } }
+      //  · 기본 항목이고 지금 글 전체(itemPrint — 파트·제목·설명·마감·중요도·가이드·링크)가 적힌 옛 기본 글과 똑같을 때만 지금 기본 글로.
+      //    완료·메모가 있어도 바꾸고, 완료 표시·완료 시각·메모·순서는 그대로. 고친 시각은 기본 데이터 버전 시각(더 늦게 고친 항목은 그대로)
+      //  · 가족이 한 글자라도 고친 항목은 지문이 달라 그대로예요
+      Object.keys(m.refreshItems || {}).forEach((iid) => {
+        const it = state.items.find((x) => x && x.id === iid);
+        const sp = seedItems.get(iid);
+        if (!it || !sp || !it.seed) return;
+        const v = m.refreshItems[iid];
+        if ((Array.isArray(v) ? v : [v]).indexOf(itemPrint(it)) < 0) return;
+        keys.forEach((k) => { it[k] = MV.clone(sv(sp, k)); });
+        it.links = MV.clone(sp.links || []);
+        if (!(typeof it.updatedAt === 'string' && it.updatedAt > seedAt(seed))) it.updatedAt = seedAt(seed);
+        n++;
+      });
+      // 칸 하나만 고치기: { itemFields: { id: { from: { 칸: 값 }, set: { 칸: 값 }, ifUpdatedAt?: 'ISO' | ['ISO'…] } } }
+      //  · from 칸이 모두 그 값일 때만 set 으로 (파트·제목·설명·마감·중요도·가이드 칸만 — 완료·메모는 건드리지 않음)
+      //  · ifUpdatedAt: 그 항목의 고친 시각(updatedAt)이 이 값일 때만 — 가족이 고친 값(마감 등)을 되돌리는 규칙은 꼭 붙여요.
+      //    그 낡은 사본에만 맞고, 가족이 그 뒤에 같은 값으로 다시 고친 항목(고친 시각이 다름)은 그대로예요(예: version 21 money-01)
+      Object.keys(m.itemFields || {}).forEach((iid) => {
+        const it = state.items.find((x) => x && x.id === iid);
+        const r = m.itemFields[iid] || {};
+        const f = r.from && typeof r.from === 'object' ? r.from : {};
+        const set = r.set && typeof r.set === 'object' ? r.set : {};
+        const fk = Object.keys(f).filter((k) => keys.indexOf(k) >= 0);
+        const sk = Object.keys(set).filter((k) => keys.indexOf(k) >= 0);
+        if (!it || !fk.length || !sk.length) return;
+        if (r.ifUpdatedAt !== undefined && [].concat(r.ifUpdatedAt).indexOf(it.updatedAt) < 0) return;
+        if (!fk.every((k) => (it[k] === undefined ? sv({}, k) : it[k]) === f[k]) || sk.every((k) => it[k] === set[k])) return;
+        sk.forEach((k) => { it[k] = MV.clone(set[k]); });
+        if (!(typeof it.updatedAt === 'string' && it.updatedAt > seedAt(seed))) it.updatedAt = seedAt(seed);
         n++;
       });
       // 가족 메모 되살리기: { itemNotes: { id: [{ id, text, at }] } } (addSeedNotes 머리말)
@@ -811,12 +875,16 @@
     const itemIds = new Set(state.items.map((i) => i.id));
     const invIds = new Set(state.inventory.map((i) => i.id));
     let added = 0;
+    let addedOwn = 0;   // 기본 데이터에 옮겨 둔 가족 할 일(seed: false — 예: version 21 의 it_mvo…)을 더한 수
     (seed.parts || []).forEach((p, i) => {
       if (!partIds.has(p.id) && !deleted.has(p.id)) { state.parts.push(Object.assign({ order: 100 + i }, MV.clone(p))); added++; }
     });
     const at = seedAt(seed);
     (seed.items || []).forEach((it, i) => {
-      if (!itemIds.has(it.id) && !deleted.has(it.id)) { state.items.push(normItem(Object.assign({ order: 1000 + i, createdAt: at, updatedAt: at }, MV.clone(it)), true)); added++; }
+      if (!itemIds.has(it.id) && !deleted.has(it.id)) {
+        state.items.push(normItem(Object.assign({ order: 1000 + i, createdAt: at, updatedAt: at }, MV.clone(it)), true));
+        if (it.seed === false) addedOwn++; else added++;
+      }
     });
     (seed.inventory || []).forEach((it) => {
       if (!invIds.has(it.id) && !deleted.has(it.id)) { state.inventory.push(normInv(MV.clone(it), true)); added++; }
@@ -827,8 +895,13 @@
     const hasKey = (k) => state.activity.some((a) => a && a.key === k);
     const kFix = 'seed-v' + seed.version + '-fix';
     const kAdd = 'seed-v' + seed.version + '-add';
-    if (migrated && !hasKey(kFix)) state.activity.unshift({ at: MV.nowISO(), key: kFix, text: '기본 파트·항목·짐 목록·도면 배치를 새 버전에 맞췄습니다 (' + migrated + '곳, 고친 내용·완료·메모·직접 옮긴 배치는 그대로).' });
-    if (added && !hasKey(kAdd)) state.activity.unshift({ at: MV.nowISO(), key: kAdd, text: '새 기본 항목 ' + added + '개를 추가했습니다 (기존 메모·완료 표시는 그대로).' });
+    if (migrated && !hasKey(kFix)) state.activity.unshift({ at: MV.nowISO(), key: kFix, text: '기본 파트·항목·짐 목록·도면 배치를 새 버전에 맞췄어요 (' + migrated + '곳, 고친 내용·완료·메모·직접 옮긴 배치는 그대로예요).' });
+    if ((added || addedOwn) && !hasKey(kAdd)) {
+      const parts = [];
+      if (added) parts.push('새 기본 항목 ' + added + '개');
+      if (addedOwn) parts.push('다른 기기에서 더한 할 일 ' + addedOwn + '개');
+      state.activity.unshift({ at: MV.nowISO(), key: kAdd, text: parts.join('와 ') + '를 이 기록에도 넣었어요 (메모·완료 표시는 그대로예요).' });
+    }
     return true;
   }
   function validState(s) {
@@ -991,12 +1064,15 @@
     const p = st.parts.find((x) => x.id === id);
     if (p) Object.assign(p, patch);
   });
+  /* 기본 데이터(MV.seed.items)에 있는 할 일 id 인지 — 가족이 만든 할 일을 같은 id 로 기본 항목에 옮긴 것(version 21)은
+     그 기록에서 seed:false 라도 지우면 meta.deletedSeed 에 적어요(다음 버전에서 mergeSeed 가 다시 더하지 않게) */
+  const inSeedItems = (id) => !!(MV.seed && Array.isArray(MV.seed.items) && MV.seed.items.some((x) => x && x.id === id));
   P.remove = (id) => S.update((st) => {
     const p = st.parts.find((x) => x.id === id);
     st.parts = st.parts.filter((x) => x.id !== id);
     const gone = st.items.filter((i) => i.partId === id);
     st.items = st.items.filter((i) => i.partId !== id);
-    st.meta.deletedSeed.push(id, ...gone.filter((i) => i.seed).map((i) => i.id));
+    st.meta.deletedSeed.push(id, ...gone.filter((i) => i.seed || inSeedItems(i.id)).map((i) => i.id));
     if (p) S.log('파트 삭제: ' + p.name + ' (항목 ' + gone.length + '개 포함)', true);
   });
   P.stats = function stats(id) {
@@ -1050,7 +1126,7 @@
   I.remove = (id) => S.update((st) => {
     const it = st.items.find((x) => x.id === id);
     st.items = st.items.filter((x) => x.id !== id);
-    if (it && it.seed) st.meta.deletedSeed.push(it.id);
+    if (it && (it.seed || inSeedItems(it.id))) st.meta.deletedSeed.push(it.id);
     if (it) S.log('항목 삭제: ' + it.title, true);
   });
   I.toggle = (id) => {

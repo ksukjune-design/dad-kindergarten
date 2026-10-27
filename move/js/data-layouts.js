@@ -256,6 +256,16 @@
     new: { placements: NEW.map(([p]) => Object.assign({}, p)) },
     old: { placements: OLD.map(([p]) => Object.assign({}, p)) },
   };
+  /* version 21 체크포인트: 새 집 기본 배치의 배열 순서만 가족 기록(10/27 16:57 백업)과 같게 — 자리·정면·쌓은 수는 그대로.
+     (이전 규칙이 읽는 NEW·NEW15·NEW16 목록은 그대로 두고, 새로 여는 기기·'기본 배치로 되돌리기'가 쓰는 이 복사본만 정렬해요) */
+  {
+    const FAMILY_ORDER = ['fridge', 'washer', 'dryer', 'ac', 'hanger', 'sofa', 'dining', 'chair-1', 'chair-2', 'chair-3', 'chair-4', 'toy',
+      'bed', 'vanity', 'chest', 'cabinet2', 'cabinet-1', 'cabinet-2', 'alex', 'desk', 'bookshelf', 'kidshelf-1', 'kidshelf-2', 'kidshelf-3',
+      'mwcab', 'trash', 'basket', 'trolley3', 'trolley2', 'kid-desk', 'box-1', 'box-6'].map((s) => 'pl-new-' + s);
+    const rank = (p) => { const i = FAMILY_ORDER.indexOf(p.id); return i < 0 ? FAMILY_ORDER.length : i; };
+    MV.seedLayouts.new.placements = MV.seedLayouts.new.placements
+      .map((p, i) => ({ p, i })).sort((a, b) => rank(a.p) - rank(b.p) || a.i - b.i).map((x) => x.p);
+  }
 
   /* 옛 기록(v7 이하) → v8: v7 기본 배치 자리(from)에 그대로 있으면 새 자리로, 나머지는 새로 더함 */
   const V7_AT = {
