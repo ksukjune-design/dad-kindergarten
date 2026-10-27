@@ -51,7 +51,30 @@
   const shortName = (s, n) => { const a = Array.from(String(s || '').replace(/\s*\(.*$/, '').replace(/\s*—.*$/, '')); return a.length > n ? a.slice(0, n - 1).join('') + '…' : a.join(''); };
 
   /* ---------------- 재질 색 ---------------- */
+  /** 우리 짐의 실제 색 (WebGL 그림 view-plan3d-gl.js 의 LOOK 과 같은 색 계열) — dark: 짙은 색이라 위 이름표 글씨·테두리를 밝게.
+      'pidor' = 마켓비 피도르 캐비닛: 색을 view-plan3d-gl.js 의 PIDOR_COLOR 한 줄에서 받아요(MV.plan3dGL.PIDOR) */
+  const LOOK = {
+    'inv-fridge': { bg: 'var(--p3-fridge)' },          // LG 오브제컬렉션 베이지
+    'inv-washer-new': { bg: 'var(--p3-washer)', dark: true },   // LG 통돌이 미드 블랙
+    'inv-dining': { bg: 'var(--p3-beech)' }, 'inv-dining-chair': { bg: 'var(--p3-beech)' },   // 니토리 N컬렉션 내추럴(너도밤나무)
+    'inv-vanity': { bg: 'var(--p3-beech)' },           // 고무나무 원목
+    'inv-desk-adult': { bg: 'var(--p3-white)' }, 'inv-desk-drawer': { bg: 'var(--p3-white)' },   // 데스커 화이트 · 알렉스 화이트
+    'inv-chest-rack': { bg: 'var(--p3-wood-md)', dark: true },   // 니토리 체스트랙 미들브라운
+    'inv-cabinet': 'pidor', 'inv-cabinet-2': 'pidor',   // 마켓비 피도르(화이트 추정)
+    'inv-hanger': { bg: 'var(--p3-white)' }, 'inv-trolley-3': { bg: 'var(--p3-white)' }, 'inv-trolley-2': { bg: 'var(--p3-white)' },
+    'inv-microwave-cabinet': { bg: 'var(--p3-white)' }, 'inv-toy-storage': { bg: 'var(--p3-white)' },
+    'inv-bookshelf-kid': { bg: 'var(--p3-cream)' }, 'inv-bookshelf': { bg: 'var(--p3-cream)' },   // 한샘 샘 크림화이트
+  };
+  /** 이 짐의 실제 색 { bg, dark } — 표에 없으면 null */
+  function lookOf(it) {
+    const l = LOOK[it.invId];
+    if (l !== 'pidor') return l || null;
+    const P = MV.plan3dGL && MV.plan3dGL.PIDOR;
+    return P && P.bg ? P : { bg: 'var(--p3-white)' };
+  }
   function colorOf(it) {
+    const lk = lookOf(it);
+    if (lk) return lk.bg;
     const t = it.tag, c = it.cat;
     if (t === 'chair') return 'var(--p3-wood-dk)';
     if (t === 'table' || t === 'desk' || t === 'vanity') return 'var(--p3-wood)';
@@ -221,7 +244,8 @@
   function drawItem(world, it, ctx) {
     const col = colorOf(it);
     const pid = it.pid;
-    const o = { bg: col, pid, cls: 'p3-item' + (it.fate === 'buy' ? ' is-buy' : '') };
+    const dark = !!(lookOf(it) || {}).dark;
+    const o = { bg: col, pid, cls: 'p3-item' + (it.fate === 'buy' ? ' is-buy' : '') + (dark ? ' is-dark' : '') };
     const z0 = it.z0 || 0;
     const H = Math.max(3, it.hgt);
     const shape = shapeOf(it);
@@ -293,7 +317,7 @@
     const top = parts.find((f) => f.dataset.side === 'top');
     if (top && ctx.labels) {
       const tfs = Math.min(ctx.font * 0.72, Math.max(it.w, it.h) / 3);
-      const lab = el('span', { class: 'p3-tag' }, shortName(it.name, Math.max(3, Math.min(12, Math.floor(Math.max(it.w, it.h) / tfs) * 2))));
+      const lab = el('span', { class: 'p3-tag' + (dark ? ' on-dark' : '') }, shortName(it.name, Math.max(3, Math.min(12, Math.floor(Math.max(it.w, it.h) / tfs) * 2))));
       lab.style.fontSize = r2(tfs) + 'px';
       top.appendChild(lab);
     }
@@ -864,13 +888,14 @@
     MV.css('p3', `
 :root { --p3-floor:#f4efe6; --p3-wet:#dde9ee; --p3-balc:#e9e4da; --p3-base:#8a8178; --p3-wall:#e8e2d8; --p3-wall-top:#5b544c;
   --p3-glass:rgba(125,185,220,.45); --p3-fixture:#d9d4cc; --p3-dark:#2b2a2e; --p3-white:#f7f7f5; --p3-wood:#b98b62; --p3-wood-dk:#8a5a3b;
-  --p3-wood-lt:#dcc6a6; --p3-steel:#c9ccd1; --p3-fabric:#9aa5b5; --p3-bed:#f3efe8; --p3-sheet:#fbf9f5; --p3-pillow:#ffffff; --p3-duvet:#cfe0ec;
+  --p3-wood-lt:#dcc6a6; --p3-steel:#c9ccd1; --p3-fabric:#8f8e8b; --p3-bed:#f3efe8; --p3-sheet:#fbf9f5; --p3-pillow:#ffffff; --p3-duvet:#cfe0ec;
   --p3-kids:#f2c46d; --p3-box:rgba(200,222,238,.92); --p3-misc:#b9b4ab; --p3-door:rgba(185,139,98,.55); --p3-stage:#ece7de; --p3-label:#4a443d;
-  --p3-inside:#d8d2c8; --p3-drawer:#e6d7bf; --p3-limit:#f08c00; }
+  --p3-inside:#d8d2c8; --p3-drawer:#e6d7bf; --p3-limit:#f08c00;
+  --p3-fridge:#e2d9c9; --p3-washer:#505257; --p3-beech:#d6b088; --p3-wood-md:#8b6545; --p3-cream:#efe9dd; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --p3-floor:#3a3833; --p3-inside:#4a4640; --p3-drawer:#6b5c49; --p3-limit:#ffa94d; --p3-wet:#2f3d44; --p3-balc:#35322d; --p3-base:#121115;
-  --p3-wall:#59544e; --p3-wall-top:#cfc7bb; --p3-fixture:#5d5953; --p3-stage:#1b1a1f; --p3-label:#e8e2d8; --p3-bed:#d9d4cc; --p3-sheet:#e5e1da; } }
+  --p3-wall:#59544e; --p3-wall-top:#cfc7bb; --p3-fixture:#5d5953; --p3-stage:#1b1a1f; --p3-label:#e8e2d8; --p3-bed:#d9d4cc; --p3-sheet:#e5e1da; --p3-washer:#77797d; } }
 :root[data-theme="dark"] { --p3-floor:#3a3833; --p3-inside:#4a4640; --p3-drawer:#6b5c49; --p3-limit:#ffa94d; --p3-wet:#2f3d44; --p3-balc:#35322d; --p3-base:#121115;
-  --p3-wall:#59544e; --p3-wall-top:#cfc7bb; --p3-fixture:#5d5953; --p3-stage:#1b1a1f; --p3-label:#e8e2d8; --p3-bed:#d9d4cc; --p3-sheet:#e5e1da; }
+  --p3-wall:#59544e; --p3-wall-top:#cfc7bb; --p3-fixture:#5d5953; --p3-stage:#1b1a1f; --p3-label:#e8e2d8; --p3-bed:#d9d4cc; --p3-sheet:#e5e1da; --p3-washer:#77797d; }
 body.p3-lock { overflow: hidden; }
 .p3-back { position: fixed; inset: 0; z-index: 80; background: rgba(20,18,16,.55); display: flex; align-items: stretch; justify-content: center;
   padding: max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom)); }
@@ -901,6 +926,8 @@ body.p3-lock { overflow: hidden; }
 .p3-south { color: var(--brand, #c2410c); opacity: .9; }
 .p3-item { border: 1px solid rgba(0,0,0,.18); cursor: pointer; }
 .p3-item.is-buy { opacity: .78; border-style: dashed; }
+.p3-item.is-dark { border-color: rgba(243,239,232,.32); }
+.p3-item.is-buy.is-dark { border-color: rgba(243,239,232,.6); }
 .p3-item.is-sel { outline: 3px solid var(--brand, #c2410c); outline-offset: -3px; }
 .p3-item.is-front::before { content: ''; position: absolute; left: 12%; right: 12%; top: 10%; height: 3px; background: rgba(0,0,0,.28); border-radius: 2px; }
 .p3-leaf { border: 1px solid rgba(0,0,0,.28); backface-visibility: visible; cursor: pointer; }
@@ -913,6 +940,7 @@ body.p3-lock { overflow: hidden; }
 .p3-photo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #fff; pointer-events: none; }
 .p3-tag { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 2px;
   color: #2b2724; font-weight: 700; line-height: 1.1; word-break: keep-all; overflow: hidden; pointer-events: none; }
+.p3-tag.on-dark { color: #f3efe8; }
 .p3-hint { position: absolute; left: 10px; right: 10px; top: 8px; font-size: .78rem; color: var(--ink-3, #777); pointer-events: none; text-wrap: balance; }
 .p3-card { position: absolute; left: 10px; right: 10px; bottom: 10px; max-width: 460px; display: flex; gap: 10px; align-items: flex-start;
   background: var(--bg-2, #fff); color: var(--ink, #222); border: 1px solid var(--line, #ddd); border-radius: var(--radius-sm, 10px);
