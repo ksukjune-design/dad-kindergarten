@@ -13,7 +13,7 @@
      · 바뀔 때만 그려요(가만히 있으면 화면 갱신 요청도 멈춰요). 그림자는 장면이 바뀔 때만 다시.
      · 손가락으로 쓰는 촘촘한 화면(휴대폰·태블릿)은 돌리는 동안만 픽셀을 덜 쓰고, 멈추면 바로 원래 선명도로 다시 그려요(마우스로 쓰는 컴퓨터는 늘 그대로).
      · 창을 닫아도 그림판(셰이더)·환경광·무늬·재질·모양을 잠시(3분) 남겨 다시 열 때 빨리 떠요. 화면을 숨기거나 3분이 지나면 돌려줘요.
-   제공  MV.plan3dGL = { supported(), load() → Promise<boolean>, create(host, P, opt) → 엔진, TABLE }
+   제공  MV.plan3dGL = { supported(), load() → Promise<boolean>, create(host, P, opt) → 엔진, TABLE, PIDOR(피도르 캐비닛 색 — CSS 3D 도 같은 색) }
    ============================================================ */
 (function () {
   'use strict';
@@ -286,6 +286,95 @@
     fridge: '#d8d2c6', fridgeBody: '#c4beb3', panel: '#2e3440', acWhite: '#f6f7f8', boxLid: '#4c86c6', boxBody: '#e3eef7',
     door: '#e6dccb', counter: '#e9e7e2', cabinet: '#f1efea', floorWood: '#d4a373', floorRoom: '#e3c07e',
   };
+  /* ---------------- 짐별 실제 제품 색 ----------------
+     부분마다 [색, 거칠기(0 반짝 ~ 1 무광), 금속감(0 ~ 1)] — 장면 빛에 맞춰 살짝 부드럽게(완전한 검정·흰색은 피해요).
+     BASE = 모델 종류별 기본 색(짐 목록에 없는 짐·가족이 더한 짐은 전과 똑같이 보여요),
+     LOOK = 우리 짐(invId)마다 제품 정보(10/27 제품 페이지 검색 결과 — 사진을 직접 보지는 못했어요)에 맞춘 색 — BASE 위에 덮어써요.
+     '추정' = 제품 정보로 색을 확정하지 못한 것. 가족이 색을 알려 주면 그 줄만 고쳐요. */
+  const BASE = {
+    fridge: { door: [C.fridge, 0.3, 0.25], body: [C.fridgeBody, 0.45, 0.2], handle: [C.chrome, 0.2, 0.85], panel: [C.panel, 0.25, 0.3], magic: null },
+    dryer: { body: ['#e9e8e4', 0.35, 0.1], panel: [C.panel, 0.3, 0.3], dial: [C.chrome, 0.2, 0.8], filter: ['#dcdad5', 0.4, 0.1], back: ['#3a3f47', 0.5, 0.2],
+      ring: ['#c9ccd1', 0.2, 0.85], ringT: 0.1, glass: ['#2b3644', 0.75] },
+    washer: { body: ['#f3f4f5', 0.35, 0.1], deck: ['#e7e9ec', 0.3, 0.1], panel: [C.panel, 0.2, 0.3], drum: ['#2e3138', 0.5, 0.3], pulsator: null,
+      frame: ['#d3d7dc', 0.3, 0.2], glass: ['#1f2a36', 0.55] },
+    microwave: { body: ['#e9e9e6', 0.4, 0.2], column: [C.panel, 0.3, 0.2], display: null, door: ['#d9d9d6', 0.3, 0.2] },
+    aircon: { body: [C.acWhite, 0.3, 0.05], outlet: ['#d5dbe1', 0.6, 0.1], blade: ['#bfc6ce', 0.8, 0.1], seam: null, display: ['#1d2733', 0.2, 0.2], grille: ['#c3cad2', 0.6] },
+    table: { top: [C.oak, 0.45], frame: [C.oakDk] },
+    chair: { frame: [C.oakDk], seat: [C.fabricBeige, 0.95, 0] },
+    desk: { top: ['#f3f2ee', 0.45], leg: ['#3a3d42', 0.4, 0.5], back: ['#e9e8e4', 0.6] },
+    vanity: { body: [C.rubber], back: ['#b98d60', 0.6], front: ['#cfa77a', 0.5], handle: [C.walnut, 0.4] },
+    sofa: { fabric: [C.fabricGray, 0.95, 0], cushion: [C.fabricGrayLt, 0.95, 0], leg: [C.walnut, 0.5] },
+    wardrobe: { body: [C.white, 0.5, 0.05], plinth: ['#e4e1da', 0.6], back: ['#dcd7cd', 0.8], door: ['#f7f6f2', 0.4, 0.05], handle: [C.chrome, 0.25, 0.8] },
+    drawers: { body: [C.white, 0.45, 0.05], face: ['#fbfbf9', 0.4], inside: '#e9e2d6', handle: ['#9aa0a6', 0.3, 0.6], slot: false, grain: false },
+    chest: { body: ['#f2efe9', 0.45, 0.05], face: ['#e9e2d6', 0.4], inside: '#e9e2d6', handle: ['#9aa0a6', 0.3, 0.6], slot: false, grain: false },
+    toy: { boxes: ['#f6b5c0', '#a9dfcf', '#fbe39a', '#c9b8ec', '#a7d3f2'] },
+    shelf: { body: [C.white, 0.5], back: ['#ebe7df', 0.8] },
+    trolley: { frame: ['#f5f5f2', 0.4, 0.3], wheel: [C.dark, 0.5] },
+    hanger: { frame: ['#e8e8e6', 0.3, 0.5], wheel: [C.dark, 0.5] },
+    livingbox: { body: [C.boxBody, 0.35, 0.05], op: 0.9, lid: [C.boxLid, 0.4, 0.05], grip: [C.boxLid, 0.4], hatch: null },
+    topbox: { body: ['#f2f2ef', 0.35, 0.05], op: 0.9, lid: ['#9aa3ad', 0.4, 0.05], grip: ['#9aa3ad', 0.4], hatch: null },
+    basket: { body: ['#ffffff', 0.9] },
+    trash: { body: ['#e9ebee', 0.4, 0.2], lid: ['#9aa3ad', 0.4, 0.3] },
+  };
+  /** 마켓비 피도르 철제 캐비닛 색 3가지 — 겉·안 한 색 철판(분체 도장): c = 몸통·문, in = 안쪽 뒤판·받침(그늘이라 조금 짙게), handle = 무광 스틸 손잡이(추정).
+      가족 것은 화이트로 추정(캐비닛장 ①·② 같은 색). 색을 알면 PIDOR_COLOR 한 줄만 바꿔요('white' · 'lightgray' · 'darkgray') —
+      3D(WebGL)의 몸통·문·안쪽·받침·손잡이와 CSS 3D(view-plan3d.js, MV.plan3dGL.PIDOR 로 받아요) 색이 함께 바뀌어요 */
+  const PIDOR = {
+    white: { c: '#edeeec', in: '#e6e7e5', handle: '#bfc3c7' },
+    lightgray: { c: '#c6c9ca', in: '#bfc2c3', handle: '#a2a6aa' },
+    darkgray: { c: '#4b4e52', in: '#45484c', handle: '#a9adb1', dark: true },
+  };
+  const PIDOR_COLOR = 'white';
+  const PD = PIDOR[PIDOR_COLOR] || PIDOR.white;
+  const PIDOR_LOOK = { body: [PD.c, 0.45, 0.1], door: [PD.c, 0.45, 0.1], plinth: [PD.in, 0.6], back: [PD.in, 0.6], handle: [PD.handle, 0.3, 0.6] };
+  const SAM_LOOK = { body: ['#efe9dd', 0.5], back: ['#e7e0d3', 0.8] };   // 한샘 샘 책장 크림화이트(어린이 3단 · 5단 같은 색)
+  const TROLLEY_LOOK = { frame: ['#f0f0ee', 0.5, 0.1], wheel: ['#c4c7ca', 0.5] };   // 이케아 흰 분체 도장 철제, 연회색 바퀴(바퀴 색은 추정)
+  const LOOK = {
+    // LG 디오스 오브제컬렉션 652L S634BB35Q — 베이지 미스트(무광) 글라스 양문, 디스펜서 없음, 오른쪽 문에 매직스페이스(가는 이음선 네모)
+    'inv-fridge': { door: ['#e2d9c9', 0.5, 0.02], body: ['#d6cdbd', 0.45, 0.05], handle: ['#cbc7bf', 0.35, 0.5], panel: null, magic: ['#cbc1b0', 0.6, 0.02] },
+    // 삼성 그랑데 AI 건조기 19kg(2021) — 화이트로 추정(그레이지·블랙캐비어도 있어요), 검은 유리 조작부 · 은색 다이얼 · 틴트 유리 둥근 문
+    'inv-dryer': { body: ['#ededeb', 0.35, 0.05], panel: ['#1e2024', 0.22, 0.2], dial: ['#c3c6ca', 0.3, 0.6], filter: ['#e2e2df', 0.4, 0.05], back: ['#2f3236', 0.5, 0.2],
+      ring: ['#b7bbbf', 0.3, 0.6], ringT: 0.07, glass: ['#34383e', 0.8] },
+    // LG 통돌이 T17MX3 — 미드 블랙(진회색) 몸통 · 검은 유리 조작부 · 투명 유리 뚜껑 너머 스텐 세탁조
+    'inv-washer-new': { body: ['#505257', 0.45, 0.2], deck: ['#46484c', 0.4, 0.2], panel: ['#1c1d21', 0.2, 0.3], drum: ['#b8bcc0', 0.35, 0.7], pulsator: ['#9ea3a8', 0.5, 0.2],
+      frame: ['#34363a', 0.4, 0.1], glass: ['#dde3e6', 0.22] },
+    // 전자레인지(모델 모름) — 흰 몸통·검은 창으로 추정, 오른쪽 조작부는 흰색에 작은 검은 표시창
+    'inv-microwave': { body: ['#efefec', 0.4, 0.05], column: ['#e7e7e4', 0.4, 0.05], display: ['#1a1c1f', 0.25, 0.1], door: ['#ebebe8', 0.35, 0.05] },
+    // 삼성 AI Q9000 스탠드(블레이드 화이트) — 흰 기둥, 둥근 회오리 바람문 2개(날개 이음선), 아래는 매끈
+    'inv-ac-stand': { body: ['#f2f2f0', 0.3, 0.05], outlet: ['#e3e4e5', 0.5, 0.05], blade: ['#d3d5d7', 0.6, 0.05], seam: ['#c4c6c8', 0.6], display: ['#1a1c20', 0.2, 0.2], grille: null },
+    // 니토리 N컬렉션 T-01 NA · C-011 NA/BE — 밝은 너도밤나무(내추럴) 한 색, 의자 방석은 베이지 천
+    'inv-dining': { top: ['#d8b38a', 0.45], frame: ['#d0a87d'] },
+    'inv-dining-chair': { frame: ['#d0a87d'] },
+    // 데스커 DSAD612P — 흰 상판 + 흰 철제 다리로 추정(화이트+화이트 · 메이플+화이트 · 빈티지블랙 세 가지뿐)
+    'inv-desk-adult': { leg: ['#e8e9e7', 0.45, 0.15] },
+    // 까르엠 헤이븐 고무나무 원목 — 밝은 고무나무색, 나무 손잡이(추정)
+    'inv-vanity': { body: ['#d4b083'], back: ['#c9a274', 0.6], front: ['#d9b78b', 0.5], handle: ['#b48a5c', 0.45] },
+    // 니토리 코우테이4 GY — 푸른 기 없는 보통 회색 천
+    'inv-sofa': { fabric: ['#8c8b88', 0.95, 0], cushion: ['#979692', 0.95, 0] },
+    'inv-cabinet': PIDOR_LOOK,
+    'inv-cabinet-2': PIDOR_LOOK,
+    // 이케아 알렉스 화이트 — 튀어나온 손잡이 대신 서랍 앞판 위쪽에 손을 넣는 홈
+    'inv-desk-drawer': { body: ['#f3f3f1', 0.45, 0.05], face: ['#f6f6f4', 0.4], handle: ['#4a4a48', 0.9], slot: true },
+    // 니토리 체스트랙 40CR MBR — 미들브라운 나뭇결
+    'inv-chest-rack': { body: ['#8b6545', 0.6], face: ['#916a49', 0.5], inside: '#a8875f', grain: true },
+    // 리바트 프렌즈아이 마카롱 — 흰 틀 + 수납함은 자리 표시용 파스텔(추정). 시리즈의 마카롱 색(핑크·그린·옐로우·퍼플·블루)을 돌려 쓴 것이라 실제 판매 색 조합과는 달라요.
+    // 가족이 수납함 색을 알려 주면 그 색으로 바꿔요(기본 '화이트' 조합이면 작은 통 '#f1f0ec', 중·대 통 '#c8cacb')
+    'inv-toy-storage': { boxes: ['#f3c6cd', '#bfe0cc', '#f5e3a0', '#d4c8e9', '#bcd7ee'] },
+    'inv-bookshelf-kid': SAM_LOOK,
+    'inv-bookshelf': SAM_LOOK,
+    'inv-trolley-3': TROLLEY_LOOK,
+    'inv-trolley-2': TROLLEY_LOOK,
+    // 일루일루 마르 스탠드 행거 — 흰 분체 도장 철제로 추정(번쩍이는 크롬이 아니에요)
+    'inv-hanger': { frame: ['#efefed', 0.45, 0.15] },
+    // 리빙박스 — 반투명 몸통이 조금 더 비치게(파란 뚜껑은 그대로)
+    'inv-living-box': { op: 0.78 },
+    // 다이소 다용도 정리함 특대 45L — 투명 몸통, 옅은 회색빛 반투명 뚜껑(뚜껑 위 작은 덮개) — 흰 캐비닛·책장 위에서도 상자로 보이게 뚜껑·손잡이를 살짝 짙게
+    'inv-top-box': { body: ['#e8edef', 0.25, 0.05], op: 0.55, lid: ['#cad1d7', 0.35, 0.05], grip: ['#b8bfc6', 0.4], hatch: ['#b8bfc6', 0.4] },
+    'inv-laundry-basket': { body: ['#f3f1ec', 0.9] },
+    'inv-trash': { body: ['#e9ebee', 0.4, 0.05], lid: ['#9aa3ad', 0.4, 0.05] },
+  };
+  /** 이 짐의 부분별 색: 종류 기본(BASE[base]) 위에 짐별 실제 색(LOOK[invId]) */
+  const look = (it, base) => Object.assign({}, BASE[base], LOOK[it.invId] || {});
   const BOOKS = ['#a4553f', '#3f6e8c', '#c2a14d', '#5d7f5a', '#7d6a8f', '#d6c7ad', '#2f3b4c', '#b88a6a', '#8c4b52', '#6a8a99'];
   const CLOTHES = ['#2f3b4c', '#c9b79c', '#7f8fa6', '#e8e1d4', '#8a5a44', '#9db4a0', '#5b6c8f', '#d8a7a0', '#4a4f57', '#b7c4cf'];
 
@@ -369,16 +458,18 @@
       const face = rbox(dg, fw, fh, 0.018, 0.004, 0, 0, front - 0.009, faceMat);
       const boxD = depth * 0.85;
       box(dg, fw - 0.03, fh * 0.75, boxD, 0, -fh * 0.08, front - 0.018 - boxD / 2, std(o && o.inside || '#e9e2d6', 0.8));
-      if (handleMat) rbox(dg, Math.min(0.12, fw * 0.4), 0.014, 0.018, 0.005, 0, fh * 0.22, front + 0.009, handleMat);
+      if (handleMat && o && o.slot) box(dg, Math.min(0.09, fw * 0.4), Math.min(0.02, fh * 0.2), 0.002, 0, fh * 0.32, front + 0.0005, handleMat);   // 손 넣는 홈(앞판에 붙은 어두운 틈)
+      else if (handleMat) rbox(dg, Math.min(0.12, fw * 0.4), 0.014, 0.018, 0.005, 0, fh * 0.22, front + 0.009, handleMat);
       const travel = Math.max(0, Math.min(pullCm / 100, boxD - 0.05));
       movers.push({ slide: dg, base: 0, max: travel, safe: Math.min(travel, safePull(op, pullCm)), lim: edges(face, LIM), warn });
       return dg;
     }
 
     if (kind === 'fridge') {
-      // LG 디오스 오브제컬렉션 양문형 — 몸체 + 문 두 짝(왼쪽 디스펜서), 열면 안쪽 선반
+      // LG 디오스 오브제컬렉션 양문형 — 몸체 + 문 두 짝(기본 모델은 왼쪽 디스펜서 · 우리 냉장고는 오른쪽 매직스페이스), 열면 안쪽 선반
+      const L = look(it, 'fridge');
       const dt = d * 0.12, bodyD = d - dt - 0.03, bz = -d / 2 + bodyD / 2, zf = bz + bodyD / 2, sh = 0.03;
-      const bm = std(C.fridgeBody, 0.45, 0.2), inMat = std('#f3f5f6', 0.55);
+      const bm = std(...L.body), inMat = std('#f3f5f6', 0.55);
       [-1, 1].forEach((sx) => rbox(g, sh, h, bodyD, 0.006, sx * (w / 2 - sh / 2), h / 2, bz, bm));
       box(g, w - 2 * sh, sh, bodyD, 0, h - sh / 2, bz, bm);
       box(g, w - 2 * sh, 0.06, bodyD, 0, 0.03, bz, bm);
@@ -389,56 +480,67 @@
       box(g, 0.014, ih, bodyD - sh - 0.01, 0, iy, bz + sh / 2 - 0.005, inMat);   // 가운데 칸막이(냉동 | 냉장)
       const cw = w / 2 - sh - 0.012, sdp = bodyD - sh - 0.06;
       for (let i = 1; i < 6; i++) [-1, 1].forEach((sx) => box(g, cw, 0.008, sdp, sx * (sh / 2 + 0.003 + cw / 2 + 0.004), 0.06 + (ih * i) / 6, back + sh + 0.008 + sdp / 2, glass('#dfe9ef', 0.6), { noCast: true }));
-      const lw = w / 2 - 0.004, doorMat = std(C.fridge, 0.3, 0.25);
+      const lw = w / 2 - 0.004, doorMat = std(...L.door), hm = std(...L.handle);
       const bins = (p, x0) => { for (let i = 0; i < 4; i++) box(p, lw - 0.08, 0.06, 0.05, x0, h * (0.2 + i * 0.19), -0.025, std('#e4eaee', 0.4, 0, { transparent: true, opacity: 0.85 }), { noCast: true }); };
       leaf(-w / 2, zf, 1, lw, 0.02, h - 0.03, dt, doorMat, 105, (p) => {
-        rbox(p, 0.022, h * 0.42, 0.03, 0.008, lw - 0.03, h * 0.5, dt + 0.015, std(C.chrome, 0.2, 0.85));
-        rbox(p, lw * 0.42, h * 0.16, 0.006, 0.004, lw * 0.5, h * 0.62, dt + 0.003, std(C.panel, 0.25, 0.3));
+        rbox(p, 0.022, h * 0.42, 0.03, 0.008, lw - 0.03, h * 0.5, dt + 0.015, hm);
+        if (L.panel) rbox(p, lw * 0.42, h * 0.16, 0.006, 0.004, lw * 0.5, h * 0.62, dt + 0.003, std(...L.panel));   // 디스펜서·표시창
         bins(p, lw / 2);   // 문 안쪽 칸
       });
       leaf(w / 2, zf, -1, lw, 0.02, h - 0.03, dt, doorMat, 105, (p) => {
-        rbox(p, 0.022, h * 0.42, 0.03, 0.008, -lw + 0.03, h * 0.5, dt + 0.015, std(C.chrome, 0.2, 0.85));
+        rbox(p, 0.022, h * 0.42, 0.03, 0.008, -lw + 0.03, h * 0.5, dt + 0.015, hm);
+        if (L.magic) {
+          // 매직스페이스(문 속 작은 문): 가는 이음선만 보이는 네모 — 이음선 색 판 위에 문과 같은 판을 조금 작게
+          const mw = lw * 0.62, mh = h * 0.3, mx = -lw * 0.5, my = h * 0.6;
+          box(p, mw, mh, 0.002, mx, my, dt + 0.001, std(...L.magic));
+          rbox(p, mw - 0.008, mh - 0.008, 0.002, 0.0015, mx, my, dt + 0.002, doorMat);
+        }
         bins(p, -lw / 2);
       });
     } else if (kind === 'dryer') {
       // 삼성 그랑데 AI 건조기 — 위 조작부 · 둥근 유리문(왼쪽 경첩) · 아래 필터 덮개
+      const L = look(it, 'dryer');
       const bodyD = d - 0.05, bz = -d / 2 + bodyD / 2, zf = bz + bodyD / 2;
-      rbox(g, w, h, bodyD, 0.015, 0, h / 2, bz, std('#e9e8e4', 0.35, 0.1));
-      rbox(g, w * 0.96, h * 0.16, 0.02, 0.005, 0, h * 0.89, zf + 0.01, std(C.panel, 0.3, 0.3));
+      rbox(g, w, h, bodyD, 0.015, 0, h / 2, bz, std(...L.body));
+      rbox(g, w * 0.96, h * 0.16, 0.02, 0.005, 0, h * 0.89, zf + 0.01, std(...L.panel));
       box(g, w * 0.2, h * 0.07, 0.006, w * 0.18, h * 0.89, zf + 0.022, std('#5ad1ff', 0.2, 0, { emissive: new T.Color('#1d6f8f'), emissiveIntensity: 0.6 }));
-      cyl(g, 0.022, 0.022, 0.018, -w * 0.3, h * 0.89, zf + 0.025, std(C.chrome, 0.2, 0.8)).rotation.x = Math.PI / 2;
-      box(g, w * 0.9, h * 0.1, 0.012, 0, h * 0.08, zf + 0.006, std('#dcdad5', 0.4, 0.1));
+      cyl(g, 0.022, 0.022, 0.018, -w * 0.3, h * 0.89, zf + 0.025, std(...L.dial)).rotation.x = Math.PI / 2;
+      box(g, w * 0.9, h * 0.1, 0.012, 0, h * 0.08, zf + 0.006, std(...L.filter));
       const r = Math.min(w * 0.33, h * 0.33);
-      cyl(g, r * 0.92, r * 0.92, 0.01, 0, h * 0.47, zf + 0.003, std('#3a3f47', 0.5, 0.2)).rotation.x = Math.PI / 2;
+      cyl(g, r * 0.92, r * 0.92, 0.01, 0, h * 0.47, zf + 0.003, std(...L.back)).rotation.x = Math.PI / 2;
       leaf(-r, zf + 0.004, 1, 2 * r, h * 0.47 - r, 2 * r, 0.04, std('#dad8d3', 0.25, 0.5), 110, (p, m, mv) => {
         m.visible = false;   // 둥근 문: 사각 판 대신 고리 + 유리
-        const ring = torus(p, r * 0.9, r * 0.1, r, r, 0.03, std('#c9ccd1', 0.2, 0.85));
-        const gl = cyl(p, r * 0.8, r * 0.8, 0.02, r, r, 0.03, glass('#2b3644', 0.75));
+        const ring = torus(p, r * 0.9, r * L.ringT, r, r, 0.03, std(...L.ring));
+        const gl = cyl(p, r * 0.8, r * 0.8, 0.02, r, r, 0.03, glass(...L.glass));
         gl.rotation.x = Math.PI / 2;
         mv.lim = edges(ring, LIM);
       });
     } else if (kind === 'washer') {
-      // LG 통돌이 — 몸통 · 뒤 조작부 · 뒤 경첩 유리 뚜껑
+      // LG 통돌이 — 몸통 · 뒤 조작부 · 뒤 경첩 유리 뚜껑(뚜껑 너머 세탁조)
+      const L = look(it, 'washer');
       const bodyH = h * 0.9;
-      rbox(g, w, bodyH, d, 0.018, 0, bodyH / 2, 0, std('#f3f4f5', 0.35, 0.1));
-      rbox(g, w, h - bodyH + 0.02, d * 0.2, 0.012, 0, bodyH + (h - bodyH) / 2, -d / 2 + d * 0.1, std('#e7e9ec', 0.3, 0.1));
-      box(g, w * 0.7, (h - bodyH) * 0.6, 0.006, 0, bodyH + (h - bodyH) / 2, -d / 2 + d * 0.2 + 0.003, std(C.panel, 0.2, 0.3));
-      cyl(g, w * 0.36, w * 0.36, 0.01, 0, bodyH + 0.001, d * 0.08, std('#2e3138', 0.5, 0.3));
+      rbox(g, w, bodyH, d, 0.018, 0, bodyH / 2, 0, std(...L.body));
+      rbox(g, w, h - bodyH + 0.02, d * 0.2, 0.012, 0, bodyH + (h - bodyH) / 2, -d / 2 + d * 0.1, std(...L.deck));
+      box(g, w * 0.7, (h - bodyH) * 0.6, 0.006, 0, bodyH + (h - bodyH) / 2, -d / 2 + d * 0.2 + 0.003, std(...L.panel));
+      cyl(g, w * 0.36, w * 0.36, 0.01, 0, bodyH + 0.001, d * 0.08, std(...L.drum));
+      if (L.pulsator) cyl(g, w * 0.16, w * 0.16, 0.004, 0, bodyH + 0.008, d * 0.08, std(...L.pulsator));   // 세탁조 바닥 회전판
       const pivot = new T.Group();
       pivot.position.set(0, bodyH + 0.006, -d / 2 + d * 0.2);
       g.add(pivot);
       const ld = d * 0.78;
-      const fm = std('#d3d7dc', 0.3, 0.2), fw = w * 0.94, gw = w * 0.62, gd = ld * 0.62, rim = (ld - gd) / 2;
+      const fm = std(...L.frame), fw = w * 0.94, gw = w * 0.62, gd = ld * 0.62, rim = (ld - gd) / 2;
       const frame = rbox(pivot, fw, 0.02, rim, 0.006, 0, 0.01, rim / 2, fm);
       rbox(pivot, fw, 0.02, rim, 0.006, 0, 0.01, ld - rim / 2, fm);
       [-1, 1].forEach((sx) => rbox(pivot, (fw - gw) / 2, 0.02, gd, 0.004, sx * (fw + gw) / 4, 0.01, ld / 2, fm));
-      box(pivot, gw, 0.008, gd, 0, 0.01, ld / 2, glass('#1f2a36', 0.55));
+      box(pivot, gw, 0.008, gd, 0, 0.01, ld / 2, glass(...L.glass));
       movers.push({ rot: pivot, axis: 'x', sign: -1, max: deg(80), safe: deg(80), lim: edges(frame, LIM), warn });
     } else if (kind === 'microwave') {
-      rbox(g, w, h, d, 0.01, 0, h / 2, 0, std('#e9e9e6', 0.4, 0.2));
+      const L = look(it, 'microwave');
+      rbox(g, w, h, d, 0.01, 0, h / 2, 0, std(...L.body));
       box(g, w * 0.64, h * 0.74, 0.004, -w * 0.13, h / 2, front + 0.001, std('#2a2d33', 0.8));   // 문 뒤 안쪽
-      box(g, w * 0.26, h * 0.86, 0.006, w * 0.35, h / 2, front + 0.003, std(C.panel, 0.3, 0.2));
-      leaf(-w / 2, front, 1, w * 0.72, h * 0.06, h * 0.88, 0.02, std('#d9d9d6', 0.3, 0.2), 100, (p) => {
+      box(g, w * 0.26, h * 0.86, 0.006, w * 0.35, h / 2, front + 0.003, std(...L.column));   // 오른쪽 조작부
+      if (L.display) box(g, w * 0.18, h * 0.12, 0.002, w * 0.35, h * 0.78, front + 0.007, std(...L.display));   // 작은 표시창
+      leaf(-w / 2, front, 1, w * 0.72, h * 0.06, h * 0.88, 0.02, std(...L.door), 100, (p) => {
         box(p, w * 0.5, h * 0.56, 0.004, w * 0.36, h * 0.44, 0.021, glass('#14181d', 0.85));
       });
     } else if (kind === 'mwcab') {
@@ -455,19 +557,21 @@
       }));
     } else if (kind === 'table') {
       // 니토리 N컬렉션 식탁 — 상판(나무결) · 앞치마(의자 팔걸이 위) · 다리 4
-      const top = 0.032, leg = TABLE.leg / 100, inset = TABLE.inset / 100, ap = 0.045;
-      rbox(g, w, top, d, 0.008, 0, h - top / 2, 0, wood(C.oak, 0.45));
+      const L = look(it, 'table');
+      const top = 0.032, leg = TABLE.leg / 100, inset = TABLE.inset / 100, ap = 0.045, fr = wood(...L.frame);
+      rbox(g, w, top, d, 0.008, 0, h - top / 2, 0, wood(...L.top));
       const ax = w / 2 - inset - leg / 2, az = d / 2 - inset - leg / 2;
-      box(g, w - 2 * inset - leg, ap, 0.02, 0, h - top - ap / 2, az, wood(C.oakDk)); box(g, w - 2 * inset - leg, ap, 0.02, 0, h - top - ap / 2, -az, wood(C.oakDk));
-      box(g, 0.02, ap, d - 2 * inset - leg, ax, h - top - ap / 2, 0, wood(C.oakDk)); box(g, 0.02, ap, d - 2 * inset - leg, -ax, h - top - ap / 2, 0, wood(C.oakDk));
-      [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([sx, sz]) => box(g, leg, h - top, leg, sx * ax, (h - top) / 2, sz * az, wood(C.oakDk)));
+      box(g, w - 2 * inset - leg, ap, 0.02, 0, h - top - ap / 2, az, fr); box(g, w - 2 * inset - leg, ap, 0.02, 0, h - top - ap / 2, -az, fr);
+      box(g, 0.02, ap, d - 2 * inset - leg, ax, h - top - ap / 2, 0, fr); box(g, 0.02, ap, d - 2 * inset - leg, -ax, h - top - ap / 2, 0, fr);
+      [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([sx, sz]) => box(g, leg, h - top, leg, sx * ax, (h - top) / 2, sz * az, fr));
     } else if (kind === 'chair') {
       // 니토리 C-011 팔걸이 의자 — 다리 · 천 방석 · 등받이 · 팔걸이(식탁 앞치마 아래로 지나가게 낮게). 넣기/빼기는 바깥 그룹이 움직여요
-      const seatH = Math.min(0.45, h * 0.62), wd = wood(C.oakDk), leg = 0.035;
+      const L = look(it, 'chair');
+      const seatH = Math.min(0.45, h * 0.62), wd = wood(...L.frame), leg = 0.035;
       const lx = w / 2 - leg / 2 - 0.01, lz = d / 2 - leg / 2 - 0.01;
       [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([sx, sz]) => box(g, leg, seatH - 0.04, leg, sx * lx, (seatH - 0.04) / 2, sz * lz, wd));
       box(g, w - 0.02, 0.04, d - 0.04, 0, seatH - 0.02, 0.01, wd);
-      rbox(g, w - 0.06, 0.05, d - 0.1, 0.018, 0, seatH + 0.025, 0.02, std(C.fabricBeige, 0.95, 0, { map: tex.fabric }));
+      rbox(g, w - 0.06, 0.05, d - 0.1, 0.018, 0, seatH + 0.025, 0.02, std(...L.seat, { map: tex.fabric }));
       [-1, 1].forEach((sx) => box(g, leg, h - seatH + 0.04, leg, sx * lx, seatH + (h - seatH) / 2 - 0.02, -lz, wd));
       rbox(g, w - 0.04, 0.12, 0.025, 0.008, 0, h - 0.08, -lz, wd);
       box(g, w - 0.08, 0.03, 0.02, 0, seatH + 0.14, -lz, wd);
@@ -478,16 +582,16 @@
       });
     } else if (kind === 'desk' || kind === 'kiddesk') {
       // 데스커 책상(흰 상판 · 철제 다리 · 뒤 가림판) · 어린이 책상 세트(작은 의자 포함)
-      const kid = kind === 'kiddesk';
+      const kid = kind === 'kiddesk', L = kid ? null : look(it, 'desk');
       const deskD = kid ? d - 0.03 : d, dz = kid ? -d / 2 + deskD / 2 : 0, top = 0.025;
-      const topMat = std(kid ? '#f6efe2' : '#f3f2ee', 0.45), legMat = std(kid ? '#9fc7a8' : '#3a3d42', 0.4, kid ? 0.05 : 0.5);
+      const topMat = kid ? std('#f6efe2', 0.45) : std(...L.top), legMat = kid ? std('#9fc7a8', 0.4, 0.05) : std(...L.leg);
       rbox(g, w, top, deskD, 0.006, 0, h - top / 2, dz, topMat);
       [-1, 1].forEach((sx) => {
         box(g, 0.03, h - top, 0.03, sx * (w / 2 - 0.035), (h - top) / 2, dz - deskD / 2 + 0.05, legMat);
         box(g, 0.03, h - top, 0.03, sx * (w / 2 - 0.035), (h - top) / 2, dz + deskD / 2 - 0.05, legMat);
         box(g, 0.03, 0.03, deskD - 0.1, sx * (w / 2 - 0.035), 0.04, dz, legMat);
       });
-      box(g, w - 0.1, h * 0.35, 0.012, 0, h - top - h * 0.175, dz - deskD / 2 + 0.03, std(kid ? '#f6efe2' : '#e9e8e4', 0.6));
+      box(g, w - 0.1, h * 0.35, 0.012, 0, h - top - h * 0.175, dz - deskD / 2 + 0.03, kid ? std('#f6efe2', 0.6) : std(...L.back));
       if (kid) {
         // 작은 의자: 닫힘 = 책상 밑, 열림 = 앞으로 뺌 — 의자 앞이 책상 모서리에 닿을 만큼(앞이 막히면 그만큼만)
         const ch = new T.Group(); g.add(ch);
@@ -500,19 +604,21 @@
       }
     } else if (kind === 'vanity') {
       // 낮은 좌식 화장대(고무나무) — 몸통 · 서랍 · 뒤 거울
-      const bodyH = Math.min(0.38, h * 0.5), wd = wood(C.rubber);
+      const L = look(it, 'vanity');
+      const bodyH = Math.min(0.38, h * 0.5), wd = wood(...L.body);
       rbox(g, w, 0.025, d, 0.006, 0, bodyH - 0.0125, 0, wd);
       [-1, 1].forEach((sx) => box(g, 0.025, bodyH - 0.025, d, sx * (w / 2 - 0.0125), (bodyH - 0.025) / 2, 0, wd));
-      box(g, w - 0.05, bodyH - 0.025, 0.012, 0, (bodyH - 0.025) / 2, -d / 2 + 0.006, wood('#b98d60', 0.6));
-      drawer(0, bodyH - 0.09, w - 0.06, 0.1, d - 0.05, wood('#cfa77a', 0.5), op ? op.need : 30, std(C.walnut, 0.4));
+      box(g, w - 0.05, bodyH - 0.025, 0.012, 0, (bodyH - 0.025) / 2, -d / 2 + 0.006, wood(...L.back));
+      drawer(0, bodyH - 0.09, w - 0.06, 0.1, d - 0.05, wood(...L.front), op ? op.need : 30, std(...L.handle));
       const mh = h - bodyH - 0.02;
       rbox(g, w * 0.6, mh, 0.03, 0.012, 0, bodyH + mh / 2, -d / 2 + 0.04, wd);
       box(g, w * 0.52, mh * 0.85, 0.006, 0, bodyH + mh / 2, -d / 2 + 0.058, std('#d3dee6', 0.05, 0.8, { envMapIntensity: 1.4 }));
     } else if (kind === 'sofa') {
       // 니토리 코우테이4 3인 패브릭(그레이) — 바닥 틀 · 방석 3 · 등쿠션 3 · 팔걸이 · 나무 다리 (둥근 모서리 · 천 무늬)
-      const fab = std(C.fabricGray, 0.95, 0, { map: tex.fabric }), fabLt = std(C.fabricGrayLt, 0.95, 0, { map: tex.fabric });
+      const L = look(it, 'sofa');
+      const fab = std(...L.fabric, { map: tex.fabric }), fabLt = std(...L.cushion, { map: tex.fabric });
       const legH = 0.08, arm = Math.min(0.16, w * 0.1);
-      [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([sx, sz]) => box(g, 0.04, legH, 0.04, sx * (w / 2 - 0.06), legH / 2, sz * (d / 2 - 0.06), std(C.walnut, 0.5)));
+      [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([sx, sz]) => box(g, 0.04, legH, 0.04, sx * (w / 2 - 0.06), legH / 2, sz * (d / 2 - 0.06), std(...L.leg)));
       rbox(g, w, h * 0.3, d, 0.03, 0, legH + h * 0.15, 0, fab);
       const backD = d * 0.24, seatW = (w - 2 * arm) / 3;
       rbox(g, w, h - legH, backD, 0.04, 0, legH + (h - legH) / 2, -d / 2 + backD / 2, fab);
@@ -536,10 +642,11 @@
       rbox(g, mw * 0.98, 0.05, 0.14, 0.02, 0, h + 0.04, dz - dl / 2 + 0.07, std('#e9f0f5', 0.9));
     } else if (kind === 'wardrobe') {
       // 마켓비 피도르 캐비닛장 — 몸체 · 받침 · 문 두 짝(손잡이), 열면 안쪽(행어형: 옷걸이 봉·옷 / 수납형: 선반·상자)
-      const bodyMat = std(C.white, 0.5, 0.05), dt = 0.02, bodyD = d - dt, bz = -dt / 2, t = 0.018;
+      const L = look(it, 'wardrobe');
+      const bodyMat = std(...L.body), dt = 0.02, bodyD = d - dt, bz = -dt / 2, t = 0.018;
       box(g, t, h, bodyD, -w / 2 + t / 2, h / 2, bz, bodyMat); box(g, t, h, bodyD, w / 2 - t / 2, h / 2, bz, bodyMat);
-      box(g, w, t, bodyD, 0, h - t / 2, bz, bodyMat); box(g, w - 2 * t, 0.06, bodyD - 0.01, 0, 0.03, bz - 0.005, std('#e4e1da', 0.6));
-      box(g, w - 2 * t, h - 0.08, 0.008, 0, h / 2 + 0.02, -d / 2 + 0.006, std('#dcd7cd', 0.8));
+      box(g, w, t, bodyD, 0, h - t / 2, bz, bodyMat); box(g, w - 2 * t, 0.06, bodyD - 0.01, 0, 0.03, bz - 0.005, std(...L.plinth));
+      box(g, w - 2 * t, h - 0.08, 0.008, 0, h / 2 + 0.02, -d / 2 + 0.006, std(...L.back));
       const hanger = /행어|2단 옷장|옷장/.test(it.name || '') && !/수납형/.test(it.name || '');
       const R = rng(it.pid);
       if (hanger) {
@@ -556,18 +663,20 @@
         }
       }
       const lw = w / 2 - 0.004, zf = d / 2 - dt;
-      [-1, 1].forEach((s) => leaf(s * (w / 2), zf, -s, lw, 0.065, h - 0.075, dt, std('#f7f6f2', 0.4, 0.05), 90, (p) => {
-        rbox(p, 0.012, 0.22, 0.02, 0.005, -s * (lw - 0.04), (h - 0.075) * 0.55, dt + 0.01, std(C.chrome, 0.25, 0.8));
+      const dm = std(...L.door), hm = std(...L.handle);
+      [-1, 1].forEach((s) => leaf(s * (w / 2), zf, -s, lw, 0.065, h - 0.075, dt, dm, 90, (p) => {
+        rbox(p, 0.012, 0.22, 0.02, 0.005, -s * (lw - 0.04), (h - 0.075) * 0.55, dt + 0.01, hm);
       }));
     } else if (kind === 'drawers') {
       // 서랍장(알렉스 5칸 · 체스트랙 4칸)
       const n = /알렉스|alex/i.test(it.name || '') ? 5 : /체스트/.test(it.name || '') ? 4 : 3;
       const chest = /체스트/.test(it.name || ''), t = 0.016;
-      rbox(g, w, h, d - 0.02, 0.006, 0, h / 2, -0.01, std(chest ? '#f2efe9' : C.white, 0.45, 0.05));
-      const fh = (h - 0.06) / n, want = op ? op.need : d * 70;
+      const L = look(it, chest ? 'chest' : 'drawers'), mk = (p) => (L.grain ? wood(p[0], p[1]) : std(...p));
+      rbox(g, w, h, d - 0.02, 0.006, 0, h / 2, -0.01, mk(L.body));
+      const fh = (h - 0.06) / n, want = op ? op.need : d * 70, face = mk(L.face), hm = std(...L.handle);
       for (let i = 0; i < n; i++) {
         const y = 0.04 + fh * (i + 0.5);
-        drawer(0, y, w - 2 * t, fh - 0.008, d - 0.06, std(chest ? '#e9e2d6' : '#fbfbf9', 0.4), i === n - 1 ? want : want * (0.5 + 0.5 * i / n), std('#9aa0a6', 0.3, 0.6));
+        drawer(0, y, w - 2 * t, fh - 0.008, d - 0.06, face, i === n - 1 ? want : want * (0.5 + 0.5 * i / n), hm, { inside: L.inside, slot: L.slot });
       }
     } else if (kind === 'toy') {
       // 리바트 프렌즈아이 마카롱 2x5 — 흰 틀 + 파스텔 수납함 10개(맨 위 왼쪽 한 칸을 빼요)
@@ -575,7 +684,7 @@
       box(g, t, h, d, -w / 2 + t / 2, h / 2, 0, bodyMat); box(g, t, h, d, w / 2 - t / 2, h / 2, 0, bodyMat); box(g, t, h - 0.04, d, 0, h / 2 + 0.02, 0, bodyMat);
       box(g, w, t, d, 0, h - t / 2, 0, bodyMat); box(g, w, 0.04, d, 0, 0.02, 0, bodyMat);
       box(g, w - 0.02, h - 0.04, 0.006, 0, h / 2, -d / 2 + 0.003, std('#ece9e3', 0.8));
-      const cols = ['#f6b5c0', '#a9dfcf', '#fbe39a', '#c9b8ec', '#a7d3f2'];
+      const cols = look(it, 'toy').boxes;
       const rh = (h - 0.06) / 5, bw = (w - 3 * t) / 2;
       for (let r = 0; r < 5; r++) {
         if (r) box(g, w - 2 * t, 0.012, d - 0.01, 0, 0.04 + rh * r, 0, bodyMat);
@@ -587,9 +696,10 @@
       }
     } else if (kind === 'shelf') {
       // 한샘 샘 책장(어린이 3단 · 5단) — 옆판 · 선반 · 뒤판 + 차분한 색 책
-      const tiers = Math.max(2, Math.round(h / 0.38)), wh = std(C.white, 0.5), t = 0.018;
+      const L = look(it, 'shelf');
+      const tiers = Math.max(2, Math.round(h / 0.38)), wh = std(...L.body), t = 0.018;
       box(g, t, h, d, -w / 2 + t / 2, h / 2, 0, wh); box(g, t, h, d, w / 2 - t / 2, h / 2, 0, wh);
-      box(g, w - 0.01, h - 0.01, 0.008, 0, h / 2, -d / 2 + 0.004, std('#ebe7df', 0.8));
+      box(g, w - 0.01, h - 0.01, 0.008, 0, h / 2, -d / 2 + 0.004, std(...L.back));
       const R = rng(it.pid);
       const step = (h - 0.05) / tiers;
       for (let i = 0; i <= tiers; i++) box(g, w - 2 * t, t, d - 0.01, 0, i === 0 ? 0.04 : Math.min(h - t / 2, 0.04 + step * i), 0.005, wh);
@@ -606,10 +716,11 @@
       }
     } else if (kind === 'trolley') {
       // 이케아 트롤리(바퀴) — 기둥 4 · 칸 · 바퀴
-      const tiers = /3단/.test(it.name || '') || h > 0.7 ? 3 : 2, mat = std('#f5f5f2', 0.4, 0.3), legH = 0.06;
+      const L = look(it, 'trolley');
+      const tiers = /3단/.test(it.name || '') || h > 0.7 ? 3 : 2, mat = std(...L.frame), legH = 0.06;
       [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([sx, sz]) => {
         cyl(g, 0.009, 0.009, h - legH, sx * (w / 2 - 0.02), legH + (h - legH) / 2, sz * (d / 2 - 0.02), mat, 10);
-        sph(g, 0.022, sx * (w / 2 - 0.03), 0.022, sz * (d / 2 - 0.03), std(C.dark, 0.5));
+        sph(g, 0.022, sx * (w / 2 - 0.03), 0.022, sz * (d / 2 - 0.03), std(...L.wheel));
       });
       for (let i = 0; i < tiers; i++) {
         const y = legH + 0.03 + ((h - legH - 0.08) * i) / Math.max(1, tiers - 1);
@@ -620,10 +731,11 @@
       }
     } else if (kind === 'hanger') {
       // 이동식 간이 행거 — 바퀴 받침 · 기둥 2 · 위 봉 · 아래 선반 · 옷걸이에 걸린 옷
-      const metal = std('#e8e8e6', 0.3, 0.5), legH = 0.04;
+      const L = look(it, 'hanger');
+      const metal = std(...L.frame), legH = 0.04;
       [-1, 1].forEach((sx) => {
         rbox(g, 0.03, 0.03, d, 0.008, sx * (w / 2 - 0.02), legH, 0, metal);
-        [-1, 1].forEach((sz) => sph(g, 0.022, sx * (w / 2 - 0.02), 0.022, sz * (d / 2 - 0.03), std(C.dark, 0.5)));
+        [-1, 1].forEach((sz) => sph(g, 0.022, sx * (w / 2 - 0.02), 0.022, sz * (d / 2 - 0.03), std(...L.wheel)));
         cyl(g, 0.012, 0.012, h - legH, sx * (w / 2 - 0.02), legH + (h - legH) / 2, 0, metal, 12);
       });
       cyl(g, 0.012, 0.012, w, 0, h - 0.015, 0, metal, 12).rotation.z = Math.PI / 2;
@@ -633,29 +745,42 @@
     } else if (kind === 'livingbox') {
       // 리빙박스(반투명 몸통 + 색 뚜껑 · 손잡이 홈) — 쌓은 수만큼은 아래에서 여러 번 그려요
       const lidH = Math.min(0.03, h * 0.12), top = /간이|다이소/.test(it.name || '');
-      rbox(g, w * 0.97, h - lidH, d * 0.97, 0.015, 0, (h - lidH) / 2, 0, std(top ? '#f2f2ef' : C.boxBody, 0.35, 0.05, { transparent: true, opacity: 0.9 }));
-      rbox(g, w, lidH, d, 0.008, 0, h - lidH / 2, 0, std(top ? '#9aa3ad' : C.boxLid, 0.4, 0.05));
-      [-1, 1].forEach((sx) => box(g, 0.012, 0.035, d * 0.4, sx * (w * 0.485 + 0.004), h * 0.62, 0, std(top ? '#9aa3ad' : C.boxLid, 0.4), { noCast: true }));
+      const L = look(it, top ? 'topbox' : 'livingbox'), grip = std(...L.grip);
+      rbox(g, w * 0.97, h - lidH, d * 0.97, 0.015, 0, (h - lidH) / 2, 0, std(...L.body, { transparent: true, opacity: L.op }));
+      rbox(g, w, lidH, d, 0.008, 0, h - lidH / 2, 0, std(...L.lid));
+      [-1, 1].forEach((sx) => box(g, 0.012, 0.035, d * 0.4, sx * (w * 0.485 + 0.004), h * 0.62, 0, grip, { noCast: true }));
+      if (L.hatch) box(g, w * 0.42, 0.002, d * 0.36, 0, h + 0.001, 0, std(...L.hatch), { noCast: true });   // 뚜껑 위 작은 덮개(이음선)
     } else if (kind === 'aircon') {
-      // 삼성 2in1 무풍 스탠드 — 둥근 모서리 기둥 · 위 둥근 바람문 · 표시창 · 아래 흡입구
-      rbox(g, w, h, d, Math.min(w, d) * 0.3, 0, h / 2, 0, std(C.acWhite, 0.3, 0.05));
+      // 삼성 AI Q9000 스탠드 — 둥근 모서리 기둥 · 위 둥근 바람문 2개(날개 이음선) · 표시창 · (기본 모델은) 아래 흡입구
+      const L = look(it, 'aircon');
+      rbox(g, w, h, d, Math.min(w, d) * 0.3, 0, h / 2, 0, std(...L.body));
+      const seam = L.seam ? std(...L.seam) : null;
       [0.82, 0.66].forEach((fy) => {
-        const c = cyl(g, w * 0.34, w * 0.34, 0.012, 0, h * fy, front + 0.002, std('#d5dbe1', 0.6, 0.1));
+        const c = cyl(g, w * 0.34, w * 0.34, 0.012, 0, h * fy, front + 0.002, std(...L.outlet));
         c.rotation.x = Math.PI / 2;
-        const c2 = cyl(g, w * 0.22, w * 0.22, 0.014, 0, h * fy, front + 0.004, std('#bfc6ce', 0.8, 0.1));
+        const c2 = cyl(g, w * 0.22, w * 0.22, 0.014, 0, h * fy, front + 0.004, std(...L.blade));
         c2.rotation.x = Math.PI / 2;
+        // 회오리 바람문 날개: 가운데에서 비스듬히 퍼지는 가는 이음선 8개 (서로 겹치지 않아 한 번에 그려요)
+        if (seam) for (let k = 0; k < 8; k++) {
+          const a0 = (k / 8) * Math.PI * 2, a1 = a0 + 0.45, r0 = w * 0.22 * 0.36, r1 = w * 0.22 * 0.94;
+          const x0 = Math.cos(a0) * r0, y0 = Math.sin(a0) * r0, x1 = Math.cos(a1) * r1, y1 = Math.sin(a1) * r1;
+          const s = box(g, Math.hypot(x1 - x0, y1 - y0), 0.0025, 0.001, (x0 + x1) / 2, h * fy + (y0 + y1) / 2, front + 0.0115, seam, { noCast: true });
+          s.rotation.z = Math.atan2(y1 - y0, x1 - x0);
+        }
       });
-      box(g, w * 0.3, 0.03, 0.006, 0, h * 0.53, front + 0.003, std('#1d2733', 0.2, 0.2, { emissive: new T.Color('#3aa0ff'), emissiveIntensity: 0.4 }));
-      for (let i = 0; i < 6; i++) box(g, w * 0.6, 0.006, 0.006, 0, h * 0.12 + i * 0.03, front + 0.003, std('#c3cad2', 0.6), { noCast: true });
+      box(g, w * 0.3, 0.03, 0.006, 0, h * 0.53, front + 0.003, std(...L.display, { emissive: new T.Color('#3aa0ff'), emissiveIntensity: 0.4 }));
+      if (L.grille) for (let i = 0; i < 6; i++) box(g, w * 0.6, 0.006, 0.006, 0, h * 0.12 + i * 0.03, front + 0.003, std(...L.grille), { noCast: true });
     } else if (kind === 'wallac') {
       // 벽걸이 에어컨 — 벽 높은 곳(아래 바람문 띠)
       rbox(g, w, h, d, 0.03, 0, h / 2, 0, std(C.acWhite, 0.3, 0.05));
       box(g, w * 0.86, h * 0.18, 0.006, 0, h * 0.15, front + 0.002, std('#c3cad2', 0.6), { noCast: true });
     } else if (kind === 'trash') {
-      rbox(g, w, h * 0.92, d, 0.02, 0, h * 0.46, 0, std('#e9ebee', 0.4, 0.2));
-      rbox(g, w + 0.006, h * 0.08, d + 0.006, 0.01, 0, h * 0.96, 0, std('#9aa3ad', 0.4, 0.3));
+      const L = look(it, 'trash');
+      rbox(g, w, h * 0.92, d, 0.02, 0, h * 0.46, 0, std(...L.body));
+      rbox(g, w + 0.006, h * 0.08, d + 0.006, 0.01, 0, h * 0.96, 0, std(...L.lid));
     } else if (kind === 'basket') {
-      const mat = std('#ffffff', 0.9, 0, { map: tex.weave });
+      const L = look(it, 'basket');
+      const mat = std(L.body[0], L.body[1], 0, { map: tex.weave });
       const t = 0.012;
       box(g, w, h, t, 0, h / 2, d / 2 - t / 2, mat); box(g, w, h, t, 0, h / 2, -d / 2 + t / 2, mat);
       box(g, t, h, d, w / 2 - t / 2, h / 2, 0, mat); box(g, t, h, d, -w / 2 + t / 2, h / 2, 0, mat);
@@ -1562,5 +1687,5 @@
     return a.length > n ? a.slice(0, n - 1).join('') + '…' : a.join('');
   }
 
-  MV.plan3dGL = { supported, load, create, TABLE };
+  MV.plan3dGL = { supported, load, create, TABLE, PIDOR: { bg: PD.c, dark: !!PD.dark } };
 })();
